@@ -1,0 +1,85 @@
+{
+  "info": {
+    "trace_id": "tr-5075218a7e01eef3938af54bc60d12f1",
+    "client_request_id": "tr-5075218a7e01eef3938af54bc60d12f1",
+    "trace_location": {
+      "type": "MLFLOW_EXPERIMENT",
+      "mlflow_experiment": {
+        "experiment_id": "639673942244400"
+      }
+    },
+    "request_time": "2026-04-30T10:05:55.687Z",
+    "state": "OK",
+    "trace_metadata": {
+      "mlflow.trace_schema.version": "3",
+      "mlflow.trace.tokenUsage": "{\"input_tokens\": 42365, \"output_tokens\": 275, \"total_tokens\": 42640}",
+      "mlflow.source.name": "/Users/zhouhang/abi/code/databricks/ai-dev-kit/databricks-builder-app/.venv/bin/uvicorn",
+      "mlflow.source.git.commit": "5a65c7628ed9cb3cf53b09cea932d11ba05f0166",
+      "mlflow.traceOutputs": "{\"status\": \"completed\", \"response\": \"Hi! I'm ready to help you build on Databricks. \\n\\nBased on your project state, it looks like this is a fresh setup \u2014 no tables, volumes, or pipelines have been created yet, and the catalog/schema haven't been ...",
+      "mlflow.traceInputs": "{\"prompt\": \"hi\"}",
+      "mlflow.trace.sizeStats": "{\"total_size_bytes\": 4269, \"num_spans\": 2, \"max\": 1186, \"p25\": 1161, \"p50\": 1169, \"p75\": 1177}",
+      "mlflow.source.type": "LOCAL",
+      "mlflow.source.git.branch": "main",
+      "mlflow.source.git.repoURL": "git@github.com:databricks-solutions/ai-dev-kit.git",
+      "mlflow.user": "zhouhang",
+      "mlflow.trace.user": "zhouhang",
+      "mlflow.trace.session": "bb8988c6-90b3-4cc4-8431-cfdbe98f6606",
+      "mlflow.trace.sizeBytes": "4269",
+      "mlflow.trace.working_directory": "/Users/zhouhang/abi/code/databricks/ai-dev-kit/databricks-builder-app"
+    },
+    "tags": {
+      "mlflow.artifactLocation": "dbfs:/databricks/mlflow-tracking/639673942244400/tr-5075218a7e01eef3938af54bc60d12f1/artifacts",
+      "mlflow.user": "8554906336667610",
+      "mlflow.traceName": "claude_code_conversation"
+    },
+    "request_preview": "hi",
+    "response_preview": "Hi! I'm ready to help you build on Databricks. \n\nBased on your project state, it looks like this is a fresh setup \u2014 no tables, volumes, or pipelines have been created yet, and the catalog/schema haven't been configured.\n\nWhat would you like to work on? I can help with:\n- Creating tables and ingesting data\n- Building Spark Declarative Pipelines\n- Setting up AI/BI dashboards\n- Deploying model serving endpoints\n- And more \u2014 just let me know what you need!",
+    "execution_duration_ms": 9776
+  },
+  "data": {
+    "spans": [
+      {
+        "trace_id": "UHUhin4B7vOTivVLxg0S8Q==",
+        "span_id": "Qs9PF3tNKrU=",
+        "parent_span_id": null,
+        "name": "claude_code_conversation",
+        "start_time_unix_nano": 1777543555687416064,
+        "end_time_unix_nano": 1777543565463416064,
+        "events": [],
+        "status": {
+          "code": "STATUS_CODE_OK",
+          "message": ""
+        },
+        "attributes": {
+          "mlflow.spanStartTimeNs": "1777543555687416064",
+          "mlflow.traceRequestId": "\"tr-5075218a7e01eef3938af54bc60d12f1\"",
+          "mlflow.spanType": "\"AGENT\"",
+          "mlflow.spanInputs": "{\"prompt\": \"hi\"}",
+          "mlflow.chat.tokenUsage": "{\"input_tokens\": 42365, \"output_tokens\": 275, \"total_tokens\": 42640}",
+          "mlflow.spanOutputs": "{\"status\": \"completed\", \"response\": \"Hi! I'm ready to help you build on Databricks. \\n\\nBased on your project state, it looks like this is a fresh setup \u2014 no tables, volumes, or pipelines have been created yet, and the catalog/schema haven't been configured.\\n\\nWhat would you like to work on? I can help with:\\n- Creating tables and ingesting data\\n- Building Spark Declarative Pipelines\\n- Setting up AI/BI dashboards\\n- Deploying model serving endpoints\\n- And more \u2014 just let me know what you need!\"}"
+        }
+      },
+      {
+        "trace_id": "UHUhin4B7vOTivVLxg0S8Q==",
+        "span_id": "iGzCEAWKimQ=",
+        "parent_span_id": "Qs9PF3tNKrU=",
+        "name": "llm",
+        "start_time_unix_nano": 1777543565632214000,
+        "end_time_unix_nano": 1777543565632327000,
+        "events": [],
+        "status": {
+          "code": "STATUS_CODE_OK",
+          "message": ""
+        },
+        "attributes": {
+          "mlflow.traceRequestId": "\"tr-5075218a7e01eef3938af54bc60d12f1\"",
+          "mlflow.spanType": "\"LLM\"",
+          "mlflow.spanInputs": "{\"model\": \"deepseek-v4-pro\", \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}]}",
+          "model": "\"deepseek-v4-pro\"",
+          "mlflow.message.format": "\"anthropic\"",
+          "mlflow.spanOutputs": "{\"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"Hi! I'm ready to help you build on Databricks. \\n\\nBased on your project state, it looks like this is a fresh setup \u2014 no tables, volumes, or pipelines have been created yet, and the catalog/schema haven't been configured.\\n\\nWhat would you like to work on? I can help with:\\n- Creating tables and ingesting data\\n- Building Spark Declarative Pipelines\\n- Setting up AI/BI dashboards\\n- Deploying model serving endpoints\\n- And more \u2014 just let me know what you need!\"}]}"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,2723 @@
+[
+  {
+    "name": "execute_sql",
+    "description": "Execute SQL query on Databricks warehouse. Auto-selects warehouse if not provided.\n\nUse for SELECT/INSERT/UPDATE/table DDL. For catalog/schema/volume DDL, use manage_uc_objects.\noutput_format: \"markdown\" (default, 50% smaller) or \"json\".",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "sql_query": {
+          "type": "string"
+        },
+        "warehouse_id": {
+          "default": null,
+          "type": "string"
+        },
+        "catalog": {
+          "default": null,
+          "type": "string"
+        },
+        "schema": {
+          "default": null,
+          "type": "string"
+        },
+        "timeout": {
+          "default": 180,
+          "type": "integer"
+        },
+        "query_tags": {
+          "default": null,
+          "type": "string"
+        },
+        "output_format": {
+          "default": "markdown",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sql_query"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "execute_sql_multi",
+    "description": "Execute multiple SQL statements with dependency-aware parallelism. Independent queries run in parallel.\n\nFor catalog/schema/volume DDL, use manage_uc_objects instead.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "sql_content": {
+          "type": "string"
+        },
+        "warehouse_id": {
+          "default": null,
+          "type": "string"
+        },
+        "catalog": {
+          "default": null,
+          "type": "string"
+        },
+        "schema": {
+          "default": null,
+          "type": "string"
+        },
+        "timeout": {
+          "default": 180,
+          "type": "integer"
+        },
+        "max_workers": {
+          "default": 4,
+          "type": "integer"
+        },
+        "query_tags": {
+          "default": null,
+          "type": "string"
+        },
+        "output_format": {
+          "default": "markdown",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sql_content"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_warehouse",
+    "description": "Manage SQL warehouses: list, get_best.\n\nActions:\n- list: List all SQL warehouses.\n  Returns: {warehouses: [{id, name, state, size, ...}]}.\n- get_best: Get best available warehouse ID. Prefers running, then starting, smaller sizes.\n  Returns: {warehouse_id} or {warehouse_id: null, error}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "default": "get_best",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "get_table_stats_and_schema",
+    "description": "Get schema and stats for tables. table_stat_level: NONE (schema only), SIMPLE (default, +row count), DETAILED (+cardinality/min/max/histograms).\n\ntable_names: list or glob patterns, None=all tables.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "catalog": {
+          "type": "string"
+        },
+        "schema": {
+          "type": "string"
+        },
+        "table_names": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "table_stat_level": {
+          "default": "SIMPLE",
+          "type": "string"
+        },
+        "warehouse_id": {
+          "default": null,
+          "type": "string"
+        }
+      },
+      "required": [
+        "catalog",
+        "schema"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "get_volume_folder_details",
+    "description": "Get schema/stats for data files in Volume folder. format: parquet/csv/json/delta/file.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "volume_path": {
+          "type": "string"
+        },
+        "format": {
+          "default": "parquet",
+          "type": "string"
+        },
+        "table_stat_level": {
+          "default": "SIMPLE",
+          "type": "string"
+        },
+        "warehouse_id": {
+          "default": null,
+          "type": "string"
+        }
+      },
+      "required": [
+        "volume_path"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "execute_code",
+    "description": "Execute code on Databricks via serverless or cluster compute.\n\nModes:\n- auto (default): Serverless unless cluster_id/context_id given or language is scala/r\n- serverless: No cluster needed, ~30s cold start, best for batch/one-off tasks\n- cluster: State persists via context_id, best for interactive work (but slow ~2min one-off cluster startup)\n\n- Cluster mode returns context_id. REUSE IT for subsequent calls to skip context creation (Variables/imports persist across calls).\n- Serverless has no context reuse (~30s cold start each time).\n\nfile_path: Run local file (.py/.scala/.sql/.r), auto-detects language.\nworkspace_path: Save as notebook in workspace (omit for ephemeral).\n.ipynb: Pass raw JSON with serverless, auto-detected.\njob_extra_params: Extra job params (serverless only). For dependencies:\n    {\"environments\": [{\"environment_key\": \"env\", \"spec\": {\"client\": \"4\", \"dependencies\": [\"pandas\", \"sklearn\"]}}]}\n\nTimeouts: serverless=1800s, cluster=120s, file=600s.\nReturns: {success, output, error, cluster_id, context_id} or {run_id, run_url}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "default": null,
+          "type": "string"
+        },
+        "file_path": {
+          "default": null,
+          "type": "string"
+        },
+        "compute_type": {
+          "default": "auto",
+          "type": "string"
+        },
+        "cluster_id": {
+          "default": null,
+          "type": "string"
+        },
+        "context_id": {
+          "default": null,
+          "type": "string"
+        },
+        "language": {
+          "default": "python",
+          "type": "string"
+        },
+        "timeout": {
+          "default": null,
+          "type": "integer"
+        },
+        "destroy_context_on_completion": {
+          "default": false,
+          "type": "boolean"
+        },
+        "workspace_path": {
+          "default": null,
+          "type": "string"
+        },
+        "run_name": {
+          "default": null,
+          "type": "string"
+        },
+        "job_extra_params": {
+          "additionalProperties": true,
+          "default": null,
+          "type": "object"
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_cluster",
+    "description": "Create, modify, start, terminate, or delete a cluster.\n\nActions:\n- create: Requires name. Auto-picks DBR, node type, SINGLE_USER, 120min auto-stop.\n- modify: Requires cluster_id. Only specified params change. Running clusters restart.\n- start: Requires cluster_id. ASK USER FIRST (costs money, 3-8min startup).\n- terminate: Reversible stop. Requires cluster_id.\n- get: returns cluster details. Requires cluster_id.\n- delete: PERMANENT. CONFIRM WITH USER. Requires cluster_id.\n\nnum_workers default 1, ignored if autoscale set. spark_conf: JSON string.\nReturns: {cluster_id, cluster_name, state, message}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "cluster_id": {
+          "default": null,
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "type": "string"
+        },
+        "num_workers": {
+          "default": null,
+          "type": "integer"
+        },
+        "spark_version": {
+          "default": null,
+          "type": "string"
+        },
+        "node_type_id": {
+          "default": null,
+          "type": "string"
+        },
+        "autotermination_minutes": {
+          "default": null,
+          "type": "integer"
+        },
+        "data_security_mode": {
+          "default": null,
+          "type": "string"
+        },
+        "spark_conf": {
+          "default": null,
+          "type": "string"
+        },
+        "autoscale_min_workers": {
+          "default": null,
+          "type": "integer"
+        },
+        "autoscale_max_workers": {
+          "default": null,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_sql_warehouse",
+    "description": "Create, modify, or delete a SQL warehouse.\n\nActions:\n- create: Requires name. Defaults: serverless PRO, Small, 120min auto-stop.\n- modify: Requires warehouse_id. Only specified params change.\n- delete: PERMANENT. CONFIRM WITH USER. Requires warehouse_id.\n\nsize: \"2X-Small\" to \"4X-Large\". Use list_warehouses to list existing.\nReturns: {warehouse_id, name, state, message}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "warehouse_id": {
+          "default": null,
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "type": "string"
+        },
+        "size": {
+          "default": null,
+          "type": "string"
+        },
+        "min_num_clusters": {
+          "default": null,
+          "type": "integer"
+        },
+        "max_num_clusters": {
+          "default": null,
+          "type": "integer"
+        },
+        "auto_stop_mins": {
+          "default": null,
+          "type": "integer"
+        },
+        "warehouse_type": {
+          "default": null,
+          "type": "string"
+        },
+        "enable_serverless": {
+          "default": null,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "list_compute",
+    "description": "List compute resources: clusters, node types, or spark versions.\n\nresource: \"clusters\" (default), \"node_types\", or \"spark_versions\".\ncluster_id: Get specific cluster status (use to poll after starting).\nauto_select: Return best running cluster (prefers \"shared\" > \"demo\" in name).",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "resource": {
+          "default": "clusters",
+          "type": "string"
+        },
+        "cluster_id": {
+          "default": null,
+          "type": "string"
+        },
+        "auto_select": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_workspace_files",
+    "description": "Manage workspace files: upload, delete.\n\nActions:\n- upload: Upload files/folders to workspace. Requires local_path, workspace_path.\n  Supports files, folders, globs, tilde expansion.\n  max_workers: Parallel upload threads (default 10). overwrite: Replace existing (default True).\n  Returns: {local_folder, remote_folder, total_files, successful, failed, success, failed_uploads}.\n- delete: Delete file/folder from workspace. Requires workspace_path.\n  recursive=True for non-empty folders. Has safety checks for protected paths.\n  Returns: {workspace_path, success, error}.\n\nworkspace_path format: /Workspace/Users/user@example.com/path/to/files",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "workspace_path": {
+          "type": "string"
+        },
+        "local_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "max_workers": {
+          "default": 10,
+          "type": "integer"
+        },
+        "overwrite": {
+          "default": true,
+          "type": "boolean"
+        },
+        "recursive": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "workspace_path"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_pipeline",
+    "description": "Manage Spark Declarative Pipelines: create, update, get, delete, find.\n\nActions:\n- create: New pipeline. Requires name, root_path, catalog, schema, workspace_file_paths.\n  Returns: {pipeline_id}.\n- create_or_update: Idempotent by name. Same params as create.\n  start_run=True triggers run after create/update. wait_for_completion=True blocks until done.\n  full_refresh=True reprocesses all data. Returns: {pipeline_id, created, success, state}.\n- get: Get pipeline details. Requires pipeline_id. Returns: full pipeline config.\n- update: Modify config. Requires pipeline_id + fields to change. Returns: {status}.\n- delete: Remove pipeline. Requires pipeline_id. Returns: {status}.\n- find_by_name: Find by name. Requires name. Returns: {found, pipeline_id}.\n\nroot_path: Workspace folder for pipeline files (e.g., /Workspace/Users/me/pipelines).\nworkspace_file_paths: List of notebook/file paths to include in pipeline.\nextra_settings: Additional config dict (clusters, photon, channel, continuous, etc).\nSee databricks-spark-declarative-pipelines skill for configuration details.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "root_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "catalog": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workspace_file_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "extra_settings": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "start_run": {
+          "default": false,
+          "type": "boolean"
+        },
+        "wait_for_completion": {
+          "default": false,
+          "type": "boolean"
+        },
+        "full_refresh": {
+          "default": true,
+          "type": "boolean"
+        },
+        "timeout": {
+          "default": 1800,
+          "type": "integer"
+        },
+        "pipeline_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_pipeline_run",
+    "description": "Manage pipeline runs: start, monitor, stop, get events.\n\nActions:\n- start: Trigger pipeline update. Requires pipeline_id.\n  wait=True (default) blocks until complete. validate_only=True checks without running.\n  full_refresh=True reprocesses all data. refresh_selection: specific tables to refresh.\n  Returns: {update_id, state, success, error_summary}.\n- get: Get run status. Requires pipeline_id, update_id.\n  include_config=True includes pipeline config. full_error_details=True for verbose errors.\n  Returns: {update_id, state, success, error_summary}.\n- stop: Stop running pipeline. Requires pipeline_id.\n  Returns: {status}.\n- get_events: Get events/logs for debugging. Requires pipeline_id.\n  event_log_level: ERROR, WARN (default), INFO. max_results: number of events (default 5).\n  update_id: filter to specific run.\n  Returns: list of event dicts.\n\nSee databricks-spark-declarative-pipelines skill for run management details.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "pipeline_id": {
+          "type": "string"
+        },
+        "refresh_selection": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "full_refresh": {
+          "default": false,
+          "type": "boolean"
+        },
+        "full_refresh_selection": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "validate_only": {
+          "default": false,
+          "type": "boolean"
+        },
+        "wait": {
+          "default": true,
+          "type": "boolean"
+        },
+        "timeout": {
+          "default": 300,
+          "type": "integer"
+        },
+        "update_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "include_config": {
+          "default": false,
+          "type": "boolean"
+        },
+        "full_error_details": {
+          "default": false,
+          "type": "boolean"
+        },
+        "max_results": {
+          "default": 5,
+          "type": "integer"
+        },
+        "event_log_level": {
+          "default": "WARN",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "pipeline_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_jobs",
+    "description": "Manage Databricks jobs: create, get, list, find_by_name, update, delete.\n\ncreate: requires name+tasks, serverless default, idempotent (returns existing if same name).\nget/update/delete: require job_id. find_by_name: returns job_id.\ntasks: [{task_key, notebook_task|spark_python_task|..., job_cluster_key or environment_key}].\njob_clusters: Shared cluster definitions tasks can reference. environments: Serverless env configs.\nschedule: {quartz_cron_expression, timezone_id}. git_source: {git_url, git_provider, git_branch}.\nSee databricks-jobs skill for task configuration details.\nReturns: create={job_id}, get=full config, list={items}, find_by_name={job_id}, update/delete={status, job_id}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "job_id": {
+          "default": null,
+          "type": "integer"
+        },
+        "name": {
+          "default": null,
+          "type": "string"
+        },
+        "tasks": {
+          "default": null,
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "job_clusters": {
+          "default": null,
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "environments": {
+          "default": null,
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "tags": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": null,
+          "type": "object"
+        },
+        "timeout_seconds": {
+          "default": null,
+          "type": "integer"
+        },
+        "max_concurrent_runs": {
+          "default": null,
+          "type": "integer"
+        },
+        "email_notifications": {
+          "additionalProperties": true,
+          "default": null,
+          "type": "object"
+        },
+        "webhook_notifications": {
+          "additionalProperties": true,
+          "default": null,
+          "type": "object"
+        },
+        "notification_settings": {
+          "additionalProperties": true,
+          "default": null,
+          "type": "object"
+        },
+        "schedule": {
+          "additionalProperties": true,
+          "default": null,
+          "type": "object"
+        },
+        "queue": {
+          "additionalProperties": true,
+          "default": null,
+          "type": "object"
+        },
+        "run_as": {
+          "additionalProperties": true,
+          "default": null,
+          "type": "object"
+        },
+        "git_source": {
+          "additionalProperties": true,
+          "default": null,
+          "type": "object"
+        },
+        "parameters": {
+          "default": null,
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "health": {
+          "additionalProperties": true,
+          "default": null,
+          "type": "object"
+        },
+        "deployment": {
+          "additionalProperties": true,
+          "default": null,
+          "type": "object"
+        },
+        "limit": {
+          "default": 25,
+          "type": "integer"
+        },
+        "expand_tasks": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_job_runs",
+    "description": "Manage job runs: run_now, repair, get, get_output, cancel, list, wait.\n\nrun_now: requires job_id, returns {run_id}. repair: requires run_id, reruns failed tasks (rerun_all_failed_tasks=True) or specific tasks (rerun_tasks=[\"task_key\"]).\nget/get_output/cancel/wait: require run_id. list: filter by job_id/active_only/completed_only. wait: blocks until complete (timeout default 3600s).\nReturns: run_now={run_id}, repair={repair_id, run_id}, get=run details, get_output=logs+results, cancel={status}, list={items}, wait=full result.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "job_id": {
+          "default": null,
+          "type": "integer"
+        },
+        "run_id": {
+          "default": null,
+          "type": "integer"
+        },
+        "idempotency_token": {
+          "default": null,
+          "type": "string"
+        },
+        "jar_params": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "notebook_params": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": null,
+          "type": "object"
+        },
+        "python_params": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "spark_submit_params": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "python_named_params": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": null,
+          "type": "object"
+        },
+        "pipeline_params": {
+          "additionalProperties": true,
+          "default": null,
+          "type": "object"
+        },
+        "sql_params": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": null,
+          "type": "object"
+        },
+        "dbt_commands": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "queue": {
+          "additionalProperties": true,
+          "default": null,
+          "type": "object"
+        },
+        "rerun_all_failed_tasks": {
+          "default": null,
+          "type": "boolean"
+        },
+        "rerun_dependent_tasks": {
+          "default": null,
+          "type": "boolean"
+        },
+        "rerun_tasks": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "latest_repair_id": {
+          "default": null,
+          "type": "integer"
+        },
+        "active_only": {
+          "default": false,
+          "type": "boolean"
+        },
+        "completed_only": {
+          "default": false,
+          "type": "boolean"
+        },
+        "limit": {
+          "default": 25,
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "type": "integer"
+        },
+        "start_time_from": {
+          "default": null,
+          "type": "integer"
+        },
+        "start_time_to": {
+          "default": null,
+          "type": "integer"
+        },
+        "timeout": {
+          "default": 3600,
+          "type": "integer"
+        },
+        "poll_interval": {
+          "default": 10,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_ka",
+    "description": "Manage Knowledge Assistant (KA) - RAG-based document Q&A.\n\nActions: create_or_update (name+volume_path), get (tile_id), find_by_name (name), delete (tile_id).\nvolume_path: UC Volume path with documents (e.g., /Volumes/catalog/schema/vol/docs).\ndescription: What this KA does (shown to users). instructions: How KA should answer queries.\nadd_examples_from_volume: scan volume for JSON example files with question/guideline pairs.\nSee agent-bricks skill for full details.\nReturns: create_or_update={tile_id, operation, endpoint_status}, get={tile_id, knowledge_sources, examples_count},\nfind_by_name={found, tile_id, endpoint_name}, delete={success}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "type": "string"
+        },
+        "volume_path": {
+          "default": null,
+          "type": "string"
+        },
+        "description": {
+          "default": null,
+          "type": "string"
+        },
+        "instructions": {
+          "default": null,
+          "type": "string"
+        },
+        "tile_id": {
+          "default": null,
+          "type": "string"
+        },
+        "add_examples_from_volume": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_mas",
+    "description": "Manage Supervisor Agent (MAS) - orchestrates multiple agents for query routing.\n\nActions: create_or_update (name+agents), get (tile_id), find_by_name (name), delete (tile_id).\nagents: [{name, description (critical for routing), ONE OF: endpoint_name|genie_space_id|ka_tile_id|uc_function_name|connection_name}].\ndescription: What this MAS does. instructions: Routing rules for the supervisor.\nexamples: [{question, guideline}] to train routing behavior.\nSee agent-bricks skill for full agent configuration details.\nReturns: create_or_update={tile_id, operation, endpoint_status, agents_count}, get={tile_id, agents, examples_count},\nfind_by_name={found, tile_id, agents_count}, delete={success}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "type": "string"
+        },
+        "agents": {
+          "default": null,
+          "items": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "description": {
+          "default": null,
+          "type": "string"
+        },
+        "instructions": {
+          "default": null,
+          "type": "string"
+        },
+        "tile_id": {
+          "default": null,
+          "type": "string"
+        },
+        "examples": {
+          "default": null,
+          "items": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_dashboard",
+    "description": "Manage AI/BI dashboards: create, update, get, list, delete, publish.\n\nCRITICAL: Before calling this tool to create or edit a dashboard, you MUST:\n0. Review the databricks-aibi-dashboards skill to understand widget definitions.\n   You must EXACTLY follow the JSON structure detailed in the skill.\n1. Call get_table_stats_and_schema() to get table schemas for your queries.\n2. Call execute_sql() to TEST EVERY dataset query before using in dashboard.\nIf you skip validation, widgets WILL show errors!\n\nActions:\n- create_or_update: Create/update dashboard from JSON.\n  Requires display_name, parent_path, serialized_dashboard, warehouse_id.\n  publish=True (default) auto-publishes after create.\n  Returns: {success, dashboard_id, path, url, published, error}.\n- get: Get dashboard details. Requires dashboard_id.\n  Returns: dashboard config and metadata.\n- list: List all dashboards.\n  Returns: {dashboards: [...]}.\n- delete: Soft-delete (moves to trash). Requires dashboard_id.\n  Returns: {status, message}.\n- publish: Publish dashboard. Requires dashboard_id, warehouse_id.\n  embed_credentials=True allows users without data access to view.\n  Returns: {status, dashboard_id}.\n- unpublish: Unpublish dashboard. Requires dashboard_id.\n  Returns: {status, dashboard_id}.\n\nWidget structure rules (for create_or_update):\n- queries is TOP-LEVEL SIBLING of spec (NOT inside spec, NOT named_queries)\n- fields[].name MUST match encodings fieldName exactly\n- Use datasetName (camelCase, not dataSetName)\n- Versions: counter/table/filter=2, bar/line/pie=3\n- Layout: 6-column grid\n- Filter types: filter-multi-select, filter-single-select, filter-date-range-picker\n- Text widget uses textbox_spec (no spec block)",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "display_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "parent_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "serialized_dashboard": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "warehouse_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "publish": {
+          "default": true,
+          "type": "boolean"
+        },
+        "dashboard_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "embed_credentials": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_serving_endpoint",
+    "description": "Manage Model Serving endpoints: get status, list, query.\n\nActions:\n- get: Get endpoint status. Requires name.\n  Returns: {name, state (READY/NOT_READY/NOT_FOUND), config_update, served_entities, error}.\n- list: List all endpoints. Optional limit (default 50).\n  Returns: {endpoints: [{name, state, creation_timestamp, creator, served_entities_count}, ...]}.\n- query: Query an endpoint. Requires name + one input format.\n  Input formats (use one):\n  - messages: Chat/agent endpoints. Format: [{\"role\": \"user\", \"content\": \"...\"}]\n  - inputs: Custom pyfunc models (dict matching model signature)\n  - dataframe_records: ML models. Format: [{\"feature1\": 1.0, ...}]\n  max_tokens, temperature: Optional for chat endpoints.\n  Returns: {choices: [...]} for chat or {predictions: [...]} for ML.\n\nSee databricks-model-serving skill for endpoint configuration.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "messages": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dataframe_records": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "max_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "limit": {
+          "default": 50,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_uc_objects",
+    "description": "Manage UC namespace objects: catalog/schema/volume/function.\n\nobject_type: \"catalog\", \"schema\", \"volume\", or \"function\".\naction: \"create\", \"get\", \"list\", \"update\", \"delete\" (function: no create, use SQL).\n\nParameters by object_type:\n- catalog: create(name, comment?, storage_root?, properties?), get/update/delete(full_name or name).\n  update supports: new_name, comment, owner, isolation_mode (OPEN/ISOLATED).\n- schema: create(catalog_name, name, comment?), get/update/delete(full_name).\n  list(catalog_name). update supports: new_name, comment, owner.\n- volume: create(catalog_name, schema_name, name, volume_type?, comment?, storage_location?).\n  volume_type: MANAGED (default) or EXTERNAL. storage_location required for EXTERNAL.\n  list(catalog_name, schema_name). get/update/delete(full_name).\n- function: get/delete(full_name), list(catalog_name, schema_name). force=True for delete.\n\nfull_name format: \"catalog\" or \"catalog.schema\" or \"catalog.schema.object\".\nReturns: list={items}, get/create/update=object details, delete={status}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "object_type": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "type": "string"
+        },
+        "full_name": {
+          "default": null,
+          "type": "string"
+        },
+        "catalog_name": {
+          "default": null,
+          "type": "string"
+        },
+        "schema_name": {
+          "default": null,
+          "type": "string"
+        },
+        "comment": {
+          "default": null,
+          "type": "string"
+        },
+        "owner": {
+          "default": null,
+          "type": "string"
+        },
+        "storage_root": {
+          "default": null,
+          "type": "string"
+        },
+        "volume_type": {
+          "default": null,
+          "type": "string"
+        },
+        "storage_location": {
+          "default": null,
+          "type": "string"
+        },
+        "new_name": {
+          "default": null,
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": null
+        },
+        "isolation_mode": {
+          "default": null,
+          "type": "string"
+        },
+        "force": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "object_type",
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_uc_grants",
+    "description": "Manage UC permissions: grant/revoke/get/get_effective.\n\naction: \"grant\", \"revoke\", \"get\", \"get_effective\".\nsecurable_type: catalog/schema/table/volume/function/storage_credential/external_location/connection/share.\nfull_name: Full UC name (e.g., \"catalog.schema.table\").\nprincipal: User, group, or service principal (e.g., \"user@example.com\", \"group_name\").\nprivileges: List of privileges to grant/revoke. Common values:\n  - catalog: USE_CATALOG, CREATE_SCHEMA, ALL_PRIVILEGES\n  - schema: USE_SCHEMA, CREATE_TABLE, CREATE_FUNCTION, ALL_PRIVILEGES\n  - table: SELECT, MODIFY, ALL_PRIVILEGES\n  - volume: READ_VOLUME, WRITE_VOLUME, ALL_PRIVILEGES\n  - function: EXECUTE, ALL_PRIVILEGES\nReturns: get/get_effective={privilege_assignments: [...]}, grant/revoke={status}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "securable_type": {
+          "type": "string"
+        },
+        "full_name": {
+          "type": "string"
+        },
+        "principal": {
+          "default": null,
+          "type": "string"
+        },
+        "privileges": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "securable_type",
+        "full_name"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_uc_storage",
+    "description": "Manage storage credentials and external locations.\n\nresource_type: \"credential\" or \"external_location\".\n\ncredential actions:\n- create: name + (aws_iam_role_arn OR azure_access_connector_id), comment?, read_only?.\n- get/delete: name. delete supports force=True.\n- update: name, new_name?, comment?, owner?, aws_iam_role_arn?, azure_access_connector_id?.\n- validate: name, url (cloud path to validate access).\n- list: no params.\n\nexternal_location actions:\n- create: name, url (cloud path), credential_name, comment?, read_only?.\n- get/delete: name. delete supports force=True.\n- update: name, new_name?, url?, credential_name?, comment?, owner?, read_only?.\n- list: no params.\n\nReturns: get/create/update=resource details, list={items}, delete={status}, validate={results}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "resource_type": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "type": "string"
+        },
+        "aws_iam_role_arn": {
+          "default": null,
+          "type": "string"
+        },
+        "azure_access_connector_id": {
+          "default": null,
+          "type": "string"
+        },
+        "url": {
+          "default": null,
+          "type": "string"
+        },
+        "credential_name": {
+          "default": null,
+          "type": "string"
+        },
+        "read_only": {
+          "default": false,
+          "type": "boolean"
+        },
+        "comment": {
+          "default": null,
+          "type": "string"
+        },
+        "owner": {
+          "default": null,
+          "type": "string"
+        },
+        "new_name": {
+          "default": null,
+          "type": "string"
+        },
+        "force": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "resource_type",
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_uc_connections",
+    "description": "Manage Lakehouse Federation foreign connections.\n\naction: \"create\", \"get\", \"list\", \"update\", \"delete\", \"create_foreign_catalog\".\nconnection_type: SNOWFLAKE, POSTGRESQL, MYSQL, SQLSERVER, BIGQUERY, REDSHIFT, SQLDW (Azure Synapse).\n\nParameters by action:\n- create: name, connection_type, options (dict with connection details), comment?.\n  options format varies by type. Example for POSTGRESQL:\n    {\"host\": \"...\", \"port\": \"5432\", \"user\": \"...\", \"password\": \"...\"}.\n- get/delete: name.\n- update: name, options?, new_name?, owner?.\n- list: no params.\n- create_foreign_catalog: Creates UC catalog from external connection.\n  Requires: catalog_name (new UC catalog name), connection_name (existing connection).\n  Optional: catalog_options (dict, e.g., {\"database\": \"mydb\"}), comment, warehouse_id.\n\nReturns: get/create/update=connection details, list={items}, delete={status}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "type": "string"
+        },
+        "connection_type": {
+          "default": null,
+          "type": "string"
+        },
+        "options": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": null,
+          "type": "object"
+        },
+        "comment": {
+          "default": null,
+          "type": "string"
+        },
+        "owner": {
+          "default": null,
+          "type": "string"
+        },
+        "new_name": {
+          "default": null,
+          "type": "string"
+        },
+        "connection_name": {
+          "default": null,
+          "type": "string"
+        },
+        "catalog_name": {
+          "default": null,
+          "type": "string"
+        },
+        "catalog_options": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": null,
+          "type": "object"
+        },
+        "warehouse_id": {
+          "default": null,
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_uc_tags",
+    "description": "Manage UC tags and comments.\n\naction: \"set_tags\", \"unset_tags\", \"set_comment\", \"query_table_tags\", \"query_column_tags\".\n\nParameters by action:\n- set_tags: object_type (catalog/schema/table/column), full_name, tags (dict of key-value pairs).\n  For columns: also set column_name. warehouse_id? for SQL-based tagging.\n- unset_tags: object_type, full_name, tag_names (list of keys to remove).\n  For columns: also set column_name. warehouse_id?.\n- set_comment: object_type, full_name, comment_text. For columns: column_name. warehouse_id?.\n- query_table_tags: Search tables by tags. catalog_filter?, tag_name_filter?, tag_value_filter?, limit? (default 100).\n- query_column_tags: Search columns by tags. catalog_filter?, table_name_filter?, tag_name_filter?, tag_value_filter?, limit?.\n\nReturns: set/unset={status}, query={data: [...]}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "object_type": {
+          "default": null,
+          "type": "string"
+        },
+        "full_name": {
+          "default": null,
+          "type": "string"
+        },
+        "column_name": {
+          "default": null,
+          "type": "string"
+        },
+        "tags": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": null,
+          "type": "object"
+        },
+        "tag_names": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "comment_text": {
+          "default": null,
+          "type": "string"
+        },
+        "catalog_filter": {
+          "default": null,
+          "type": "string"
+        },
+        "tag_name_filter": {
+          "default": null,
+          "type": "string"
+        },
+        "tag_value_filter": {
+          "default": null,
+          "type": "string"
+        },
+        "table_name_filter": {
+          "default": null,
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "type": "integer"
+        },
+        "warehouse_id": {
+          "default": null,
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_uc_security_policies",
+    "description": "Manage row-level security and column masking.\n\naction: \"set_row_filter\", \"drop_row_filter\", \"set_column_mask\", \"drop_column_mask\", \"create_security_function\".\n\nParameters by action:\n- set_row_filter: table_name (full name), filter_function (UDF name), filter_columns (list of columns to pass).\n  Example: filter_function=\"main.default.row_filter_fn\", filter_columns=[\"user_id\"].\n- drop_row_filter: table_name.\n- set_column_mask: table_name, column_name, mask_function (UDF that returns masked value).\n- drop_column_mask: table_name, column_name.\n- create_security_function: Creates a UDF for row filtering or column masking.\n  Requires: function_name (full name), parameter_name, parameter_type, return_type, function_body.\n  Example: function_name=\"main.default.my_filter\", parameter_name=\"user_id\", parameter_type=\"STRING\",\n           return_type=\"BOOLEAN\", function_body=\"return user_id = current_user()\".\n\nAll actions accept optional warehouse_id for SQL execution.\nReturns: {status, message} or function details for create.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "table_name": {
+          "default": null,
+          "type": "string"
+        },
+        "column_name": {
+          "default": null,
+          "type": "string"
+        },
+        "filter_function": {
+          "default": null,
+          "type": "string"
+        },
+        "filter_columns": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mask_function": {
+          "default": null,
+          "type": "string"
+        },
+        "function_name": {
+          "default": null,
+          "type": "string"
+        },
+        "function_body": {
+          "default": null,
+          "type": "string"
+        },
+        "parameter_name": {
+          "default": null,
+          "type": "string"
+        },
+        "parameter_type": {
+          "default": null,
+          "type": "string"
+        },
+        "return_type": {
+          "default": null,
+          "type": "string"
+        },
+        "function_comment": {
+          "default": null,
+          "type": "string"
+        },
+        "warehouse_id": {
+          "default": null,
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_uc_monitors",
+    "description": "Manage Lakehouse quality monitors for data quality tracking.\n\naction: \"create\", \"get\", \"run_refresh\", \"list_refreshes\", \"delete\".\ntable_name: Full table name (required for all actions).\n\nParameters by action:\n- create: table_name, output_schema_name (where metrics tables are stored).\n  Optional: assets_dir (for dashboard assets), schedule_cron (e.g., \"0 0 * * *\"),\n  schedule_timezone (default \"UTC\").\n- get: table_name. Returns monitor config and status.\n- run_refresh: table_name. Triggers a new monitor refresh.\n- list_refreshes: table_name. Returns {refreshes: [...]}.\n- delete: table_name. Removes the monitor.\n\nReturns: create/get=monitor details, run_refresh={status}, list_refreshes={refreshes}, delete={status}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "table_name": {
+          "type": "string"
+        },
+        "output_schema_name": {
+          "default": null,
+          "type": "string"
+        },
+        "schedule_cron": {
+          "default": null,
+          "type": "string"
+        },
+        "schedule_timezone": {
+          "default": "UTC",
+          "type": "string"
+        },
+        "assets_dir": {
+          "default": null,
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "table_name"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_uc_sharing",
+    "description": "Manage Delta Sharing: shares, recipients, and providers.\n\nresource_type: \"share\", \"recipient\", or \"provider\".\n\nSHARE actions (for data providers to share tables):\n- create: name, comment?. Creates an empty share.\n- get: name, include_shared_data? (default True).\n- list: no params. Returns {items: [...]}.\n- delete: name.\n- add_table: name (or share_name), table_name (full UC name), shared_as? (alias), partition_spec?.\n- remove_table: name (or share_name), table_name.\n- grant_to_recipient: name (or share_name), recipient_name.\n- revoke_from_recipient: name (or share_name), recipient_name.\n\nRECIPIENT actions (for data providers to manage share consumers):\n- create: name, authentication_type? (TOKEN/DATABRICKS), sharing_id?, comment?, ip_access_list?.\n- get: name. list: no params. delete: name.\n- rotate_token: name. Generates new access token for TOKEN-based recipients.\n\nPROVIDER actions (for data consumers to view available shares):\n- get: name. list: no params.\n- list_shares: name (provider name). Lists shares available from this provider.\n\nReturns: create/get=details, list={items}, delete={status}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "resource_type": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "type": "string"
+        },
+        "comment": {
+          "default": null,
+          "type": "string"
+        },
+        "table_name": {
+          "default": null,
+          "type": "string"
+        },
+        "shared_as": {
+          "default": null,
+          "type": "string"
+        },
+        "partition_spec": {
+          "default": null,
+          "type": "string"
+        },
+        "authentication_type": {
+          "default": null,
+          "type": "string"
+        },
+        "sharing_id": {
+          "default": null,
+          "type": "string"
+        },
+        "ip_access_list": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "share_name": {
+          "default": null,
+          "type": "string"
+        },
+        "recipient_name": {
+          "default": null,
+          "type": "string"
+        },
+        "include_shared_data": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "resource_type",
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_metric_views",
+    "description": "Manage UC metric views (reusable business metrics). Requires DBR 17.2+.\n\naction: \"create\", \"alter\", \"describe\", \"query\", \"drop\", \"grant\".\nfull_name: Full metric view name (catalog.schema.metric_view).\n\nParameters by action:\n- create: full_name, source (table/view name), dimensions, measures.\n  dimensions: List of dicts [{name: \"dim_name\", expr: \"column_or_expr\"}, ...].\n  measures: List of dicts [{name: \"measure_name\", expr: \"SUM(amount)\"}, ...] (aggregate functions).\n  Optional: version (default \"1.1\"), comment, filter_expr, joins, materialization, or_replace.\n- alter: Same params as create except or_replace. Updates existing metric view.\n- describe: full_name. Returns metric view definition and metadata.\n- query: full_name, query_measures (list of measure names to retrieve).\n  Optional: query_dimensions (list of dimension names), where, order_by, limit.\n- drop: full_name. Deletes the metric view.\n- grant: full_name, principal, privileges (list, e.g., [\"SELECT\"]).\n\nAll actions accept optional warehouse_id for SQL execution.\nReturns: create/alter/describe/grant=details, query={data: [...]}, drop={status}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "full_name": {
+          "type": "string"
+        },
+        "source": {
+          "default": null,
+          "type": "string"
+        },
+        "dimensions": {
+          "default": null,
+          "items": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "measures": {
+          "default": null,
+          "items": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "version": {
+          "default": "1.1",
+          "type": "string"
+        },
+        "comment": {
+          "default": null,
+          "type": "string"
+        },
+        "filter_expr": {
+          "default": null,
+          "type": "string"
+        },
+        "joins": {
+          "default": null,
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "materialization": {
+          "additionalProperties": true,
+          "default": null,
+          "type": "object"
+        },
+        "or_replace": {
+          "default": false,
+          "type": "boolean"
+        },
+        "query_measures": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "query_dimensions": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "where": {
+          "default": null,
+          "type": "string"
+        },
+        "order_by": {
+          "default": null,
+          "type": "string"
+        },
+        "limit": {
+          "default": null,
+          "type": "integer"
+        },
+        "principal": {
+          "default": null,
+          "type": "string"
+        },
+        "privileges": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "warehouse_id": {
+          "default": null,
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "full_name"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_volume_files",
+    "description": "Manage Unity Catalog Volume files: list, upload, download, delete, mkdir, get_info.\n\nActions:\n- list: List files in volume path. Returns: {files: [{name, path, is_directory, file_size}], truncated}.\n  max_results: Limit results (default 500, max 1000).\n- upload: Upload local file/folder/glob to volume. Auto-creates directories.\n  Requires volume_path, local_path. Returns: {total_files, successful, failed}.\n- download: Download file from volume to local path.\n  Requires volume_path, local_destination. Returns: {success, error}.\n- delete: Delete file/directory from volume.\n  recursive=True for non-empty directories. Returns: {files_deleted, directories_deleted}.\n- mkdir: Create directory in volume (like mkdir -p). Idempotent.\n  Returns: {success}.\n- get_info: Get file/directory metadata.\n  Returns: {name, path, is_directory, file_size, last_modified}.\n\nvolume_path format: /Volumes/catalog/schema/volume/path/to/file_or_dir\nSupports tilde expansion (~) and glob patterns for local_path.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "volume_path": {
+          "type": "string"
+        },
+        "local_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "local_destination": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "max_results": {
+          "default": 500,
+          "type": "integer"
+        },
+        "recursive": {
+          "default": false,
+          "type": "boolean"
+        },
+        "max_workers": {
+          "default": 4,
+          "type": "integer"
+        },
+        "overwrite": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "volume_path"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_genie",
+    "description": "Manage Genie Spaces: create, update, get, list, delete, export, import.\n\nActions:\n- create_or_update: Idempotent by name. Requires display_name, table_identifiers.\n  warehouse_id auto-detected if omitted. description: Explains space purpose.\n  sample_questions: Example questions shown to users.\n  serialized_space: Full config from export (preserves instructions/SQL examples).\n  Returns: {space_id, display_name, operation: created|updated, warehouse_id, table_count}.\n- get: Get space details. Requires space_id.\n  include_serialized_space=True for full config export.\n  Returns: {space_id, display_name, description, warehouse_id, table_identifiers, sample_questions}.\n- list: List all spaces.\n  Returns: {spaces: [{space_id, title, description}, ...]}.\n- delete: Delete a space. Requires space_id.\n  Returns: {success, space_id}.\n- export: Export space config for migration/backup. Requires space_id.\n  Returns: {space_id, title, description, warehouse_id, serialized_space}.\n- import: Import space from serialized_space. Requires warehouse_id, serialized_space.\n  Optional title, description, parent_path overrides.\n  Returns: {space_id, title, description, operation: imported}.\n\nSee databricks-genie skill for configuration details.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "display_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "table_identifiers": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "warehouse_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sample_questions": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "serialized_space": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "space_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "include_serialized_space": {
+          "default": false,
+          "type": "boolean"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "parent_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "ask_genie",
+    "description": "Ask natural language question to Genie Space. Pass conversation_id for follow-ups.\n\nReturns: {question, conversation_id, message_id, status, sql, description, columns, data, row_count, text_response, error}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "space_id": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "timeout_seconds": {
+          "default": 120,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "space_id",
+        "question"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "list_tracked_resources",
+    "description": "List resources tracked in project manifest (dashboards, jobs, pipelines, genie_space, etc.).\n\ntype: Filter by resource type (optional). Returns: {resources: [...], count}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "delete_tracked_resource",
+    "description": "Delete resource from manifest, optionally from Databricks too.\n\ndelete_from_databricks: If True, deletes from Databricks first (default: False, manifest-only).\nReturns: {success, removed_from_manifest, deleted_from_databricks, error}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "resource_id": {
+          "type": "string"
+        },
+        "delete_from_databricks": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "resource_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_vs_endpoint",
+    "description": "Manage Vector Search endpoints: create, get, list, delete.\n\nActions:\n- create_or_update: Idempotent create. Returns existing if found. Requires name.\n  endpoint_type: \"STANDARD\" (<100ms latency) or \"STORAGE_OPTIMIZED\" (~250ms, 1B+ vectors).\n  Async creation - poll with action=\"get\" until state=ONLINE.\n  Returns: {name, endpoint_type, state, created: bool}.\n- get: Get endpoint details. Requires name.\n  Returns: {name, state, num_indexes, ...}.\n- list: List all endpoints.\n  Returns: {endpoints: [{name, state, ...}, ...]}.\n- delete: Delete endpoint. All indexes must be deleted first. Requires name.\n  Returns: {name, status}.\n\nSee databricks-vector-search skill for endpoint configuration.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "endpoint_type": {
+          "default": "STANDARD",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_vs_index",
+    "description": "Manage Vector Search indexes: create, get, list, delete.\n\nActions:\n- create_or_update: Idempotent create. Returns existing if found. Auto-triggers initial sync for DELTA_SYNC.\n  Requires name, endpoint_name, primary_key.\n  index_type: \"DELTA_SYNC\" (auto-sync from Delta table) or \"DIRECT_ACCESS\" (manual CRUD via manage_vs_data).\n  delta_sync_index_spec: {source_table, embedding_source_columns OR embedding_vector_columns, pipeline_type}.\n    - embedding_source_columns: List of text columns for managed embeddings (Databricks generates vectors).\n    - embedding_vector_columns: List of {name, dimension} for self-managed embeddings (you provide vectors).\n    - pipeline_type: \"TRIGGERED\" (manual sync) or \"CONTINUOUS\" (auto-sync on changes).\n  direct_access_index_spec: {embedding_vector_columns: [{name, dimension}], schema_json}.\n  Returns: {name, created: bool, sync_triggered}.\n- get: Get index details. Requires name (format: catalog.schema.index_name).\n  Returns: {name, state, index_type, ...}.\n- list: List indexes. Optional endpoint_name to filter. Omit for all indexes across all endpoints.\n  Returns: {indexes: [...]}.\n- delete: Delete index. Requires name.\n  Returns: {name, status}.\n\nSee databricks-vector-search skill for full spec details and examples.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "endpoint_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "primary_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "index_type": {
+          "default": "DELTA_SYNC",
+          "type": "string"
+        },
+        "delta_sync_index_spec": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "direct_access_index_spec": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "query_vs_index",
+    "description": "Query a Vector Search index for similar documents.\n\nUse ONE OF:\n- query_text: For managed embeddings (Databricks generates vector from text).\n- query_vector: For self-managed embeddings (you provide the vector).\n\ncolumns: List of columns to return in results.\nnum_results: Number of results to return (default 5).\nFilters (use one based on endpoint type):\n- filters_json: For STANDARD endpoints. Dict like {\"field\": \"value\"} or {\"field NOT\": \"value\"}.\n- filter_string: For STORAGE_OPTIMIZED endpoints. SQL WHERE clause like \"field = 'value'\".\nquery_type: \"ANN\" (default, approximate) or \"HYBRID\" (combines vector + keyword search).\n\nReturns: {columns, data (with similarity score appended), num_results}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "index_name": {
+          "type": "string"
+        },
+        "columns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "query_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "query_vector": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "num_results": {
+          "default": 5,
+          "type": "integer"
+        },
+        "filters_json": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "filter_string": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "query_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "index_name",
+        "columns"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_vs_data",
+    "description": "Manage Vector Search index data: upsert, delete, scan, sync.\n\nActions:\n- upsert: Insert or update records. Requires inputs_json.\n  inputs_json: List of records, each with primary key + embedding vector.\n  Example: [{\"id\": \"doc1\", \"text\": \"...\", \"embedding\": [0.1, 0.2, ...]}]\n  Returns: {status, upserted_count}.\n- delete: Delete records by primary key. Requires primary_keys.\n  primary_keys: List of primary key values to delete.\n  Returns: {status, deleted_count}.\n- scan: Scan index contents. Optional num_results (default 100).\n  Returns: {columns, data, num_results}.\n- sync: Trigger re-sync for TRIGGERED DELTA_SYNC indexes.\n  Returns: {index_name, status: \"sync_triggered\"}.\n\nFor DIRECT_ACCESS indexes, use upsert/delete to manage data.\nFor DELTA_SYNC indexes, use sync to trigger refresh from source table.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "index_name": {
+          "type": "string"
+        },
+        "inputs_json": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {},
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "primary_keys": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "num_results": {
+          "default": 100,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action",
+        "index_name"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_lakebase_database",
+    "description": "Manage Lakebase PostgreSQL databases: create, update, get, list, delete.\n\nActions:\n- create_or_update: Idempotent create/update. Requires name.\n  type: \"provisioned\" (fixed capacity CU_1/2/4/8) or \"autoscale\" (auto-scaling with branches).\n  capacity: For provisioned only. pg_version: For autoscale only.\n  Returns: {created: bool, type, ...connection info}.\n- get: Get database details. Requires name.\n  For autoscale, includes branches and endpoints.\n  Returns: {name, type, state, ...}.\n- list: List all databases. Optional type filter.\n  Returns: {databases: [{name, type, ...}]}.\n- delete: Delete database. Requires name.\n  force=True cascades to children (provisioned). Autoscale deletes all branches/computes/data.\n  Returns: {status, ...}.\n\nSee databricks-lakebase-provisioned or databricks-lakebase-autoscale skill for details.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "default": "provisioned",
+          "type": "string"
+        },
+        "capacity": {
+          "default": "CU_1",
+          "type": "string"
+        },
+        "stopped": {
+          "default": false,
+          "type": "boolean"
+        },
+        "display_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pg_version": {
+          "default": "17",
+          "type": "string"
+        },
+        "force": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_lakebase_branch",
+    "description": "Manage Autoscale branches: create, update, delete.\n\nBranches are isolated copy-on-write environments with their own compute endpoints.\n\nActions:\n- create_or_update: Idempotent create/update. Requires project_name, branch_id.\n  source_branch: Branch to fork from (default: production).\n  ttl_seconds: Auto-delete after N seconds. is_protected: Prevent accidental deletion.\n  autoscaling_limit_min/max_cu: Compute unit limits. scale_to_zero_seconds: Idle time before scaling to zero.\n  Returns: {branch details, endpoint connection info, created: bool}.\n- delete: Delete branch and endpoints. Requires name (full branch name).\n  Permanently deletes data/databases/roles. Cannot delete protected branches.\n  Returns: {status, ...}.\n\nSee databricks-lakebase-autoscale skill for branch workflows.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "project_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "branch_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source_branch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ttl_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "no_expiry": {
+          "default": false,
+          "type": "boolean"
+        },
+        "is_protected": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "endpoint_type": {
+          "default": "ENDPOINT_TYPE_READ_WRITE",
+          "type": "string"
+        },
+        "autoscaling_limit_min_cu": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "autoscaling_limit_max_cu": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "scale_to_zero_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_lakebase_sync",
+    "description": "Manage Lakebase sync (reverse ETL): create, delete.\n\nActions:\n- create_or_update: Set up reverse ETL from Delta table to Lakebase.\n  Requires instance_name, source_table_name, target_table_name.\n  Creates catalog if needed, then synced table.\n  source_table_name: Delta table (catalog.schema.table). target_table_name: Postgres destination.\n  primary_key_columns: Required for incremental sync.\n  scheduling_policy: TRIGGERED/SNAPSHOT/CONTINUOUS.\n  Returns: {catalog, synced_table, created}.\n- delete: Remove synced table, optionally UC catalog. Source Delta table unaffected.\n  Requires table_name. Optional catalog_name to also delete catalog.\n  Returns: {synced_table, catalog (if deleted)}.\n\nSee databricks-lakebase-provisioned skill for sync workflows.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "instance_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source_table_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "target_table_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "catalog_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "database_name": {
+          "default": "databricks_postgres",
+          "type": "string"
+        },
+        "primary_key_columns": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "scheduling_policy": {
+          "default": "TRIGGERED",
+          "type": "string"
+        },
+        "table_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "generate_lakebase_credential",
+    "description": "Generate OAuth token (~1hr) for Lakebase connection. Use as password with sslmode=require.\n\nProvide instance_names (provisioned) or endpoint (autoscale).",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "instance_names": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "endpoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "get_current_user",
+    "description": "Get current Databricks user identity.\n\nReturns: {username (email), home_path (/Workspace/Users/user@example.com/)}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_app",
+    "description": "Manage Databricks Apps: create, deploy, get, list, delete.\n\nActions:\n- create_or_update: Idempotent create. Deploys if source_code_path provided. Requires name.\n  source_code_path: Volume or workspace path to deploy from.\n  description: App description. mode: Deployment mode.\n  Returns: {name, created: bool, url, status, deployment}.\n- get: Get app details. Requires name.\n  include_logs=True for deployment logs. deployment_id for specific deployment.\n  Returns: {name, url, status, logs}.\n- list: List all apps. Optional name_contains filter.\n  Returns: {apps: [{name, url, status}, ...]}.\n- delete: Delete an app. Requires name.\n  Returns: {name, status}.\n\nSee databricks-app-python skill for app development guidance.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source_code_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "include_logs": {
+          "default": false,
+          "type": "boolean"
+        },
+        "deployment_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name_contains": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_workspace",
+    "description": "Manage active Databricks workspace connection (session-scoped).\n\nActions: status (current workspace), list (profiles from ~/.databrickscfg), switch (profile or host), login (OAuth via CLI).\nReturns: {host, profile, username} or {profiles: [...]}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "generate_and_upload_pdf",
+    "description": "Convert complete HTML (with styles) to PDF and upload to Unity Catalog volume.\n\nReturns: {success, volume_path, error}.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "html_content": {
+          "type": "string"
+        },
+        "filename": {
+          "type": "string"
+        },
+        "catalog": {
+          "type": "string"
+        },
+        "schema": {
+          "type": "string"
+        },
+        "volume": {
+          "default": "raw_data",
+          "type": "string"
+        },
+        "folder": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "html_content",
+        "filename",
+        "catalog",
+        "schema"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "check_operation_status",
+    "description": "Check status of an async operation.\n\nUse this to get results of long-running operations that were moved to\nbackground execution. When a tool takes longer than 30 seconds, it returns\nan operation_id instead of blocking. Use this tool to poll for the result.\n\nArgs:\n    operation_id: The operation ID returned by the long-running tool\n\nReturns:\n    - status: 'running', 'completed', or 'failed'\n    - tool_name: Name of the original tool\n    - result: The operation result (if completed)\n    - error: Error message (if failed)\n    - elapsed_seconds: Time since operation started\n",
+    "inputSchema": {
+      "operation_id": "<class 'str'>"
+    }
+  },
+  {
+    "name": "list_operations",
+    "description": "List all tracked async operations.\n\nUse this to see all operations that are running or recently completed.\nUseful for checking what's in progress or finding an operation ID.\n\nArgs:\n    status: Optional filter - 'running', 'completed', or 'failed'\n\nReturns:\n    List of operations with their status and elapsed time\n",
+    "inputSchema": {
+      "status": "<class 'str'>"
+    }
+  }
+]

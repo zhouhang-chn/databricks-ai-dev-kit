@@ -1,0 +1,147 @@
+[
+  {
+    "name": "Bash",
+    "description": "Run a bash command. Supports long-running processes, interactive sessions, and environment variables.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "The command to execute"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Maximum time to wait for the command to finish"
+        },
+        "restart": {
+          "type": "boolean",
+          "description": "Restart the command if it's already running"
+        }
+      },
+      "required": [
+        "command"
+      ]
+    }
+  },
+  {
+    "name": "Read",
+    "description": "Read a file from the local filesystem. Supports line range reading for efficiency.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "type": "string",
+          "description": "Path to the file to read"
+        },
+        "start_line": {
+          "type": "integer",
+          "description": "1-based line number to start reading from"
+        },
+        "end_line": {
+          "type": "integer",
+          "description": "1-based line number to end reading at"
+        }
+      },
+      "required": [
+        "file_path"
+      ]
+    }
+  },
+  {
+    "name": "Write",
+    "description": "Write or overwrite a file on the local filesystem.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "type": "string",
+          "description": "Path to the file to write"
+        },
+        "content": {
+          "type": "string",
+          "description": "Content to write to the file"
+        }
+      },
+      "required": [
+        "file_path",
+        "content"
+      ]
+    }
+  },
+  {
+    "name": "Glob",
+    "description": "Find files matching specific glob patterns.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "The glob pattern to match"
+        },
+        "dir_path": {
+          "type": "string",
+          "description": "Directory to search within"
+        }
+      },
+      "required": [
+        "pattern"
+      ]
+    }
+  },
+  {
+    "name": "Grep",
+    "description": "Search for a regular expression pattern within file contents.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "The pattern to search for"
+        },
+        "dir_path": {
+          "type": "string",
+          "description": "Directory to search recursively"
+        },
+        "include_pattern": {
+          "type": "string",
+          "description": "Glob pattern to filter files"
+        }
+      },
+      "required": [
+        "pattern"
+      ]
+    }
+  },
+  {
+    "name": "Skill",
+    "description": "Load a specific skill from the available skills library.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "skill": {
+          "type": "string",
+          "description": "Name of the skill to load"
+        }
+      },
+      "required": [
+        "skill"
+      ]
+    }
+  },
+  {
+    "name": "Task",
+    "description": "Create a new sub-task for specialized agents or for complex planning.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "objective": {
+          "type": "string",
+          "description": "Detailed description of the task objective"
+        }
+      },
+      "required": [
+        "objective"
+      ]
+    }
+  }
+]

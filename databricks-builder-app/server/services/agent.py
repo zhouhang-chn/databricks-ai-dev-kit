@@ -124,7 +124,8 @@ def _log_llm_text(text: str) -> None:
   ):
     logger.error('LLM error response: %s', text[:500])
   else:
-    logger.info('LLM text: %s', text[:300])
+    # Reduced to DEBUG because AssistantMessage is already logged at INFO
+    logger.debug('LLM text: %s', text[:300])
 
 
 # Built-in Claude Code tools
@@ -271,7 +272,16 @@ def _run_agent_in_fresh_loop(message, options, result_queue, context, is_cancell
           async for msg in client.receive_response():
             msg_count += 1
             msg_type = type(msg).__name__
-            logger.debug('[AGENT] Message #%s: %s %r', msg_count, msg_type, msg)
+
+            # Truncate very large messages in logs to avoid overwhelming the log file
+            msg_repr = repr(msg)
+            if len(msg_repr) > 2000:
+                msg_repr = msg_repr[:2000] + "... [truncated]"
+
+            if isinstance(msg, StreamEvent):
+              logger.debug('[AGENT] Message #%s: %s %s', msg_count, msg_type, msg_repr)
+            else:
+              logger.info('[AGENT] Message #%s: %s %s', msg_count, msg_type, msg_repr)
 
             if is_cancelled_fn():
               logger.info('Agent cancelled by user request')
@@ -460,8 +470,9 @@ async def stream_agent_response(
       enabled_skills=enabled_skills,
     )
 
-    # Load Claude settings for Databricks model serving authentication
-    claude_env = _load_claude_settings()
+    # Load base Claude settings and copy them so provider-specific values from
+    # one request cannot leak into another request.
+    claude_env = _load_claude_settings().copy()
 
     # Log auth state for debugging
     logger.info(
@@ -469,24 +480,51 @@ async def stream_agent_response(
       f'is_cross_workspace={is_cross_workspace}'
     )
 
-    # Configure Claude subprocess to use Databricks FMAPI on the Builder App's
-    # workspace. FMAPI auth always points at the Builder App, even when tool
-    # operations target a different workspace (cross-workspace mode).
-    # Fall back to databricks_host/token for callers that don't split FMAPI creds.
+    # Explicit Anthropic-compatible environment config wins over Databricks app
+    # credentials. Some environments do not have the Databricks model-serving
+    # gateway available, while ANTHROPIC_BASE_URL/API_KEY/MODEL are the intended
+    # runtime contract.
     effective_fmapi_host = fmapi_host or databricks_host
     effective_fmapi_token = fmapi_token or databricks_token
     custom_base_url = os.environ.get('ANTHROPIC_BASE_URL')
     custom_api_key = os.environ.get('ANTHROPIC_API_KEY')
 
-    if effective_fmapi_host and effective_fmapi_token:
+    for provider_key in (
+      'ANTHROPIC_BASE_URL',
+      'ANTHROPIC_AUTH_TOKEN',
+      'ANTHROPIC_API_KEY',
+      'ANTHROPIC_MODEL',
+      'ANTHROPIC_CUSTOM_HEADERS',
+      'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS',
+    ):
+      claude_env.pop(provider_key, None)
+
+    if custom_base_url and custom_api_key:
+      claude_env['ANTHROPIC_BASE_URL'] = custom_base_url
+      claude_env['ANTHROPIC_AUTH_TOKEN'] = custom_api_key
+      # Claude CLI subprocess env inherits os.environ before options.env is
+      # applied. Blank API_KEY here so custom gateways receive only the
+      # auth-token path rather than both auth headers.
+      claude_env['ANTHROPIC_API_KEY'] = ''
+
+      anthropic_model = os.environ.get('ANTHROPIC_MODEL')
+      if anthropic_model:
+        claude_env['ANTHROPIC_MODEL'] = anthropic_model
+
+      logger.info(
+        f'Configured Anthropic-compatible gateway from environment: {custom_base_url}'
+      )
+      logger.info(
+        f'Claude env vars: BASE_URL={claude_env.get("ANTHROPIC_BASE_URL")}, '
+        f'AUTH_TOKEN_LEN={len(claude_env.get("ANTHROPIC_AUTH_TOKEN", ""))}, '
+        f'MODEL={claude_env.get("ANTHROPIC_MODEL")}'
+      )
+    elif effective_fmapi_host and effective_fmapi_token:
       host = effective_fmapi_host.replace('https://', '').replace('http://', '').rstrip('/')
       anthropic_base_url = f'https://{host}/serving-endpoints/anthropic'
 
       claude_env['ANTHROPIC_BASE_URL'] = anthropic_base_url
       claude_env['ANTHROPIC_AUTH_TOKEN'] = effective_fmapi_token
-      # Claude CLI subprocess env inherits os.environ before options.env is
-      # applied. Blank API_KEY here so a shell/.env value cannot leak alongside
-      # AUTH_TOKEN and confuse custom gateways.
       claude_env['ANTHROPIC_API_KEY'] = ''
 
       # Set the model to use (required for Databricks FMAPI)
@@ -501,25 +539,6 @@ async def stream_agent_response(
       claude_env['CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS'] = '1'
 
       logger.info(f'Configured Databricks model serving: {anthropic_base_url} with model {anthropic_model}')
-      logger.info(
-        f'Claude env vars: BASE_URL={claude_env.get("ANTHROPIC_BASE_URL")}, '
-        f'AUTH_TOKEN_LEN={len(claude_env.get("ANTHROPIC_AUTH_TOKEN", ""))}, '
-        f'MODEL={claude_env.get("ANTHROPIC_MODEL")}'
-      )
-    elif custom_base_url and custom_api_key:
-      claude_env['ANTHROPIC_BASE_URL'] = custom_base_url
-      claude_env['ANTHROPIC_AUTH_TOKEN'] = custom_api_key
-      # Override inherited ANTHROPIC_API_KEY with an empty value in the Claude
-      # subprocess so custom gateways receive only the auth-token path.
-      claude_env['ANTHROPIC_API_KEY'] = ''
-
-      anthropic_model = os.environ.get('ANTHROPIC_MODEL')
-      if anthropic_model:
-        claude_env['ANTHROPIC_MODEL'] = anthropic_model
-
-      logger.info(
-        f'Configured custom Anthropic-compatible gateway: {custom_base_url}'
-      )
       logger.info(
         f'Claude env vars: BASE_URL={claude_env.get("ANTHROPIC_BASE_URL")}, '
         f'AUTH_TOKEN_LEN={len(claude_env.get("ANTHROPIC_AUTH_TOKEN", ""))}, '
@@ -576,7 +595,7 @@ async def stream_agent_response(
       mcp_servers={'databricks': databricks_server},  # In-process SDK tools
       system_prompt=system_prompt,  # Databricks-focused system prompt
       setting_sources=["user", "project"],  # Load Skills from filesystem
-      env=claude_env,  # Pass Databricks auth settings (ANTHROPIC_AUTH_TOKEN, etc.)
+      env=claude_env,  # Pass provider auth settings (ANTHROPIC_AUTH_TOKEN, etc.)
       include_partial_messages=True,  # Enable token-by-token streaming
       stderr=stderr_callback,  # Capture stderr for debugging
     )
@@ -619,7 +638,7 @@ async def stream_agent_response(
       if msg_type == 'keepalive':
         # Emit keepalive event to keep the stream active during long tool execution
         elapsed = time.time() - last_activity
-        logger.debug(f'Emitting keepalive after {elapsed:.0f}s of inactivity')
+        logger.info(f'Agent stream keepalive after {elapsed:.0f}s without messages')
         yield {
           'type': 'keepalive',
           'elapsed_since_last_event': elapsed,

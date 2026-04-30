@@ -9,6 +9,7 @@ execution continues in background and returns an operation ID for polling.
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import threading
@@ -227,8 +228,23 @@ Returns:
     return list_ops
 
 
-def _convert_schema(json_schema: dict) -> dict[str, type]:
-    """Convert JSON schema to SDK simple format: {"param": type}"""
+def _convert_schema(json_schema: dict) -> dict[str, Any]:
+    """Return a JSON Schema suitable for the SDK tool wrapper.
+
+    The Claude SDK accepts either a simple ``{"param": type}`` schema or a
+    full JSON Schema. The simple form marks every property as required, which
+    breaks FastMCP tools with optional/defaulted parameters. Preserve the
+    FastMCP JSON Schema so only the real required parameters are required.
+    """
+    if (
+        isinstance(json_schema, dict)
+        and json_schema.get('type') == 'object'
+        and isinstance(json_schema.get('properties'), dict)
+    ):
+        # Copy through JSON so later mutations cannot affect FastMCP's cached
+        # schema objects.
+        return json.loads(json.dumps(json_schema))
+
     type_map = {
         'string': str,
         'integer': int,
@@ -272,8 +288,13 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
         import concurrent.futures
 
         start_time = time.time()
-        print(f'[MCP TOOL] {name} called with args: {args}', file=sys.stderr, flush=True)
-        logger.info(f'[MCP] Tool {name} called with args: {args}')
+
+        # Truncate args for cleaner logs
+        args_repr = repr(args)
+        if len(args_repr) > 1000:
+            args_repr = args_repr[:1000] + "... [truncated]"
+
+        logger.debug(f'[MCP] Tool {name} called with args: {args_repr}')
         try:
             # Parse JSON strings for complex types (Claude agent sometimes sends these as strings)
             parsed_args = {}
@@ -282,31 +303,41 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
                     # Try to parse as JSON if it looks like a list or dict
                     try:
                         parsed_args[key] = json.loads(value)
-                        print(f'[MCP TOOL] Parsed {key} from JSON string', file=sys.stderr, flush=True)
+                        logger.debug(f'[MCP] Parsed {key} from JSON string for tool {name}')
                     except json.JSONDecodeError:
                         # Not valid JSON, keep as string
                         parsed_args[key] = value
                 else:
                     parsed_args[key] = value
 
-            # FastMCP tools are sync - run in thread pool with heartbeat
-            print(f'[MCP TOOL] Running {name} in thread pool with heartbeat...', file=sys.stderr, flush=True)
-
             # Copy context to propagate Databricks auth contextvars to the thread
             ctx = copy_context()
-
-            def run_in_context():
-                """Run the tool function within the copied context."""
-                return ctx.run(fn, **parsed_args)
-
-            # Run tool in executor so we can poll for completion with heartbeat
-            # Use executor.submit() to get a concurrent.futures.Future (thread-safe)
-            # instead of loop.run_in_executor() which returns an asyncio.Future
             loop = asyncio.get_event_loop()
-            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            cf_future = executor.submit(run_in_context)  # concurrent.futures.Future
-            # Wrap in asyncio.Future for async waiting
-            future = asyncio.wrap_future(cf_future, loop=loop)
+            executor = None
+            cf_future = None
+
+            if inspect.iscoroutinefunction(fn):
+                logger.debug(f'[MCP] Running async FastMCP function {name}...')
+
+                def create_task_in_context():
+                    """Create the async tool task within the copied context."""
+                    return asyncio.create_task(fn(**parsed_args))
+
+                future = ctx.run(create_task_in_context)
+            else:
+                logger.debug(f'[MCP] Running sync FastMCP function {name} in thread pool...')
+
+                def run_in_context():
+                    """Run the tool function within the copied context."""
+                    return ctx.run(fn, **parsed_args)
+
+                # Run tool in executor so we can poll for completion with heartbeat.
+                # Use executor.submit() to get a concurrent.futures.Future (thread-safe)
+                # instead of loop.run_in_executor() which returns an asyncio.Future.
+                executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                cf_future = executor.submit(run_in_context)  # concurrent.futures.Future
+                # Wrap in asyncio.Future for async waiting.
+                future = asyncio.wrap_future(cf_future, loop=loop)
 
             # Heartbeat every 10 seconds while waiting for the tool to complete
             HEARTBEAT_INTERVAL = 10
@@ -324,61 +355,59 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
                     # Tool still running - emit heartbeat
                     heartbeat_count += 1
                     elapsed = time.time() - start_time
-                    print(f'[MCP HEARTBEAT] {name} still running... ({elapsed:.0f}s elapsed, heartbeat #{heartbeat_count})', file=sys.stderr, flush=True)
-                    logger.debug(f'[MCP] Heartbeat for {name}: {elapsed:.0f}s elapsed')
+                    logger.debug(f'[MCP] Heartbeat for {name}: {elapsed:.0f}s elapsed, heartbeat #{heartbeat_count}')
 
                     # Check if we should switch to async mode to avoid connection timeout
                     if elapsed > SAFE_EXECUTION_THRESHOLD:
                         op_id = create_operation(name, parsed_args)
-                        print(
-                            f'[MCP ASYNC] {name} exceeded {SAFE_EXECUTION_THRESHOLD}s, '
-                            f'switching to async mode (operation_id: {op_id})',
-                            file=sys.stderr,
-                            flush=True,
-                        )
                         logger.info(
                             f'[MCP] Tool {name} switched to async mode after {elapsed:.0f}s '
                             f'(operation_id: {op_id})'
                         )
 
-                        # Start background thread to complete the operation
-                        # We use threading.Thread instead of asyncio.create_task because
-                        # the fresh event loop pattern may not keep tasks alive
+                        async def complete_async_operation(op_id, future):
+                            """Background task to wait for async completion and store result."""
+                            try:
+                                result = await future
+                                if inspect.isawaitable(result):
+                                    result = await result
+                                complete_operation(op_id, result=result)
+                                logger.info(f'[MCP] Async operation {op_id} completed successfully')
+                            except Exception as e:
+                                import traceback
+                                error_details = traceback.format_exc()
+                                complete_operation(op_id, error=str(e))
+                                logger.error(f'[MCP] Async operation {op_id} failed: {e}')
+                                logger.debug(f'[MCP] Async operation {op_id} traceback:\n{error_details}')
+
                         def complete_in_background(op_id, cf_future, executor):
                             """Background thread to wait for completion and store result."""
                             try:
                                 # Block until the future completes (it's already running)
                                 # cf_future is a concurrent.futures.Future which is thread-safe
                                 result = cf_future.result()  # This blocks
+                                if inspect.isawaitable(result):
+                                    result = asyncio.run(result)
                                 complete_operation(op_id, result=result)
-                                print(
-                                    f'[MCP ASYNC] Operation {op_id} completed successfully',
-                                    file=sys.stderr,
-                                    flush=True,
-                                )
+                                logger.info(f'[MCP] Async operation {op_id} completed successfully')
                             except Exception as e:
                                 import traceback
                                 error_details = traceback.format_exc()
                                 complete_operation(op_id, error=str(e))
-                                print(
-                                    f'[MCP ASYNC] Operation {op_id} failed: {e}',
-                                    file=sys.stderr,
-                                    flush=True,
-                                )
-                                print(
-                                    f'[MCP ASYNC] Traceback:\n{error_details}',
-                                    file=sys.stderr,
-                                    flush=True,
-                                )
+                                logger.error(f'[MCP] Async operation {op_id} failed: {e}')
+                                logger.debug(f'[MCP] Async operation {op_id} traceback:\n{error_details}')
                             finally:
                                 executor.shutdown(wait=False)
 
-                        bg_thread = threading.Thread(
-                            target=complete_in_background,
-                            args=(op_id, cf_future, executor),
-                            daemon=True,
-                        )
-                        bg_thread.start()
+                        if cf_future is not None and executor is not None:
+                            bg_thread = threading.Thread(
+                                target=complete_in_background,
+                                args=(op_id, cf_future, executor),
+                                daemon=True,
+                            )
+                            bg_thread.start()
+                        else:
+                            asyncio.create_task(complete_async_operation(op_id, future))
 
                         # Return immediately with operation info
                         return {
@@ -404,28 +433,33 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
                     continue
 
             elapsed = time.time() - start_time
+            if inspect.isawaitable(result):
+                result = await result
             result_str = json.dumps(result, default=str)
-            print(f'[MCP TOOL] {name} completed in {elapsed:.2f}s, result length: {len(result_str)}', file=sys.stderr, flush=True)
-            logger.info(f'[MCP] Tool {name} completed in {elapsed:.2f}s')
+            logger.info(f'[MCP] Tool {name} completed in {elapsed:.2f}s (result length: {len(result_str)})')
+            if executor is not None:
+                executor.shutdown(wait=False)
             return {'content': [{'type': 'text', 'text': result_str}]}
         except asyncio.CancelledError:
+            if 'executor' in locals() and executor is not None:
+                executor.shutdown(wait=False)
             elapsed = time.time() - start_time
             error_msg = f'Tool execution cancelled after {elapsed:.2f}s (likely due to stream timeout)'
-            print(f'[MCP TOOL] {name} CANCELLED: {error_msg}', file=sys.stderr, flush=True)
             logger.error(f'[MCP] Tool {name} cancelled: {error_msg}')
             return {'content': [{'type': 'text', 'text': f'Error: {error_msg}'}], 'is_error': True}
         except TimeoutError as e:
+            if 'executor' in locals() and executor is not None:
+                executor.shutdown(wait=False)
             elapsed = time.time() - start_time
             error_msg = f'Tool execution timed out after {elapsed:.2f}s: {e}'
-            print(f'[MCP TOOL] {name} TIMEOUT: {error_msg}', file=sys.stderr, flush=True)
             logger.error(f'[MCP] Tool {name} timeout: {error_msg}')
             return {'content': [{'type': 'text', 'text': f'Error: {error_msg}'}], 'is_error': True}
         except Exception as e:
+            if 'executor' in locals() and executor is not None:
+                executor.shutdown(wait=False)
             elapsed = time.time() - start_time
             error_details = traceback.format_exc()
             error_msg = f'{type(e).__name__}: {str(e)}'
-            print(f'[MCP TOOL] {name} FAILED after {elapsed:.2f}s: {error_msg}', file=sys.stderr, flush=True)
-            print(f'[MCP TOOL] Stack trace:\n{error_details}', file=sys.stderr, flush=True)
             logger.exception(f'[MCP] Tool {name} failed after {elapsed:.2f}s: {error_msg}')
             return {'content': [{'type': 'text', 'text': f'Error ({type(e).__name__}): {str(e)}\n\nThis error occurred after {elapsed:.2f}s. If this is a long-running operation, it may have exceeded the stream timeout (50s).'}], 'is_error': True}
 
