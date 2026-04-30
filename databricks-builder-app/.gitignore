@@ -4,6 +4,9 @@ skills/
 # Projects directory (local development)
 projects/
 
+# Server log files (timestamped per startup)
+logs/
+
 # Packages (copied from sibling dirs during deployment)
 packages/
 

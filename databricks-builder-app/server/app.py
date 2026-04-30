@@ -4,16 +4,54 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
-# Configure logging BEFORE importing other modules
+# Configure logging BEFORE importing other modules.
+# Mirror to a timestamped file so background-thread agent runs can be inspected
+# after the server process exits.
+_LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+_LOG_DIR = Path(__file__).resolve().parent.parent / 'logs'
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+_LOG_FILE = _LOG_DIR / f'server_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+os.environ['BUILDER_APP_LOG_FILE'] = str(_LOG_FILE)
+
+_log_formatter = logging.Formatter(_LOG_FORMAT)
+_stream_handler = logging.StreamHandler()
+_stream_handler.setFormatter(_log_formatter)
+_file_handler = logging.FileHandler(_LOG_FILE, encoding='utf-8')
+_file_handler.setFormatter(_log_formatter)
+
+_root_logger = logging.getLogger()
+_root_level = (
+  _root_logger.getEffectiveLevel()
+  if _root_logger.getEffectiveLevel() < logging.INFO
+  else logging.INFO
+)
 logging.basicConfig(
-  level=logging.INFO,
-  format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+  level=_root_level,
+  format=_LOG_FORMAT,
   handlers=[
-    logging.StreamHandler(),
+    _stream_handler,
+    _file_handler,
   ],
 )
+
+if _root_logger.getEffectiveLevel() > logging.INFO:
+  _root_logger.setLevel(logging.INFO)
+if not any(
+  isinstance(handler, logging.FileHandler)
+  and Path(handler.baseFilename) == _LOG_FILE
+  for handler in _root_logger.handlers
+):
+  _root_logger.addHandler(_file_handler)
+if not any(
+  isinstance(handler, logging.StreamHandler)
+  and not isinstance(handler, logging.FileHandler)
+  for handler in _root_logger.handlers
+):
+  _root_logger.addHandler(_stream_handler)
+logging.getLogger(__name__).info(f'Logging to {_LOG_FILE}')
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -187,7 +225,7 @@ if build_path:
 else:
   logger.warning(
     f'Build directory not found in any of: {[str(p) for p in _possible_build_paths]}. '
-    'In development, run Vite separately: cd client && npm run dev'
+    'In development, run Vite separately: cd client && pnpm dev'
   )
 
 # ---------------------------------------------------------------------------

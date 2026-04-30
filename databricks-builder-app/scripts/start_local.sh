@@ -367,7 +367,7 @@ trap cleanup SIGINT SIGTERM
 
 cd "$PROJECT_DIR"
 echo -e "  Starting backend on ${GREEN}http://localhost:8000${NC}..."
-uv run uvicorn server.app:app --reload --port 8000 --reload-dir server &
+uv run uvicorn server.app:app --reload --port 8000 --reload-dir server --log-level debug &
 sleep 2
 
 echo -e "  Starting frontend on ${GREEN}http://localhost:3000${NC}..."

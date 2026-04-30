@@ -17,7 +17,6 @@ See: https://github.com/anthropics/claude-agent-sdk-python/issues/462
 """
 
 import asyncio
-import json
 import logging
 import os
 import queue
@@ -51,6 +50,82 @@ from .databricks_tools import load_databricks_tools, create_filtered_databricks_
 from .system_prompt import get_system_prompt
 
 logger = logging.getLogger(__name__)
+_LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+
+
+def _desired_logger_level() -> int:
+  """Use INFO by default, but honor DEBUG when the root logger is more verbose."""
+  root_level = logging.getLogger().getEffectiveLevel()
+  return root_level if root_level < logging.INFO else logging.INFO
+
+
+def _has_file_handler(target_logger: logging.Logger, filename: str) -> bool:
+  """Return True when a logger already writes to the given log file."""
+  return any(
+    isinstance(handler, logging.FileHandler)
+    and getattr(handler, 'baseFilename', None) == filename
+    for handler in target_logger.handlers
+  )
+
+
+def _attach_configured_file_handlers(target_logger: logging.Logger) -> None:
+  """Attach the app's configured file logging to a non-propagating logger."""
+  root_logger = logging.getLogger()
+  for handler in root_logger.handlers:
+    if not isinstance(handler, logging.FileHandler):
+      continue
+
+    filename = getattr(handler, 'baseFilename', None)
+    if filename and not _has_file_handler(target_logger, filename):
+      target_logger.addHandler(handler)
+
+  log_file = os.environ.get('BUILDER_APP_LOG_FILE')
+  if log_file and not _has_file_handler(target_logger, log_file):
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+    target_logger.addHandler(file_handler)
+
+
+def _ensure_logger_active(
+  target_logger: logging.Logger,
+  *,
+  set_propagate_false: bool = False,
+) -> None:
+  """Re-enable a logger and guarantee it has a working StreamHandler.
+
+  Why: uvicorn reconfigures Python logging at startup and can leave module
+  loggers with `disabled = True`. Code that runs in a freshly spawned thread
+  (see `_run_agent_in_fresh_loop`) inherits that state, so `logger.info()`
+  calls silently drop. This helper resets `disabled`, ensures a sensible
+  level, and attaches a fallback handler if none exist so logs always reach
+  stderr/the configured file handlers.
+  """
+  target_logger.disabled = False
+  target_logger.setLevel(_desired_logger_level())
+  if not target_logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+    target_logger.addHandler(handler)
+  if set_propagate_false:
+    _attach_configured_file_handlers(target_logger)
+    target_logger.propagate = False
+
+
+_ensure_logger_active(logger, set_propagate_false=True)
+
+
+def _log_llm_text(text: str) -> None:
+  """Log LLM text content with elevated level for error-like responses."""
+  normalized = text.lower()
+  if (
+    'error' in normalized
+    or 'fail' in normalized
+    or normalized.startswith('failed')
+  ):
+    logger.error('LLM error response: %s', text[:500])
+  else:
+    logger.info('LLM text: %s', text[:300])
+
 
 # Built-in Claude Code tools
 BUILTIN_TOOLS = [
@@ -169,6 +244,11 @@ def _run_agent_in_fresh_loop(message, options, result_queue, context, is_cancell
   """
   # Run in the copied context to preserve contextvars (like Databricks auth)
   def run_with_context():
+    # Re-enable the module logger inside this fresh thread. Uvicorn's logging
+    # config can leave the inherited logger with disabled=True, causing all
+    # `logger.info()` calls below to silently drop.
+    _ensure_logger_active(logger, set_propagate_false=True)
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
@@ -181,30 +261,57 @@ def _run_agent_in_fresh_loop(message, options, result_queue, context, is_cancell
       """Run agent using ClaudeSDKClient for streaming + MLflow tracing."""
       try:
         msg_count = 0
+        logger.info(
+          f'[AGENT] Opening ClaudeSDKClient (query length={len(message)} chars)'
+        )
         async with ClaudeSDKClient(options=options) as client:
+          logger.info('[AGENT] ClaudeSDKClient connected; sending query')
           await client.query(message)
+          logger.info('[AGENT] Query sent; awaiting response stream')
           async for msg in client.receive_response():
             msg_count += 1
             msg_type = type(msg).__name__
-            logger.info(f"[AGENT] Message #{msg_count}: {msg_type}")
+            logger.debug('[AGENT] Message #%s: %s %r', msg_count, msg_type, msg)
 
             if is_cancelled_fn():
-              logger.info("Agent cancelled by user request")
+              logger.info('Agent cancelled by user request')
               result_queue.put(('cancelled', None))
               return
             result_queue.put(('message', msg))
-        logger.info(f"[AGENT] Completed after {msg_count} messages")
+        logger.info(f'[AGENT] Completed after {msg_count} messages')
       except asyncio.CancelledError:
-        logger.warning("Agent query was cancelled (asyncio.CancelledError)")
-        result_queue.put(('error', Exception("Agent query cancelled - likely due to stream timeout or connection issue")))
+        logger.warning('Agent query was cancelled (asyncio.CancelledError)')
+        result_queue.put(
+          (
+            'error',
+            Exception(
+              'Agent query cancelled - likely due to stream timeout or connection issue'
+            ),
+          )
+        )
       except ConnectionError as e:
-        logger.error(f"Connection error in agent query: {e}")
-        result_queue.put(('error', Exception(f"Connection error: {e}. This may occur when tools take longer than the stream timeout (50s).")))
+        logger.error(f'Connection error in agent query: {e}')
+        result_queue.put(
+          (
+            'error',
+            Exception(
+              f'Connection error: {e}. This may occur when tools take longer '
+              'than the stream timeout (50s).'
+            ),
+          )
+        )
       except BrokenPipeError as e:
-        logger.error(f"Broken pipe in agent query: {e}")
-        result_queue.put(('error', Exception(f"Broken pipe: {e}. The agent subprocess communication was interrupted.")))
+        logger.error(f'Broken pipe in agent query: {e}')
+        result_queue.put(
+          (
+            'error',
+            Exception(
+              f'Broken pipe: {e}. The agent subprocess communication was interrupted.'
+            ),
+          )
+        )
       except Exception as e:
-        logger.exception(f"Unexpected error in agent query: {type(e).__name__}: {e}")
+        logger.exception(f'Unexpected error in agent query: {type(e).__name__}: {e}')
         result_queue.put(('error', e))
       finally:
         result_queue.put(('done', None))
@@ -295,6 +402,8 @@ async def stream_agent_response(
   Yields:
       Event dicts with 'type' field for frontend consumption
   """
+  _ensure_logger_active(logger, set_propagate_false=True)
+
   project_dir = get_project_directory(project_id)
 
   if session_id:
@@ -366,13 +475,19 @@ async def stream_agent_response(
     # Fall back to databricks_host/token for callers that don't split FMAPI creds.
     effective_fmapi_host = fmapi_host or databricks_host
     effective_fmapi_token = fmapi_token or databricks_token
+    custom_base_url = os.environ.get('ANTHROPIC_BASE_URL')
+    custom_api_key = os.environ.get('ANTHROPIC_API_KEY')
+
     if effective_fmapi_host and effective_fmapi_token:
       host = effective_fmapi_host.replace('https://', '').replace('http://', '').rstrip('/')
       anthropic_base_url = f'https://{host}/serving-endpoints/anthropic'
 
       claude_env['ANTHROPIC_BASE_URL'] = anthropic_base_url
-      claude_env['ANTHROPIC_API_KEY'] = effective_fmapi_token
       claude_env['ANTHROPIC_AUTH_TOKEN'] = effective_fmapi_token
+      # Claude CLI subprocess env inherits os.environ before options.env is
+      # applied. Blank API_KEY here so a shell/.env value cannot leak alongside
+      # AUTH_TOKEN and confuse custom gateways.
+      claude_env['ANTHROPIC_API_KEY'] = ''
 
       # Set the model to use (required for Databricks FMAPI)
       anthropic_model = os.environ.get('ANTHROPIC_MODEL', 'databricks-claude-opus-4-6')
@@ -386,7 +501,30 @@ async def stream_agent_response(
       claude_env['CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS'] = '1'
 
       logger.info(f'Configured Databricks model serving: {anthropic_base_url} with model {anthropic_model}')
-      logger.info(f'Claude env vars: BASE_URL={claude_env.get("ANTHROPIC_BASE_URL")}, MODEL={claude_env.get("ANTHROPIC_MODEL")}')
+      logger.info(
+        f'Claude env vars: BASE_URL={claude_env.get("ANTHROPIC_BASE_URL")}, '
+        f'AUTH_TOKEN_LEN={len(claude_env.get("ANTHROPIC_AUTH_TOKEN", ""))}, '
+        f'MODEL={claude_env.get("ANTHROPIC_MODEL")}'
+      )
+    elif custom_base_url and custom_api_key:
+      claude_env['ANTHROPIC_BASE_URL'] = custom_base_url
+      claude_env['ANTHROPIC_AUTH_TOKEN'] = custom_api_key
+      # Override inherited ANTHROPIC_API_KEY with an empty value in the Claude
+      # subprocess so custom gateways receive only the auth-token path.
+      claude_env['ANTHROPIC_API_KEY'] = ''
+
+      anthropic_model = os.environ.get('ANTHROPIC_MODEL')
+      if anthropic_model:
+        claude_env['ANTHROPIC_MODEL'] = anthropic_model
+
+      logger.info(
+        f'Configured custom Anthropic-compatible gateway: {custom_base_url}'
+      )
+      logger.info(
+        f'Claude env vars: BASE_URL={claude_env.get("ANTHROPIC_BASE_URL")}, '
+        f'AUTH_TOKEN_LEN={len(claude_env.get("ANTHROPIC_AUTH_TOKEN", ""))}, '
+        f'MODEL={claude_env.get("ANTHROPIC_MODEL")}'
+      )
 
     # Databricks SDK upstream tracking for subprocess user-agent attribution
     from databricks_tools_core.identity import PRODUCT_NAME, PRODUCT_VERSION
@@ -505,6 +643,7 @@ async def stream_agent_response(
           # Process content blocks
           for block in msg.content:
             if isinstance(block, TextBlock):
+              _log_llm_text(block.text)
               yield {
                 'type': 'text',
                 'text': block.text,
