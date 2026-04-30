@@ -13,3 +13,4 @@ Internal reference documentation for the AI Dev Kit monorepo. Top-level guidance
 | [`analyst-app/design.md`](analyst-app/design.md) | Design proposal for a business-oriented Databricks Analyst App for data scientists and business users |
 | [`analyst-app/system-design.md`](analyst-app/system-design.md) | Phase 0 system design decisions for the externally hosted Databricks Analyst App |
 | [`analyst-app/plan.md`](analyst-app/plan.md) | Build plan for the externally hosted Databricks Analyst App |
+| [`analyst-app/phase-0-action-plan.md`](analyst-app/phase-0-action-plan.md) | Detailed phase 0 action plan for agent runtime feasibility |

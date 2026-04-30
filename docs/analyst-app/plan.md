@@ -8,37 +8,39 @@ The app is not a Databricks App and should not depend on Databricks-native analy
 
 ## Build Strategy
 
-1. **Shortest useful loop first.** Deliver one web surface, one backend, one cluster execution path, and one evidence-backed answer flow.
-2. **Discovery quality before feature breadth.** Treat table and metric selection as the primary correctness problem.
-3. **Ranked context, not raw context.** Aggregate and score metadata, usage, annotations, metric semantics, and docs before retrieval.
-4. **Runtime probes as validation.** Use live Databricks checks to resolve uncertainty, not as the primary knowledge store.
-5. **Evals before scale.** Every new tool, prompt, workflow, and model change should be regression-tested against golden business questions.
-6. **Memory only with approval.** Corrections become reusable knowledge through an explicit proposal and review path.
+1. **Runtime foundation first.** Prove Claude Agent SDK integration, Databricks tool backing, and skill reuse before UI, packaging, or persistence work.
+2. **Shortest useful product loop next.** Deliver one web surface, one backend, one cluster execution path, and one evidence-backed Analysis Story flow.
+3. **Discovery quality before feature breadth.** Treat table and metric selection as the primary correctness problem.
+4. **Ranked context, not raw context.** Aggregate and score metadata, usage, annotations, metric semantics, and docs before retrieval.
+5. **Runtime probes as validation.** Use live Databricks checks to resolve uncertainty, not as the primary knowledge store.
+6. **Evals before scale.** Every new tool, prompt, workflow, and model change should be regression-tested against golden business questions.
+7. **Memory only with approval.** Corrections become reusable knowledge through an explicit proposal and review path.
 
-## Phase 0: Development Environment and Feasibility
+## Phase 0: Agent Runtime Feasibility
 
-Goal: lock the first deployable shape, set up the local development environment, and prove the key architecture decisions are feasible. Phase 0 decisions and environment checks are resolved in [`system-design.md`](system-design.md).
+Goal: prove the agent-runtime foundation before UI, Docker packaging, semantic indexing, or full application persistence. Phase 0 decisions and environment checks are resolved in [`system-design.md`](system-design.md), and the implementation checklist is detailed in [`phase-0-action-plan.md`](phase-0-action-plan.md).
 
 Deliverables:
 
-- Target deployment: local development, with frontend/backend packaged into a Docker image deployable to VM or AKS.
+- Agent runtime approach: Claude Agent SDK through an application-owned adapter, without a Claude Code subprocess in the request path.
+- Databricks tool integration decision: direct `databricks-tools-core`, `databricks-mcp-server`, or a hybrid adapter.
+- Skill reuse approach for loading, selecting, trimming, and injecting existing Databricks skills into Claude Agent SDK context.
+- Initial analyst-safe tool contracts independent of the backing implementation.
 - Authentication approach: PAT until phase 3.
-- Application database choice: PostgreSQL-compatible database with pgvector enabled.
-- Local database setup: Docker Compose or equivalent local service for PostgreSQL with pgvector, plus migrations that enable and validate the extension.
-- First business domain and seed metric set.
 - Initial execution policy: general-purpose cluster until phase 3, with timeouts, row limits, and cost confirmation threshold.
 - Decision on canonical metrics: UC metric views.
-- Agent runtime approach: Claude Agent SDK through an application-owned adapter, without a Claude Code subprocess in the request path.
-- Development environment setup: `.env.example`, local PostgreSQL + pgvector, backend health endpoint, frontend dev server, migrations, and Docker build path.
-- Environment and infrastructure evals: repeatable checks for config, PAT auth, cluster execution, UC metric views, pgvector retrieval, Claude Agent SDK integration, no Claude subprocess usage, MLflow tracing, and Docker packaging.
+- First business domain and seed metric set.
+- Backend-only feasibility tests for config, PAT auth, cluster execution, UC metadata, metric views, Claude Agent SDK integration, no Claude subprocess usage, direct tool adapter, MCP adapter, and skill selection.
 
 Exit criteria:
 
-- A developer can run frontend, backend, database migrations, and a cluster-backed Databricks SQL smoke test locally.
-- A developer can index and retrieve at least one context document through pgvector locally.
-- A developer can run a single preflight command or test suite that reports environment readiness with actionable failure messages.
-- The preflight suite verifies PAT identity, configured cluster availability, read-only cluster SQL execution, metric view access or an explicit "not configured" diagnostic, pgvector extension health, Claude Agent SDK viability, and Docker image build health.
-- Security model is documented with separate app, user, and worker identities.
+- A developer can run a backend-only phase 0 test suite that reports agent-runtime readiness with actionable failure messages.
+- Claude Agent SDK mocked smoke test passes, and optional live smoke test is documented and gated.
+- Tests prove the serving path does not invoke Claude Code as a subprocess.
+- Direct `databricks-tools-core` adapter and MCP adapter are compared through parity tests.
+- Phase 1 tool backing choice is recorded with evidence.
+- Skill registry and selector can load allowlisted local skills and render them into agent instructions.
+- Databricks smoke checks verify PAT identity, configured cluster availability, read-only cluster execution, UC metadata access, and metric view access or an explicit "not configured" diagnostic.
 
 ## Phase 1: Shortest Governed Analysis Loop
 
@@ -46,13 +48,13 @@ Goal: answer a simple business question using the current user's Databricks perm
 
 Scope:
 
-- React/Vite workbench with prompt bar, session list, answer view, and evidence drawer.
-- FastAPI backend with session/message/run APIs.
+- React/Vite workbench with global ask, left rail, Story Canvas, StoryCard, right inspect panel, and evidence drawer.
+- FastAPI backend with session/story/action/run APIs.
 - Databricks SQL execution on a configured general-purpose cluster.
 - Read-only SQL guardrails, row limits, timeouts, cancellation, and statement links.
 - Streaming run events over SSE or WebSocket.
 - Minimal analyst loop: understand, plan, generate SQL, execute, summarize, cite evidence.
-- Persistence for sessions, messages, runs, query runs, and artifacts.
+- Persistence for sessions, messages, stories, story events, evidence blocks, runs, query runs, and artifacts.
 
 Exit criteria:
 
@@ -233,7 +235,7 @@ MVP acceptance:
 - 20-50 golden questions in one business domain.
 - At least one canonical metric path.
 - Pass-through Databricks permissions.
-- Evidence-backed answers with SQL, result preview, row counts, caveats, and validation checks.
+- Evidence-backed Analysis Stories with SQL, result preview, row counts, caveats, trace, next moves, and validation checks.
 - MLflow traces and eval report for every release candidate.
 
 ## Major Risks
@@ -250,14 +252,14 @@ MVP acceptance:
 
 ## Near-Term Backlog
 
-1. Create `.env.example` and local setup scripts for backend, frontend, PostgreSQL, and pgvector.
-2. Define database schema and migrations for sessions, runs, query runs, context documents, artifacts, feedback, eval cases, workflows, and memories.
-3. Add local PostgreSQL + pgvector setup and migrations for context embeddings.
-4. Add environment and infrastructure preflight tests for config, PAT auth, cluster execution, metric views, pgvector, Claude Agent SDK, MLflow, and Docker packaging.
-5. Implement Databricks SQL execution adapter with read-only guardrails and statement links.
-6. Build the first context ingestion job for UC metadata and metric views.
-7. Create initial `search_context`, `describe_asset`, `execute_sql`, and `validate_sql` tool contracts.
-8. Build a deterministic eval runner with 20 seed questions.
-9. Implement the workbench answer layout and evidence drawer.
-10. Add MLflow tracing around every agent run.
-11. Package containers and deployment manifests for the chosen external runtime.
+1. Create `.env.example` for backend-only agent/runtime feasibility checks.
+2. Implement Claude Agent SDK adapter behind an app-owned `AgentRuntime` interface.
+3. Add no-Claude-Code-subprocess guard tests for the serving path.
+4. Implement direct `databricks-tools-core` adapter proof of concept.
+5. Implement MCP adapter proof of concept or in-process parity harness against `databricks-mcp-server`.
+6. Define initial analyst-safe app tool contracts for identity, compute readiness, cluster execution, UC metadata, and metric views.
+7. Add parity tests comparing direct and MCP-backed implementations.
+8. Add Databricks smoke tests for PAT identity, cluster execution, UC metadata, and metric views.
+9. Build skill registry, allowlist, selector, and prompt renderer for existing Databricks skills.
+10. Write the phase 0 decision record: Claude SDK pattern, tool backing choice, initial tool set, and skill reuse strategy.
+11. Move UI, Docker packaging, pgvector setup, and full persistence to later-phase implementation tasks.

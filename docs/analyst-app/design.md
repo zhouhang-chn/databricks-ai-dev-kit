@@ -4,7 +4,7 @@
 
 `databricks-analyst-app` is an externally hosted conversational analytics application for business-oriented analysis on Databricks data. It is designed for data scientists and business users who need trustworthy answers, repeatable analytical workflows, and clear evidence trails without manually finding tables, writing SQL, debugging joins, or building one-off charts.
 
-The app is inspired by the design lessons in [`docs/refer/Inside OpenAI’s in-house data agent.md`](../refer/Inside%20OpenAI%E2%80%99s%20in-house%20data%20agent.md) and the reverse analysis in [`docs/refer/openai_data_agent_reverse_analysis_zh.md`](../refer/openai_data_agent_reverse_analysis_zh.md): high-quality data agents need rich context, discovery-first table selection, closed-loop self-correction, reusable workflows, continuous evaluation, and pass-through security. The Databricks version should ground those ideas in Unity Catalog, metric views, general-purpose cluster execution for the first phases, app-managed semantic retrieval such as pgvector, a PostgreSQL-compatible application database, system tables, and governed enterprise data access.
+The app is inspired by the design lessons in [`docs/refer/Inside OpenAI’s in-house data agent.md`](../refer/Inside%20OpenAI%E2%80%99s%20in-house%20data%20agent.md), the reverse analysis in [`docs/refer/openai_data_agent_reverse_analysis_zh.md`](../refer/openai_data_agent_reverse_analysis_zh.md), and the frontend architecture guidance in [`docs/refer/data_agent_frontend_design_architecture_v3.pdf`](../refer/data_agent_frontend_design_architecture_v3.pdf): high-quality data agents need rich context, discovery-first table selection, closed-loop self-correction, reusable workflows, continuous evaluation, pass-through security, and a frontend that treats each answer as an operable analysis object. The Databricks version should ground those ideas in Unity Catalog, metric views, general-purpose cluster execution for the first phases, app-managed semantic retrieval such as pgvector, a PostgreSQL-compatible application database, system tables, and governed enterprise data access.
 
 ## Goals
 
@@ -13,6 +13,7 @@ The app is inspired by the design lessons in [`docs/refer/Inside OpenAI’s in-h
 - Reduce time spent on data discovery by retrieving governed context about tables, metrics, lineage, owners, usage, and prior analyses.
 - Prefer canonical metrics and certified data assets over ad hoc table exploration.
 - Support iterative analysis: follow-ups, drill-downs, cohort cuts, anomaly explanations, and comparisons should preserve context.
+- Treat each agent answer as an Analysis Story with evidence, trace, context, next moves, and save/share affordances rather than as a disposable chat message.
 - Package repeated analyses into reusable workflows such as weekly business reviews, launch readouts, churn diagnostics, and metric QA.
 - Build trust through transparent evidence, query validation, evals, user feedback, and memory proposals that require approval.
 
@@ -99,23 +100,29 @@ The app should compare candidates by:
 
 ## User Experience
 
-The first screen should be a workbench, not a marketing page:
+The first screen should be an analysis workbench, not a chat-only page or a marketing page. The center of the product is a Story Canvas: a list or grid of Analysis Stories that can be inspected, continued, forked, pinned, saved, and shared.
 
-- Prompt bar: "Ask a business question"
-- Context chips: workspace, catalog/schema, business domain, date range, selected workflow
-- Suggested workflows: business review, launch readout, anomaly investigation, cohort analysis, metric definition, table comparison
-- Recent analyses with status, owner, saved workflow, and published report links
-- Saved memory and context warnings when relevant
+Desktop shell:
 
-Answer layout:
+- Top bar: workspace switcher, global ask box, time range, save, share, and account/status controls.
+- Left rail: new analysis, recent threads, saved stories, dashboards/canvases, workflows, and memory.
+- Main canvas: user question, streaming StoryCards, evidence blocks, next moves, and inline follow-up composer.
+- Right inspect panel: filters, trace inspector, evidence details, metadata, context, artifacts, and actions for the active story.
 
-1. **Summary:** 2-5 bullets focused on the business decision.
-2. **Key numbers:** KPI cards with date range, comparison, and delta.
-3. **Visuals:** trend, breakdown, distribution, or cohort chart as appropriate.
-4. **Drivers:** ranked contributors with quantified impact.
-5. **Assumptions and caveats:** defaults, filters, freshness, missing data, statistical limits.
-6. **Evidence:** tables used, metric views, Databricks execution links, row counts, query text, result preview.
-7. **Next steps:** drill-down buttons and workflow actions.
+Responsive behavior:
+
+- Left and right panels are collapsible on desktop; the main canvas remains available.
+- On mobile, the main view becomes a single-column Story Canvas, navigation moves to bottom navigation or a drawer, and inspect opens as a half-sheet.
+- Closing a side panel should never remove the ability to continue the current analysis.
+
+StoryCard layout:
+
+1. **Question:** the normalized business question and active context.
+2. **Conclusion:** current best answer in one short section.
+3. **Evidence:** KPI, chart, table, narrative, caveat, and query/result evidence blocks.
+4. **Trace:** visible but compact list of analysis actions already taken.
+5. **Next moves:** a small set of explicit actions such as break down, compare, drill down, change metric, apply filter, validate hypothesis, or save story.
+6. **Governance:** source assets, metric views, freshness, permissions, execution links, and memory/context used.
 
 Advanced mode for data scientists:
 
@@ -125,6 +132,73 @@ Advanced mode for data scientists:
 - show intermediate result tables
 - export to notebook
 - save as workflow
+
+### Analysis Story Object Model
+
+Analysis Story is the frontend's first-class business object. Chat messages can exist for conversational continuity, but persistence, inspection, sharing, and follow-up should be anchored on stories.
+
+```ts
+type AnalysisStory = {
+  id: string
+  question: string
+  status: 'planning' | 'running' | 'done' | 'error'
+  summary?: string
+  conclusion?: string
+  evidence: EvidenceBlock[]
+  trace: AnalysisStep[]
+  nextMoves: NextMove[]
+  context: AnalysisContext
+  layout: StoryLayout
+  persistedAs?: { type: 'dashboard' | 'saved_story'; id: string }
+}
+
+type AnalysisContext = {
+  assetId?: string
+  timeRange?: TimeRange
+  filters: Filter[]
+  metrics: string[]
+  dimensions: string[]
+  selection?: SelectionState
+}
+```
+
+Important modeling rule: context must be explicit. The app should not depend on implicit chat history to know the active filters, time range, selected metric, evidence block, or semantic asset.
+
+### Frontend Architecture
+
+The frontend should use a layered architecture:
+
+| Layer | Responsibility |
+|-------|----------------|
+| Host shell | Routing, auth boundary, workspace switching, theme, navigation, responsive shell |
+| AI surface | Global ask, contextual ask buttons, suggested next moves, inline composer |
+| Story/Canvas layer | StoryCard rendering, evidence blocks, canvas layout, saved story/dashboard composition |
+| Application state | Workspace state, conversation state, UI state, active story and selected evidence |
+| Event bus/controller | Standard analysis actions, streaming event reducer, user/agent action coordination |
+| Runtime boundary | Backend API client; sends analysis intent and context rather than SQL or component-level instructions |
+
+State should be split at minimum into:
+
+- `WorkspaceStore`: stories, story order, active story, canvas layout.
+- `ConversationStore`: user/assistant turns and branch history.
+- `UIStore`: right panel tab, panel open state, selected evidence block, local loading state.
+
+The same action vocabulary should drive both agent trace and user next moves. Initial actions should include `OBSERVE_TREND`, `BREAKDOWN`, `DRILL_DOWN`, `COMPARE`, `FORM_HYPOTHESIS`, `VALIDATE_HYPOTHESIS`, `PIVOT`, `CHANGE_METRIC`, and `APPLY_FILTER`.
+
+### Streaming Strategy
+
+Story streaming should fill the card progressively:
+
+1. `story.created`
+2. normalized question and context
+3. first trace step
+4. first evidence block
+5. additional trace/evidence updates
+6. conclusion update
+7. next moves update
+8. final governance and artifact links
+
+This keeps the product from feeling like a blank waiting state and makes the analysis process inspectable.
 
 ## Architecture
 
@@ -159,6 +233,7 @@ Recommended implementation shape:
 - Start with a single main analyst agent loop rather than a premature multi-agent system; specialize through tools, context, workflows, and validation gates first.
 - Narrow the agent tool surface to analyst-safe, orthogonal operations with minimal overlap.
 - Use the Claude Agent SDK through an application-owned adapter; avoid running a Claude Code instance as a subprocess in the serving path.
+- Keep frontend components behind a runtime boundary: UI emits analysis intent, context, and action events; backend owns planning, SQL generation, execution, and validation.
 - Add a context retrieval service and a workflow registry.
 - Store analysis sessions, query runs, feedback, approved memories, workflow definitions, context documents, and embeddings in a PostgreSQL-compatible application database with pgvector enabled.
 - Use MLflow tracing and evaluations for quality measurement.
@@ -271,13 +346,17 @@ Application database tables:
 |-------|---------|
 | `analysis_sessions` | Conversation/session metadata, user, title, domain, status |
 | `analysis_messages` | User and assistant messages |
+| `analysis_stories` | First-class story objects with question, status, conclusion, context, layout, and saved state |
 | `analysis_runs` | One agent execution with plan, status, cost, latency |
 | `query_runs` | SQL text, cluster ID, statement/run ID, row count, result preview, validation state |
+| `evidence_blocks` | KPI, chart, table, narrative, caveat, and query/result blocks attached to stories |
+| `story_events` | Streaming story lifecycle events and normalized analysis actions |
 | `analysis_artifacts` | Charts, reports, exported files, notebook exports |
 | `context_documents` | Compact indexed context metadata and ACL pointers |
 | `memories` | Approved learned facts with scope, owner, TTL, source run, review state |
 | `workflow_templates` | Parameterized recurring analyses |
 | `workflow_runs` | Workflow execution state and outputs |
+| `canvases` | Saved or active story layouts that can later become dashboard-like assets |
 | `feedback` | User rating, corrections, comments, linked eval case |
 | `eval_cases` | Golden prompts, expected SQL/results, tags, owner |
 
@@ -293,10 +372,13 @@ Result data should not be copied wholesale into the application database by defa
 | `POST /api/sessions` | Create analysis session |
 | `GET /api/sessions` | List recent sessions |
 | `GET /api/sessions/{id}` | Session details |
-| `POST /api/sessions/{id}/messages` | Start an analysis run |
-| `GET /api/runs/{id}/stream` | SSE stream of plan/tool/result events |
+| `POST /api/sessions/{id}/stories` | Create an analysis story from a question and explicit context |
+| `POST /api/stories/{id}/actions` | Continue, fork, filter, drill, compare, or validate from an existing story |
+| `GET /api/runs/{id}/stream` | SSE stream of story, trace, evidence, conclusion, and next-move events |
 | `POST /api/runs/{id}/cancel` | Cancel run |
 | `POST /api/runs/{id}/feedback` | Capture feedback and corrections |
+| `POST /api/canvases` | Save or update a story canvas |
+| `POST /api/stories/{id}/pin` | Pin a story to the active canvas |
 | `GET /api/workflows` | List workflow templates |
 | `POST /api/workflows/{id}/run` | Run a workflow |
 | `POST /api/memories/proposals/{id}/approve` | Approve proposed memory |
@@ -455,7 +537,7 @@ Included:
 - context retrieval over UC metadata, comments, tags, query history summaries, metric views, and curated docs
 - SQL generation and bounded execution
 - validation checks for date filters, row counts, nulls, join cardinality, freshness, and metric reconciliation
-- answer cards with charts, SQL evidence, and caveats
+- StoryCards with charts, SQL evidence, trace, next moves, and caveats
 - personal memory proposals
 - workflow templates for business review, anomaly investigation, and metric/table discovery
 - MLflow traces and offline eval harness
@@ -487,7 +569,7 @@ Deferred:
 4. Add PAT-based Databricks auth, cluster selection, and read-only SQL execution.
 5. Build context index tables and a pgvector-backed retrieval service.
 6. Implement analyst agent loop with plan, SQL, validation, execution, synthesis, and streaming.
-7. Build UI for answer cards, charts, evidence drawer, advanced SQL inspection, and feedback.
+7. Build UI for StoryCards, Story Canvas, charts, right inspect panel, advanced SQL inspection, and feedback.
 8. Add workflow registry and three MVP workflows.
 9. Add memory proposal/approval for personal memories.
 10. Instrument MLflow traces.
