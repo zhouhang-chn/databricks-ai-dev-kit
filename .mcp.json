@@ -1,9 +1,14 @@
 {
   "mcpServers": {
     "databricks": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/.venv/bin/python",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/databricks-mcp-server/run_server.py"],
-      "defer_loading": true
+      "command": "/Users/zhouhang/abi/code/databricks/ai-dev-kit/.ai-dev-kit/.venv/bin/python",
+      "args": [
+        "/Users/zhouhang/abi/code/databricks/ai-dev-kit/.ai-dev-kit/repo/databricks-mcp-server/run_server.py"
+      ],
+      "defer_loading": true,
+      "env": {
+        "DATABRICKS_CONFIG_PROFILE": "DEFAULT"
+      }
     }
   }
 }
