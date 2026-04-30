@@ -6,6 +6,15 @@
 import type { Cluster, Conversation, Execution, Project, UserInfo, Warehouse } from '@/lib/types';
 
 const API_BASE = '/api';
+const STREAM_RETRY_DELAYS_MS = [500, 1000, 2000, 3000, 5000];
+const STREAM_LOST_MESSAGE = (
+  'Execution was interrupted because the backend server restarted. '
+  + 'Start a new message to continue.'
+);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function request<T>(
   path: string,
@@ -223,6 +232,7 @@ async function streamProgress(params: {
   } = params;
 
   let lastTs: number = lastEventTimestamp ?? 0;
+  let reconnectFailures = 0;
 
   while (true) {
     if (signal?.aborted) return;
@@ -241,9 +251,28 @@ async function streamProgress(params: {
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
         const message = (errBody.detail ?? res.statusText) as string;
+
+        if (
+          res.status === 404
+          && typeof message === 'string'
+          && message.includes('Stream not found')
+        ) {
+          onEvent({ type: 'error', error: STREAM_LOST_MESSAGE });
+          await onDone();
+          return;
+        }
+
+        if (res.status >= 500 && reconnectFailures < STREAM_RETRY_DELAYS_MS.length) {
+          await sleep(STREAM_RETRY_DELAYS_MS[reconnectFailures]);
+          reconnectFailures += 1;
+          continue;
+        }
+
         onError(new Error(typeof message === 'string' ? message : JSON.stringify(message)));
         return;
       }
+
+      reconnectFailures = 0;
 
       const reader = res.body?.getReader();
       if (!reader) {
@@ -289,6 +318,11 @@ async function streamProgress(params: {
       }
     } catch (e) {
       if ((e as Error).name === 'AbortError') return;
+      if (reconnectFailures < STREAM_RETRY_DELAYS_MS.length) {
+        await sleep(STREAM_RETRY_DELAYS_MS[reconnectFailures]);
+        reconnectFailures += 1;
+        continue;
+      }
       onError(e instanceof Error ? e : new Error(String(e)));
       return;
     }

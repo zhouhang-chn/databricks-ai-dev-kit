@@ -11,6 +11,7 @@ The async pattern:
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -411,9 +412,35 @@ async def stream_progress(execution_id: str, body: StreamProgressRequest):
     stream = await stream_manager.get_stream(execution_id)
 
     if not stream:
-        raise HTTPException(
-            status_code=404,
-            detail=f'Stream not found: {execution_id}'
+        logger.warning(
+            f'Stream {execution_id} not found in memory; returning terminal SSE event'
+        )
+
+        async def missing_stream_events():
+            """Tell the client the in-memory stream disappeared."""
+            yield sse_event({
+                'type': 'error',
+                'error': (
+                    'Execution stream is no longer available. The backend server '
+                    'may have restarted, so the in-memory agent process was '
+                    'interrupted. Start a new message to continue.'
+                ),
+            })
+            yield sse_event({
+                'type': 'stream.completed',
+                'is_error': True,
+                'is_cancelled': False,
+            })
+            yield 'data: [DONE]\n\n'
+
+        return StreamingResponse(
+            missing_stream_events(),
+            media_type='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'X-Accel-Buffering': 'no',
+            },
         )
 
     async def generate_events():
@@ -589,6 +616,33 @@ async def get_conversation_executions(
     try:
         exec_storage = ExecutionStorage(user_email, project_id, conversation_id)
         active = await exec_storage.get_active()
+
+        if active and not in_memory_active:
+            error_message = (
+                'Execution interrupted because the backend server restarted. '
+                'The in-memory agent process is no longer running.'
+            )
+            logger.warning(
+                f'Marking orphaned execution {active.id} as error: {error_message}'
+            )
+            await exec_storage.add_events(
+                active.id,
+                [
+                    {
+                        'timestamp': time.time(),
+                        'type': 'error',
+                        'error': error_message,
+                    },
+                    {
+                        'timestamp': time.time(),
+                        'type': 'stream.completed',
+                        'is_error': True,
+                    },
+                ],
+            )
+            await exec_storage.update_status(active.id, 'error', error_message)
+            active = None
+
         recent = await exec_storage.get_recent(limit=5)
     except Exception as e:
         # Table might not exist yet (migration pending) - log and continue
