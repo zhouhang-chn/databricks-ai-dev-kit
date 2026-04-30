@@ -39,7 +39,7 @@ async function request<T>(
 // --- Config / user ---
 
 export async function fetchUserInfo(): Promise<UserInfo> {
-  return request<UserInfo>('/me');
+  return request<UserInfo>('/config/me');
 }
 
 // --- Projects ---

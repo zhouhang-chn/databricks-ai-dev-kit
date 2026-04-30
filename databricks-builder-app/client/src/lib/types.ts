@@ -2,7 +2,7 @@
  * Types matching the backend API and DB models.
  */
 
-/** Current user info from GET /api/me */
+/** Current user info from GET /api/config/me */
 export interface UserInfo {
   user: string;
   workspace_url: string | null;
