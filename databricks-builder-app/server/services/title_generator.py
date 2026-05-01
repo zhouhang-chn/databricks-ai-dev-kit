@@ -3,8 +3,9 @@
 Uses Claude to generate concise, descriptive titles for conversations
 based on the first user message.
 
-Supports both direct Anthropic API and Databricks FMAPI (Foundation Model API).
-When running in Databricks Apps, uses the user's OAuth token for authentication.
+Supports direct Anthropic API and Anthropic-compatible gateways configured via
+ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY. Databricks FMAPI is only used as a
+fallback when explicit Anthropic environment configuration is absent.
 """
 
 import asyncio
@@ -35,8 +36,10 @@ def _create_client(
 ) -> anthropic.AsyncAnthropic:
   """Create an Anthropic client configured for the current context.
 
-  When databricks_host and databricks_token are provided, configures the client
-  to use Databricks FMAPI. Otherwise falls back to direct Anthropic API.
+  Explicit ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY configuration takes
+  precedence over Databricks credentials. When that env config is absent and
+  databricks_host/token are provided, falls back to Databricks FMAPI. Otherwise
+  uses direct Anthropic API.
 
   Args:
       databricks_host: Databricks workspace URL (e.g., https://xxx.cloud.databricks.com)
@@ -45,7 +48,36 @@ def _create_client(
   Returns:
       Configured AsyncAnthropic client
   """
-  # Check if we should use Databricks FMAPI
+  # Environment-based Anthropic-compatible gateway config wins over Databricks
+  # app credentials because some deployments do not have the Databricks
+  # model-serving gateway available.
+  api_key = os.environ.get('ANTHROPIC_API_KEY')
+  base_url = os.environ.get('ANTHROPIC_BASE_URL')
+  auth_token = os.environ.get('ANTHROPIC_AUTH_TOKEN')
+  gateway_token = api_key or auth_token
+
+  if base_url and gateway_token:
+    logger.info(
+      'Title generation using Anthropic-compatible gateway: '
+      f'BASE_URL={base_url}, AUTH_TOKEN_LEN={len(gateway_token)}, MODEL={_get_model()}'
+    )
+    client = anthropic.AsyncAnthropic(
+      auth_token=gateway_token,
+      base_url=base_url,
+    )
+    # The Anthropic Python SDK reads ANTHROPIC_API_KEY from os.environ even
+    # when auth_token is passed. Clear the client field so custom gateways see
+    # only the Authorization bearer token, not an extra X-Api-Key header.
+    client.api_key = None
+    return client
+
+  if base_url and not gateway_token:
+    logger.warning(
+      'ANTHROPIC_BASE_URL is set but no ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN '
+      'is available; falling back to other title generation auth'
+    )
+
+  # Check if we should use Databricks FMAPI as a fallback.
   if databricks_host and databricks_token:
     # Build Databricks model serving endpoint URL
     # Format: https://<workspace>/serving-endpoints/anthropic
@@ -54,18 +86,6 @@ def _create_client(
 
     return anthropic.AsyncAnthropic(
       api_key=databricks_token,
-      base_url=base_url,
-    )
-
-  # Fall back to environment-based configuration
-  api_key = os.environ.get('ANTHROPIC_API_KEY')
-  base_url = os.environ.get('ANTHROPIC_BASE_URL')
-  auth_token = os.environ.get('ANTHROPIC_AUTH_TOKEN')
-
-  if base_url:
-    # Databricks FMAPI mode via environment
-    return anthropic.AsyncAnthropic(
-      api_key=auth_token or api_key or 'unused',
       base_url=base_url,
     )
 

@@ -16,18 +16,54 @@ _LOG_DIR.mkdir(parents=True, exist_ok=True)
 _LOG_FILE = _LOG_DIR / f'server_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
 os.environ['BUILDER_APP_LOG_FILE'] = str(_LOG_FILE)
 
-_log_formatter = logging.Formatter(_LOG_FORMAT)
-_stream_handler = logging.StreamHandler()
-_stream_handler.setFormatter(_log_formatter)
-_file_handler = logging.FileHandler(_LOG_FILE, encoding='utf-8')
-_file_handler.setFormatter(_log_formatter)
+
+def _parse_log_level(value: str | None) -> int | None:
+  """Parse a standard logging level name or number."""
+  if not value:
+    return None
+  value = value.strip()
+  if value.isdigit():
+    return int(value)
+  level = getattr(logging, value.upper(), None)
+  return level if isinstance(level, int) else None
+
 
 _root_logger = logging.getLogger()
-_root_level = (
+_explicit_log_level = _parse_log_level(
+  os.environ.get('BUILDER_APP_LOG_LEVEL') or os.environ.get('LOG_LEVEL')
+)
+_root_level = _explicit_log_level or (
   _root_logger.getEffectiveLevel()
   if _root_logger.getEffectiveLevel() < logging.INFO
   else logging.INFO
 )
+
+_log_formatter = logging.Formatter(_LOG_FORMAT)
+_stream_handler = logging.StreamHandler()
+_stream_handler.setFormatter(_log_formatter)
+_stream_handler.setLevel(_root_level)
+_file_handler = logging.FileHandler(_LOG_FILE, encoding='utf-8')
+_file_handler.setFormatter(_log_formatter)
+_file_handler.setLevel(_root_level)
+
+
+def _ensure_root_logging_handlers() -> None:
+  """Keep root logging level and app handlers intact after server reconfiguration."""
+  _root_logger.setLevel(_root_level)
+  if not any(
+    isinstance(handler, logging.FileHandler)
+    and Path(handler.baseFilename) == _LOG_FILE
+    for handler in _root_logger.handlers
+  ):
+    _root_logger.addHandler(_file_handler)
+  if not any(
+    isinstance(handler, logging.StreamHandler)
+    and not isinstance(handler, logging.FileHandler)
+    for handler in _root_logger.handlers
+  ):
+    _root_logger.addHandler(_stream_handler)
+
+
 logging.basicConfig(
   level=_root_level,
   format=_LOG_FORMAT,
@@ -37,20 +73,7 @@ logging.basicConfig(
   ],
 )
 
-if _root_logger.getEffectiveLevel() > logging.INFO:
-  _root_logger.setLevel(logging.INFO)
-if not any(
-  isinstance(handler, logging.FileHandler)
-  and Path(handler.baseFilename) == _LOG_FILE
-  for handler in _root_logger.handlers
-):
-  _root_logger.addHandler(_file_handler)
-if not any(
-  isinstance(handler, logging.StreamHandler)
-  and not isinstance(handler, logging.FileHandler)
-  for handler in _root_logger.handlers
-):
-  _root_logger.addHandler(_stream_handler)
+_ensure_root_logging_handlers()
 logging.getLogger(__name__).info(f'Logging to {_LOG_FILE}')
 
 from dotenv import load_dotenv
@@ -66,6 +89,24 @@ from .services.backup_manager import start_backup_worker, stop_backup_worker
 from .services.skills_manager import copy_skills_to_app
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_app_loggers_active() -> None:
+  """Undo Uvicorn disabling or raising levels on application loggers."""
+  _ensure_root_logging_handlers()
+  prefixes = ('server', 'databricks_tools_core', 'databricks_mcp_server')
+  logger_dict = logging.Logger.manager.loggerDict
+  for name, candidate in logger_dict.items():
+    if not isinstance(candidate, logging.Logger):
+      continue
+    if not any(name == prefix or name.startswith(f'{prefix}.') for prefix in prefixes):
+      continue
+    candidate.disabled = False
+    if candidate.level == logging.NOTSET or candidate.level > _root_level:
+      candidate.setLevel(_root_level)
+
+
+_ensure_app_loggers_active()
 
 # Load environment variables
 env_local_loaded = load_dotenv(dotenv_path='.env.local')
@@ -88,6 +129,7 @@ async def lifespan(app: FastAPI):
   """Async lifespan context manager for startup/shutdown events."""
   global _mcp_lifespan_task, _mcp_shutdown_event
 
+  _ensure_app_loggers_active()
   logger.info('Starting application...')
 
   # Copy skills from databricks-skills to local cache

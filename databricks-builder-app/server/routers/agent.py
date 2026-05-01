@@ -410,9 +410,13 @@ async def stream_progress(execution_id: str, body: StreamProgressRequest):
     """
     stream_manager = get_stream_manager()
     stream = await stream_manager.get_stream(execution_id)
+    logger.info(
+        f'SSE stream_progress requested for {execution_id} '
+        f'from cursor={body.last_event_timestamp or 0.0}'
+    )
 
     if not stream:
-        logger.warning(
+        logger.error(
             f'Stream {execution_id} not found in memory; returning terminal SSE event'
         )
 
@@ -455,6 +459,11 @@ async def stream_progress(execution_id: str, body: StreamProgressRequest):
 
             # Send new events
             for event in new_events:
+                event_type = event.get('type')
+                if event_type == 'error':
+                    logger.error(f'SSE event for {execution_id}: {event}')
+                else:
+                    logger.debug(f'SSE event for {execution_id}: {event}')
                 yield sse_event(event)
 
             # Update timestamp
@@ -463,10 +472,18 @@ async def stream_progress(execution_id: str, body: StreamProgressRequest):
 
             # Check if stream is complete or cancelled
             if stream.is_complete or stream.is_cancelled:
+                logger.info(
+                    f'SSE stream_progress completing for {execution_id}: '
+                    f'is_error={stream.error is not None}, is_cancelled={stream.is_cancelled}'
+                )
                 # Drain any events added between last poll and completion
                 remaining, _ = stream.get_events_since(last_timestamp)
                 for event in remaining:
                     if event.get('type') != 'stream.completed':
+                        if event.get('type') == 'error':
+                            logger.error(f'SSE final event for {execution_id}: {event}')
+                        else:
+                            logger.debug(f'SSE final event for {execution_id}: {event}')
                         yield sse_event(event)
                 yield sse_event({
                     'type': 'stream.completed',
@@ -479,6 +496,10 @@ async def stream_progress(execution_id: str, body: StreamProgressRequest):
             # Check if we've exceeded the SSE window (50 seconds)
             elapsed = (datetime.now() - start_time).total_seconds()
             if elapsed > SSE_WINDOW_SECONDS:
+                logger.info(
+                    f'SSE stream_progress window expired for {execution_id}; '
+                    f'client should reconnect from cursor={last_timestamp}'
+                )
                 # Send reconnect signal with last timestamp
                 yield sse_event({
                     'type': 'stream.reconnect',
