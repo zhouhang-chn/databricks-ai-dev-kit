@@ -4,7 +4,7 @@ This section captures the analysis and design for `databricks-builder-app-oai`,
 a new sibling version of `databricks-builder-app` that depends on the OpenAI
 Agents SDK instead of the Claude Agent SDK.
 
-The directory name follows the requested path, `docs/agnets-sdk`.
+The canonical directory is `docs/agents-sdk`.
 
 ## Contents
 

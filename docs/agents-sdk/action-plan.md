@@ -16,8 +16,8 @@ implementation until the OpenAI version is complete and separately validated.
 
 ## Source Documents
 
-- Existing analysis: [`../agnets-sdk/analysis.md`](../agnets-sdk/analysis.md)
-- Existing design: [`../agnets-sdk/design.md`](../agnets-sdk/design.md)
+- Existing analysis: [`analysis.md`](analysis.md)
+- Existing design: [`design.md`](design.md)
 - Current Builder App docs: [`../builder-app/README.md`](../builder-app/README.md)
 - OpenAI Agents SDK docs:
   - [Intro](https://openai.github.io/openai-agents-python/)
@@ -50,20 +50,16 @@ Goal: make the target path and documentation structure unambiguous.
 Tasks:
 
 - Create `databricks-builder-app-oai/` as a sibling of `databricks-builder-app/`.
-- Decide whether to move the existing misspelled docs directory
-  `docs/agnets-sdk/` to `docs/agents-sdk/`.
-- If moving docs, update all links in `docs/README.md`,
-  `docs/agents-sdk/README.md`, and this action plan.
-- Add a short `docs/agents-sdk/README.md` if the canonical docs path becomes
-  `docs/agents-sdk/`.
+- Use `docs/agents-sdk/` as the canonical OpenAI Agents SDK docs path.
+- Update all links in `docs/README.md`, `docs/agents-sdk/README.md`, and this
+  action plan.
 - Add a tracking issue or checklist entry for every open question in
   `design.md`.
 
 Acceptance gates:
 
 - `find docs -maxdepth 2 -type d | sort` shows the intended canonical docs path.
-- `rg -n "agnets-sdk|agents-sdk" docs` shows no stale links except intentional
-  compatibility notes.
+- A repository-wide search for the misspelled docs path returns no results.
 - `git status --short` shows only planned files staged for the setup change.
 
 ## Phase 1: Scaffold `databricks-builder-app-oai`
