@@ -12,6 +12,7 @@ The canonical directory is `docs/agents-sdk`.
 |------|-------|
 | [analysis.md](analysis.md) | Current Builder App coupling to Claude, target `databricks-builder-app-oai` scope, OpenAI Agents SDK capability fit, migration constraints, and risks |
 | [design.md](design.md) | Proposed `databricks-builder-app-oai` runtime architecture, tool strategy, persistence, streaming, deployment, and rollout plan |
+| [action-plan.md](action-plan.md) | Implementation phases, acceptance gates, and validation checklist |
 
 ## Source References
 

@@ -16,6 +16,31 @@ in the new folder. Instead, `databricks-builder-app-oai` constructs an OpenAI
 conversation memory through an OpenAI Agents SDK session keyed by the app
 conversation.
 
+## Decisions
+
+These decisions are inputs to Phase 0, not follow-up questions:
+
+1. **Primary model provider:** the deployed app uses the company AI Gateway's
+   OpenAI-compatible endpoint. Field Engineers should not need to bring their
+   own public OpenAI key for the standard setup.
+2. **Primary model:** `deepseek-v4-pro` is the default agent model until a
+   better AI Gateway model is validated.
+3. **Cheap auxiliary model:** `deepseek-v4-flash` is the default model for title
+   generation and similar short, low-risk auxiliary generations.
+4. **Configuration source:** local and deployed environments configure model
+   access through `.env.local` or app secrets using `OPENAI_BASE_URL`,
+   `OPENAI_API_KEY`, `OPENAI_AGENT_MODEL=deepseek-v4-pro`, and
+   `OPENAI_TITLE_MODEL=deepseek-v4-flash`.
+5. **Fallback provider path:** direct OpenAI API usage is a development or
+   customer-specific fallback, not the default Field Engineering deployment
+   path. It uses the same `OPENAI_*` variables with `OPENAI_BASE_URL` unset.
+6. **State lane:** the app uses OpenAI Agents SDK sessions keyed by the Builder
+   App conversation. It does not use `previous_response_id` or OpenAI
+   server-managed `conversation_id` for the MVP runtime.
+7. **MCP gateway:** the optional `/mcp` gateway is a product surface that must
+   be ported explicitly; it is not covered by merely replacing the in-app agent
+   runtime.
+
 ## Goals
 
 - Create `databricks-builder-app-oai` as the OpenAI Agents SDK target folder.
@@ -27,15 +52,13 @@ conversation.
 - Preserve cross-workspace Databricks tool auth.
 - Make runtime behavior testable without launching a provider-specific
   subprocess.
-- Keep the path open for SandboxAgent once beta risk and Databricks Apps
-  deployment behavior are validated.
 
 ## Non-goals
 
 - Rebuilding the React product surface.
 - Mutating the existing `databricks-builder-app` in place.
 - Removing Claude runtime support from the legacy `databricks-builder-app`.
-- Replacing `databricks-tools-core` or the external MCP gateway.
+- Replacing `databricks-tools-core`.
 - Enabling arbitrary shell execution in MVP.
 - Guaranteeing resume compatibility with Claude SDK internal session state.
 - Depending on OpenAI SandboxAgent in the first production version.
@@ -85,6 +108,7 @@ databricks-builder-app-oai/server/
       databricks_openai.py     # OpenAI function tools for Databricks tools
       operation_tools.py       # check/list long-running operations
     skills_registry.py         # runtime-neutral skill loading/rendering
+  mcp_gateway.py               # optional external MCP gateway port
 ```
 
 The exact module names can be adjusted to repo style during implementation, but
@@ -137,7 +161,10 @@ The OpenAI implementation can translate this into SDK-specific types internally.
 For each run:
 
 1. Resolve the project directory.
-2. Set Databricks auth contextvars for tool calls.
+2. Set Databricks auth contextvars for tool calls by calling
+   `set_databricks_auth(...)` from `databricks_tools_core.auth`. Cross-workspace
+   runs must force the target workspace credentials, and cleanup must call
+   `clear_databricks_auth()` in a `finally` block.
 3. Load enabled skills and render selected guidance.
 4. Build the system instructions from:
    - existing `get_system_prompt()` output, updated to remove Claude wording
@@ -152,11 +179,14 @@ For each run:
 10. Map SDK stream events to Builder App events.
 11. Clear Databricks auth contextvars.
 
+Any executor thread used for sync Databricks tools must run inside a copied
+`contextvars` context so the auth state set by `set_databricks_auth()` is
+available inside the worker thread.
+
 Sketch:
 
 ```python
-from agents import Agent, Runner
-from agents.run import RunConfig
+from agents import Agent, Runner, RunConfig
 
 
 agent = Agent(
@@ -191,14 +221,17 @@ last visible token.
 
 ## Model Configuration
 
-Use explicit OpenAI runtime variables:
+Use explicit OpenAI runtime variables. The standard Field Engineering path is
+the company AI Gateway's OpenAI-compatible endpoint with `deepseek-v4-pro`.
+Local development should configure these in `.env.local`; deployed apps should
+use Databricks App secrets or equivalent deployment-time environment variables.
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | Model API credential |
-| `OPENAI_AGENT_MODEL` | Default model for the Builder App agent |
-| `OPENAI_TITLE_MODEL` | Optional cheaper model for title generation |
-| `OPENAI_BASE_URL` | Optional only for validated OpenAI-compatible endpoints |
+| `OPENAI_BASE_URL` | AI Gateway OpenAI-compatible endpoint URL for the standard deployment path |
+| `OPENAI_API_KEY` | AI Gateway credential, or direct OpenAI key only when `OPENAI_BASE_URL` is unset |
+| `OPENAI_AGENT_MODEL` | Default model for the Builder App agent; defaults to `deepseek-v4-pro` |
+| `OPENAI_TITLE_MODEL` | Title and cheap auxiliary generation model; defaults to `deepseek-v4-flash` |
 | `OPENAI_AGENTS_DISABLE_TRACING` | Provider-supported tracing disable switch |
 | `BUILDER_AGENT_RUNTIME` | Optional migration flag; new version defaults to `openai_agents` |
 
@@ -212,7 +245,8 @@ Remove runtime dependency on:
 - `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`
 
 Databricks tool auth remains separate and should continue using the existing
-workspace token resolution path.
+workspace token resolution path. Databricks user tokens must never be passed to
+the AI Gateway or direct OpenAI client.
 
 ## Project File Tools
 
@@ -255,13 +289,16 @@ Implementation options:
 2. Wrap selected `databricks-tools-core` functions directly with typed
    `@function_tool` wrappers.
 
-The first pass should prefer option 1 for coverage parity with the current app,
-then move hot or sensitive tools to typed direct wrappers if schema quality,
-latency, or auth control requires it.
+The first pass should prefer typed direct wrappers for high-use and
+security-sensitive parity tools. A generated FastMCP adapter can be used for
+coverage only after schema-fidelity tests cover the JSON Schema differences that
+commonly break tool calls, including `additionalProperties`, `default`, nullable
+types, `required`, and `oneOf`/`anyOf` handling.
 
 Tool wrapper requirements:
 
-- Copy Databricks auth context into worker threads.
+- Copy the Databricks auth context created by `set_databricks_auth()` into
+  worker threads before running sync tools.
 - Parse JSON strings for list/dict inputs where legacy tool behavior requires it.
 - Normalize empty strings to `None` where Databricks APIs expect null.
 - Run sync tools in an executor.
@@ -282,6 +319,13 @@ Inputs:
 - `databricks-skills`
 - optional project `.agents/skills`
 - optional legacy project `.claude/skills` during migration
+
+Skill source precedence on name collision:
+
+1. Project `.agents/skills`
+2. App-bundled `databricks-builder-app-oai/skills`
+3. Repository `databricks-skills`
+4. Legacy project `.claude/skills`
 
 Outputs:
 
@@ -318,15 +362,16 @@ Recommended schema changes:
 |-------|--------|---------|
 | `conversations` | `agent_runtime` | `openai_agents` for new conversations |
 | `conversations` | `agent_session_id` | SDK session key |
-| `conversations` | `claude_session_id` | Legacy only during migration |
+| `conversations` | `claude_session_id` | Legacy only if the source app has or copied this column |
 
 For local development, `SQLiteSession` is acceptable. For deployed Builder App,
 use `SQLAlchemySession` against the existing async database URL or implement a
 custom session adapter over the app's SQLAlchemy models.
 
-Do not combine OpenAI Agents SDK sessions with server-managed `conversation_id`
-or `previous_response_id` in the same run unless a specific runtime path is
-chosen and tested. The SDK docs call out these as separate state strategies.
+The MVP chooses SDK sessions as the single model-memory lane. The Builder App
+`conversation_id` remains the product identity used to derive the SDK session
+key; the runtime must not use OpenAI `previous_response_id` or OpenAI
+server-managed conversation IDs in the same path.
 
 ## Streaming Event Mapping
 
@@ -352,6 +397,10 @@ Add new event types only when the UI needs them. Candidate future additions:
 - `agent_updated`
 - `handoff`
 
+OpenAI `stream_events()` output is non-replayable. The existing `ActiveStream`
+window buffer is therefore load-bearing for `stream.reconnect`; do not remove or
+shorten that buffer without adding another replay source.
+
 ## Cancellation
 
 The current `ActiveStream` cancellation flag should remain. The OpenAI runtime
@@ -359,7 +408,9 @@ should check it while consuming `stream_events()`.
 
 When cancelled:
 
-- Prefer the SDK streaming result cancellation API if the run is active.
+- Call `result.cancel()` on the active streamed run when available, then finish
+  the SDK-required stream cleanup path while suppressing further model-visible
+  events.
 - Stop emitting model-visible events after cancellation.
 - Persist a `cancelled` event.
 - Clear Databricks auth context.
@@ -372,9 +423,10 @@ Replace `server/services/title_generator.py` with OpenAI-backed title generation
 
 Recommended behavior:
 
-- Use `OPENAI_TITLE_MODEL` if set, otherwise a cheaper configured fallback.
-- Call the OpenAI client directly for a single short generation, or use a small
-  `Agent` with no tools.
+- Use `OPENAI_TITLE_MODEL`, defaulting to `deepseek-v4-flash`.
+- Call the OpenAI client directly for a single short generation. Do not use an
+  Agents SDK run for titles unless title generation later needs tool or tracing
+  parity.
 - Keep the existing title length and fallback behavior.
 - Do not include Databricks tokens in title-generation input.
 
@@ -446,6 +498,13 @@ trace URLs unless explicitly added as an admin/debug feature.
 the implementation changes. Do not introduce npm lockfiles or npm commands for
 client work; this repository's instructions require pnpm.
 
+## Optional SandboxAgent Follow-Up
+
+SandboxAgent is out of scope for MVP. After the plain OpenAI Agents SDK runtime
+proves parity with project files, Databricks tools, persistence, and deployment,
+evaluate SandboxAgent as a separate feature branch for richer coding workflows.
+No phase in the MVP should depend on sandbox-native file or skill behavior.
+
 ## Migration Plan
 
 ### Phase 0: Runtime Spike
@@ -479,7 +538,10 @@ Exit criteria:
 
 ### Phase 2: Databricks Tool Parity
 
-- Generate OpenAI function tools from existing Databricks tool registrations.
+- Implement typed direct wrappers for core Databricks tools.
+- Use generated FastMCP-derived schemas only after schema-fidelity tests pass
+  for `additionalProperties`, defaults, nullable fields, required fields, and
+  `oneOf`/`anyOf`.
 - Preserve async operation tracker.
 - Add parity tests for tool names, schemas, and basic outputs.
 - Run live gated smoke tests for `execute_sql`, volume file listing, and compute
@@ -509,7 +571,6 @@ Exit criteria:
 - Add cancellation tests.
 - Add long-running tool tests.
 - Add OpenAI tracing configuration tests.
-- Evaluate SandboxAgent behind a feature flag for richer coding workflows.
 - Add browser regression tests after confirming backend `127.0.0.1:8000` and the
   frontend server under test are reachable.
 
@@ -563,13 +624,10 @@ Browser tests:
   app-local execution records only?
 - Should SDK session storage use built-in `SQLAlchemySession` tables or a custom
   adapter over existing app tables?
-- Which model should be the default for Builder App coding and Databricks tasks?
 - Should `databricks-builder-app-oai` eventually replace
   `databricks-builder-app` in docs and deployment scripts, or remain a parallel
   app indefinitely?
-- Can any Databricks-hosted OpenAI-compatible endpoint support the exact SDK
-  model provider path required by the Agents SDK?
-- When should SandboxAgent graduate from experiment to supported runtime mode?
+- When should SandboxAgent be evaluated as a separate post-MVP feature?
 
 ## Implementation Checklist
 
@@ -580,6 +638,7 @@ Browser tests:
 - [ ] Add project file function tools.
 - [ ] Add runtime-neutral skill registry.
 - [ ] Add Databricks OpenAI function tool adapter.
+- [ ] Port optional MCP gateway.
 - [ ] Add OpenAI session factory.
 - [ ] Add OpenAI title generator.
 - [ ] Add migrations for runtime/session columns.

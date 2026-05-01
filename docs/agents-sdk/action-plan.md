@@ -35,6 +35,10 @@ implementation until the OpenAI version is complete and separately validated.
   `databricks-builder-app-oai/`.
 - Preserve the current browser API and SSE event contract unless an additive
   change is required.
+- Use AI Gateway's OpenAI-compatible endpoint as the standard model path,
+  configured through `.env.local` or app secrets with `OPENAI_BASE_URL`,
+  `OPENAI_API_KEY`, `OPENAI_AGENT_MODEL=deepseek-v4-pro`, and
+  `OPENAI_TITLE_MODEL=deepseek-v4-flash`.
 - Enforce tool access by constructing the actual OpenAI tool list per run, not
   by prompt instruction only.
 - Keep OpenAI model credentials separate from Databricks tool credentials.
@@ -120,10 +124,10 @@ Tasks:
   - keep `mlflow` until the tracing path is decided
 - Regenerate `requirements.txt` for the new app.
 - Add OpenAI-specific environment variables to examples and config docs:
-  - `OPENAI_API_KEY`
-  - `OPENAI_AGENT_MODEL`
-  - `OPENAI_TITLE_MODEL`
   - `OPENAI_BASE_URL`
+  - `OPENAI_API_KEY`
+  - `OPENAI_AGENT_MODEL=deepseek-v4-pro`
+  - `OPENAI_TITLE_MODEL=deepseek-v4-flash`
   - `OPENAI_AGENTS_DISABLE_TRACING`
   - `BUILDER_AGENT_RUNTIME=openai_agents`
 - Remove active use of:
@@ -146,8 +150,8 @@ Acceptance gates:
 
 - Backend imports without `claude_agent_sdk`.
 - Backend imports without `anthropic`.
-- Config validation fails clearly when `OPENAI_API_KEY` or the selected model is
-  missing.
+- Config validation fails clearly when the standard AI Gateway profile lacks
+  `OPENAI_BASE_URL`, `OPENAI_API_KEY`, or the selected model.
 - Secrets are redacted in config diagnostics.
 
 ## Phase 3: Runtime Adapter
@@ -164,8 +168,10 @@ Tasks:
   - `OpenAIAgentRuntime`
   - OpenAI `Agent` construction
   - `Runner.run_streamed()` execution
-  - Databricks auth context setup and cleanup
-  - cancellation checks
+  - Databricks auth context setup and cleanup through
+    `set_databricks_auth()` and `clear_databricks_auth()` from
+    `databricks_tools_core.auth`
+  - cancellation checks that call `result.cancel()` on active streamed runs
 - Add `server/services/agent_runtime/openai_events.py` to map SDK events into
   current Builder App events:
   - `text_delta`
@@ -181,6 +187,8 @@ Tasks:
 - Route `/api/invoke_agent` through the runtime interface.
 - Keep `ActiveStreamManager` and SSE windowing unchanged unless tests prove an
   SDK-specific issue.
+- Treat OpenAI `stream_events()` as non-replayable; the existing
+  `ActiveStreamManager` window buffer remains required for stream reconnects.
 
 Unit tests:
 
@@ -245,6 +253,9 @@ Tasks:
   - `databricks-skills`
   - optional project `.agents/skills`
   - optional legacy project `.claude/skills` for migration only
+- Enforce skill source precedence on name collision:
+  project `.agents/skills` > app-bundled `databricks-builder-app-oai/skills` >
+  repository `databricks-skills` > legacy project `.claude/skills`.
 - Parse `SKILL.md` frontmatter and Markdown content.
 - Sync enabled skills into `project/.agents/skills`.
 - Render selected skill guidance into the agent instructions.
@@ -273,11 +284,12 @@ current app.
 Tasks:
 
 - Add `server/services/tools/databricks_openai.py`.
-- Load existing FastMCP registrations or direct `databricks-tools-core`
-  functions.
-- Generate OpenAI function tool schemas from validated metadata.
+- Implement typed direct `@function_tool` wrappers for core parity tools.
+- Use generated FastMCP-derived OpenAI schemas only for coverage gaps after
+  schema-fidelity tests pass.
 - Preserve existing behavior:
-  - copy Databricks auth context into worker threads
+  - copy the `set_databricks_auth()` context into worker threads before running
+    sync Databricks tools
   - parse JSON-like string arguments for list/dict fields
   - normalize empty strings to `None`
   - run sync tools in an executor
@@ -290,7 +302,9 @@ Tasks:
 Unit tests:
 
 - Tool names match the current Builder App allowlist where expected.
-- Generated schemas are valid OpenAI function tool schemas.
+- Typed wrappers expose valid OpenAI function tool schemas.
+- FastMCP-derived schema conversion covers `required`, optional/default values,
+  `additionalProperties`, nullable fields, and `oneOf`/`anyOf`.
 - Disabled skills remove Databricks tools before agent construction.
 - Long-running tool handoff returns an operation ID.
 - Operation status polling returns completed and failed results.
@@ -317,8 +331,8 @@ Tasks:
 - Add migration columns:
   - `conversations.agent_runtime`
   - `conversations.agent_session_id`
-- Keep `conversations.claude_session_id` only for legacy compatibility if copied
-  from the current app.
+- Do not assume `conversations.claude_session_id` exists in the current source
+  app; keep it only if a copied schema already has the legacy column.
 - Add `server/services/agent_runtime/openai_sessions.py`.
 - Use a stable session key:
 
@@ -331,8 +345,9 @@ builder:{project_id}:{conversation_id}
   - custom session adapter over app-managed SQLAlchemy models
 - Keep `messages` and `executions` as the product record for replay and
   debugging.
-- Do not mix SDK sessions with server-managed `conversation_id` or
-  `previous_response_id` unless that path is deliberately selected and tested.
+- Use OpenAI Agents SDK sessions as the single model-memory lane. The app
+  `conversation_id` only derives the SDK session key; do not use
+  `previous_response_id` or OpenAI server-managed conversation IDs in MVP.
 
 Tests:
 
@@ -354,7 +369,10 @@ Tasks:
 
 - Replace `server/services/title_generator.py` with OpenAI-backed title
   generation.
-- Use `OPENAI_TITLE_MODEL` when set.
+- Use `OPENAI_TITLE_MODEL=deepseek-v4-flash` for title generation and similar
+  cheap auxiliary generations.
+- Call the OpenAI client directly for title generation; do not use a separate
+  Agents SDK run unless titles later need tool or tracing parity.
 - Keep existing title length and fallback behavior.
 - Do not include Databricks tokens in title-generation input.
 - Keep app execution records as the UI/debug source of truth.
@@ -377,7 +395,32 @@ Acceptance gates:
 - No `mlflow.anthropic.autolog()` remains in the target app.
 - No Anthropic client is imported by title generation.
 
-## Phase 9: Frontend and Documentation Cutover
+## Phase 9: Optional MCP Gateway Port
+
+Goal: preserve the Builder App's optional `/mcp` product surface without relying
+on Claude Agent SDK plumbing.
+
+Tasks:
+
+- Port `server/mcp_gateway.py` into `databricks-builder-app-oai`.
+- Ensure the gateway uses the same Databricks tool registry, skill allowlist
+  rules, and auth separation as the in-app OpenAI runtime.
+- Remove any Claude-specific tool exposure or `claude-agent-sdk` assumptions.
+- Preserve the existing `--enable-mcp` or environment-controlled startup path.
+- Add gateway tests for:
+  - tool listing
+  - a simple tool call with mocked Databricks auth
+  - disabled skill/tool filtering
+  - startup disabled by default when the flag is absent
+
+Acceptance gates:
+
+- The app starts normally with the MCP gateway disabled.
+- The app starts with the MCP gateway enabled and no Claude SDK imports.
+- External MCP clients can list the expected Databricks tools and call a mocked
+  tool.
+
+## Phase 10: Frontend and Documentation Cutover
 
 Goal: make the new app read like an OpenAI Agents SDK app without changing the
 core user workflow.
@@ -388,7 +431,7 @@ Tasks:
 - Update docs pages rendered inside the app.
 - Add `/api/config/runtime` if the UI needs runtime metadata.
 - Update local development docs for:
-  - OpenAI env vars
+  - AI Gateway OpenAI-compatible env vars
   - pnpm commands
   - backend/frontend service checks
 - Update deployment docs for `databricks-builder-app-oai`.
@@ -414,7 +457,7 @@ Acceptance gates:
 - Project creation, conversation streaming, tool event display, and file changes
   work in browser tests.
 
-## Phase 10: Deployment and Release Readiness
+## Phase 11: Deployment and Release Readiness
 
 Goal: prove the new sibling app is deployable and supportable.
 
@@ -425,7 +468,6 @@ Tasks:
   `databricks-builder-app-oai`.
 - Verify Lakebase/PostgreSQL migrations run on startup.
 - Verify project backup worker runs.
-- Verify optional MCP gateway still starts if enabled.
 - Add smoke test script for deployed app health.
 - Document rollback: continue using legacy `databricks-builder-app`.
 
@@ -450,6 +492,7 @@ Acceptance gates:
 | File tools | `server/services/tools/project_files.py` | path escape or oversized file handling |
 | Databricks tools | `server/services/tools/databricks_openai.py` | schema parity and long-running operations |
 | Skills | `server/services/skills_registry.py` | degraded agent quality from poor context selection |
+| MCP gateway | `server/mcp_gateway.py` | preserving external tool surface without Claude-specific wrappers |
 | Persistence | `server/db/models.py`, `alembic/versions/*` | mixing product history with SDK session memory |
 | Frontend | `client/src/*` | UI coupled to Claude-specific event assumptions |
 | Deployment | `scripts/*`, `databricks.yml`, `app.yaml.example` | wrong env vars or missing OpenAI secrets |
@@ -460,6 +503,8 @@ The first useful milestone is not full feature parity. It is:
 
 - `databricks-builder-app-oai` exists and imports.
 - OpenAI Agents SDK is the only agent runtime dependency.
+- AI Gateway config works with `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and
+  `OPENAI_AGENT_MODEL=deepseek-v4-pro`.
 - `/api/invoke_agent` starts a mocked or live OpenAI run.
 - SSE emits normalized `text_delta`, `tool_use`, `tool_result`, and `result`
   events.
@@ -467,8 +512,9 @@ The first useful milestone is not full feature parity. It is:
 - At least one Databricks tool works through the OpenAI runtime.
 - Conversation history persists in app tables.
 
-After this milestone, broaden Databricks tool parity, frontend polish,
-deployment automation, and optional SandboxAgent experiments.
+After this milestone, broaden Databricks tool parity, frontend polish, and
+deployment automation. Treat any SandboxAgent exploration as a separate
+post-MVP branch.
 
 ## Final Validation Checklist
 
@@ -485,4 +531,5 @@ deployment automation, and optional SandboxAgent experiments.
 - [ ] Live Databricks smoke tests pass when credentials are present.
 - [ ] OpenAI tracing can be disabled.
 - [ ] Secrets are redacted from logs, traces, and execution records.
+- [ ] Optional MCP gateway starts and serves tools when enabled.
 - [ ] Legacy `databricks-builder-app` remains untouched and runnable.

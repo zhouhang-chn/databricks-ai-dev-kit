@@ -47,9 +47,13 @@ Most of this should be ported into `databricks-builder-app-oai`. The
 runtime-specific source parts that need replacement sit mostly in:
 
 - `server/services/agent.py`
+- `server/services/active_stream.py`
 - `server/services/databricks_tools.py`
+- `server/services/operation_tracker.py`
+- `server/services/system_prompt.py`
 - `server/services/title_generator.py`
 - `server/services/skills_manager.py`
+- `server/mcp_gateway.py`
 - `server/db/models.py`
 - docs and UI copy that name Claude Code or Claude Agent SDK
 
@@ -66,9 +70,9 @@ runtime-specific source parts that need replacement sit mostly in:
 | Skills | Copies selected skills into project `.claude/skills` and relies on Claude Code's `Skill` tool | OpenAI version needs a runtime-neutral skill registry that injects selected skill guidance into instructions, or uses SandboxAgent Skills if that beta path is adopted |
 | Sessions | Stores a Claude SDK `session_id` for resume in `conversations.claude_session_id` | Introduce runtime-neutral `agent_session_id` and `agent_runtime`; use OpenAI Agents SDK sessions keyed by conversation ID |
 | Streaming | Converts Claude message block types into normalized app events such as `text_delta`, `tool_use`, `tool_result`, and `result` | Keep the app event contract, but map from OpenAI `stream_events()` event types |
-| Model auth | Builds Anthropic-compatible env vars such as `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, and `ANTHROPIC_MODEL`, usually pointed at Databricks FMAPI's Anthropic endpoint | Replace with `OPENAI_API_KEY`, `OPENAI_BASE_URL` only when a compatible endpoint is supported, and `OPENAI_AGENT_MODEL` or similar |
+| Model auth | Builds Anthropic-compatible env vars such as `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, and `ANTHROPIC_MODEL`, usually pointed at the current AI Gateway Anthropic-compatible route | Replace with AI Gateway OpenAI-compatible config: `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_AGENT_MODEL=deepseek-v4-pro`, and `OPENAI_TITLE_MODEL=deepseek-v4-flash`; direct OpenAI remains a fallback only when `OPENAI_BASE_URL` is unset |
 | Tracing | Enables `mlflow.anthropic.autolog()` before creating `ClaudeSDKClient` | Use OpenAI Agents SDK built-in tracing and evaluate a custom trace processor or MLflow OpenAI tracing path separately |
-| Title generation | Uses the Anthropic client and Anthropic-compatible endpoint | Replace with the OpenAI client or a small Agents SDK run with a cheaper title model |
+| Title generation | Uses the Anthropic client and Anthropic-compatible endpoint | Replace with the OpenAI client directly, using `OPENAI_TITLE_MODEL=deepseek-v4-flash` |
 | User-facing copy | Docs and UI pages say Claude Code, Claude Agent SDK, Anthropic, and `.claude/skills` | Update to OpenAI Agents SDK, agent runtime, and runtime-neutral skills paths |
 
 ## OpenAI Agents SDK Capability Fit
@@ -180,14 +184,22 @@ them for Claude. The OpenAI version has two practical paths:
    integration, likely `MCPServerStreamableHttp` if using the Builder App's `/mcp`
    gateway or `MCPServerStdio` for a local process.
 
-For the in-app runtime, direct function tools are the better default because the
-app already owns auth context, skill-based tool filtering, long-running operation
-tracking, and output normalization. The MCP gateway should remain for external
-clients.
+For the in-app runtime, typed direct function wrappers are the better default
+for high-use and security-sensitive parity tools because the app already owns
+auth context, skill-based tool filtering, long-running operation tracking, and
+output normalization. A generated FastMCP-to-OpenAI adapter can fill coverage
+gaps, but only behind schema-fidelity tests. The JSON Schema dialect differences
+around `additionalProperties`, `default`, nullable fields, required fields, and
+`oneOf`/`anyOf` are a concrete implementation risk, not a documentation detail.
+The MCP gateway should remain for external clients and needs its own port.
 
 The OpenAI version should keep these current behaviors:
 
 - Build the registered tool list per run based on enabled skills.
+- Call `set_databricks_auth()` and `clear_databricks_auth()` from
+  `databricks_tools_core.auth` around each run.
+- Copy the Databricks auth `contextvars` context into executor threads before
+  running sync Databricks tools.
 - Convert empty strings and JSON-like string arguments where needed.
 - Execute blocking Databricks calls off the async event loop.
 - Preserve the async operation handoff for long-running tools.
@@ -228,6 +240,10 @@ registry:
 - Render selected skill guidance into the agent instructions with source names.
 - Preserve the current enabled-skills UI and API contract where possible.
 
+When multiple sources define the same skill name, precedence should be:
+project `.agents/skills`, app-bundled `databricks-builder-app-oai/skills`,
+repository `databricks-skills`, then legacy project `.claude/skills`.
+
 For SandboxAgent experiments, the same registry can provide the host skill
 source consumed by sandbox-native Skills capability.
 
@@ -251,8 +267,9 @@ Required schema changes:
   conversations.
 - Add `conversations.agent_session_id`, likely equal to a stable conversation
   key such as `conversation:{uuid}`.
-- Keep `claude_session_id` during migration only if legacy conversations need to
-  be displayed or resumed by the old runtime.
+- Keep `claude_session_id` during migration only if the copied source schema
+  actually has that legacy column; the current source app may not, so the OpenAI
+  migration should be purely additive.
 - Optionally add a separate SDK session storage table if the built-in
   `SQLAlchemySession` should not create its own tables in the app database.
 
@@ -289,16 +306,19 @@ The new runtime needs an event adapter from OpenAI stream events:
 | SDK interruption or approval request | `system` first, future `approval_required` if UI support is added |
 
 The current SSE windowing and `ActiveStreamManager` are runtime-neutral and
-should remain.
+should remain. OpenAI `stream_events()` output is non-replayable, so the
+existing ActiveStream window buffer is load-bearing for `stream.reconnect`.
 
 ## Authentication Analysis
 
 Split authentication into two independent channels:
 
-1. **Model auth.** Used only for OpenAI model calls. Configure with
-   `OPENAI_API_KEY`, `OPENAI_ORG_ID` if needed, and `OPENAI_AGENT_MODEL`.
-   `OPENAI_BASE_URL` should be optional and used only for endpoints validated as
-   compatible with the selected Agents SDK model provider path.
+1. **Model auth.** Used only for model calls. The standard deployment path uses
+   AI Gateway's OpenAI-compatible endpoint configured through `.env.local` or
+   app secrets: `OPENAI_BASE_URL`, `OPENAI_API_KEY`,
+   `OPENAI_AGENT_MODEL=deepseek-v4-pro`, and
+   `OPENAI_TITLE_MODEL=deepseek-v4-flash`.
+   Direct OpenAI is a fallback path when `OPENAI_BASE_URL` is unset.
 2. **Databricks tool auth.** Continue using the existing user/workspace token
    resolution, contextvars, and cross-workspace mode for Databricks SDK calls.
 
@@ -329,17 +349,19 @@ Open questions:
 | Claude built-in file tools have no exact OpenAI plain-agent equivalent | Agent cannot modify project files with current prompts | Implement app-owned file tools before switching runtime |
 | Skill loading changes from host-managed `.claude/skills` to app-managed instructions | Lower answer quality if too much or too little skill content is injected | Build skill registry with token budgets and evals |
 | Existing conversations have Claude session IDs | Old conversations cannot be resumed by OpenAI session memory | Display history from app messages; start new OpenAI session on first post-migration turn |
-| Databricks FMAPI Anthropic endpoint does not map to OpenAI Responses API | Model calls fail if config is only swapped | Use direct OpenAI API first; validate any OpenAI-compatible Databricks route separately |
-| Tool schemas differ between FastMCP, Claude wrappers, and OpenAI function tools | Model emits malformed tool inputs | Generate schemas from typed wrappers and test each tool shape |
+| AI Gateway OpenAI-compatible endpoint diverges from SDK expectations | Model calls fail even with `OPENAI_BASE_URL` and `deepseek-v4-pro` configured | Gate Phase 0 on a live AI Gateway smoke test and keep direct OpenAI as a development fallback |
+| Tool schemas differ between FastMCP, Claude wrappers, and OpenAI function tools | Model emits malformed tool inputs | Prefer typed wrappers for core tools; use generated schemas only after fidelity tests for defaults, nullable fields, `additionalProperties`, required fields, and `oneOf`/`anyOf` |
 | Long-running Databricks tools may exceed model/tool loop timeouts | Streams stall or runs fail | Preserve async operation tracker and polling tools |
 | Provider tracing may capture sensitive prompts or tool data | Data governance concern | Make tracing configurable and document data handling |
-| Sandbox agents are beta | Runtime churn and deployment uncertainty | Keep sandbox out of MVP; evaluate behind a feature flag |
+| Sandbox agents are beta | Runtime churn and deployment uncertainty | Keep sandbox out of MVP; evaluate in a separate post-MVP branch |
 
 ## Recommended Direction
 
 Build `databricks-builder-app-oai` as an `openai_agents` runtime with:
 
 - `agents.Agent` and `Runner.run_streamed()`.
+- AI Gateway OpenAI-compatible model config from `.env.local` or app secrets,
+  defaulting to `deepseek-v4-pro`.
 - App-owned project file tools.
 - Direct OpenAI function tools for Databricks operations.
 - Runtime-neutral skill registry.
