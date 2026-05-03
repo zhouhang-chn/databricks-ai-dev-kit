@@ -7,6 +7,13 @@ from typing import Any, List, Optional
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, LargeBinary, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from ..project_config import (
+  DEFAULT_PROJECT_STATUS,
+  DEFAULT_PROJECT_TYPE,
+  DEFAULT_RELEASE_ID,
+  parse_project_settings,
+)
+
 
 def generate_uuid() -> str:
   return str(uuid.uuid4())
@@ -23,15 +30,35 @@ class Base(DeclarativeBase):
 
 
 class Project(Base):
-  """Project model - user-scoped container for conversations."""
+  """Project model - user-scoped work product and conversation container."""
 
   __tablename__ = 'projects'
 
   id: Mapped[str] = mapped_column(String(50), primary_key=True, default=generate_uuid)
   name: Mapped[str] = mapped_column(String(255), nullable=False)
+  description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  project_type: Mapped[str] = mapped_column(
+    String(50),
+    nullable=False,
+    default=DEFAULT_PROJECT_TYPE,
+  )
+  status: Mapped[str] = mapped_column(
+    String(50),
+    nullable=False,
+    default=DEFAULT_PROJECT_STATUS,
+  )
+  settings_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  current_release_id: Mapped[str] = mapped_column(
+    String(100),
+    nullable=False,
+    default=DEFAULT_RELEASE_ID,
+  )
   user_email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
   created_at: Mapped[datetime] = mapped_column(
     DateTime(timezone=True), default=utc_now, nullable=False
+  )
+  updated_at: Mapped[datetime] = mapped_column(
+    DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
   )
 
   # Relationships
@@ -46,8 +73,14 @@ class Project(Base):
     return {
       'id': self.id,
       'name': self.name,
+      'description': self.description,
+      'project_type': self.project_type,
+      'status': self.status,
+      'settings': parse_project_settings(self.settings_json),
+      'current_release_id': self.current_release_id,
       'user_email': self.user_email,
       'created_at': self.created_at.isoformat() if self.created_at else None,
+      'updated_at': self.updated_at.isoformat() if self.updated_at else None,
       'conversation_count': len(self.conversations) if self.conversations else 0,
     }
 

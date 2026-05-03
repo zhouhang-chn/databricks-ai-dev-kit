@@ -3,7 +3,15 @@
  * All routes are under /api (proxied in dev).
  */
 
-import type { Cluster, Conversation, Execution, Project, UserInfo, Warehouse } from '@/lib/types';
+import type {
+  Cluster,
+  Conversation,
+  Execution,
+  Project,
+  ProjectSettings,
+  UserInfo,
+  Warehouse,
+} from '@/lib/types';
 
 const API_BASE = '/api';
 const STREAM_RETRY_DELAYS_MS = [500, 1000, 2000, 3000, 5000];
@@ -69,6 +77,22 @@ export async function createProject(name: string): Promise<Project> {
 
 export async function renameProject(projectId: string, name: string): Promise<void> {
   return request(`/projects/${projectId}`, { method: 'PATCH', body: { name } });
+}
+
+export interface UpdateProjectPayload {
+  name?: string;
+  description?: string | null;
+  project_type?: string;
+  status?: string;
+  current_release_id?: string;
+  settings?: Partial<ProjectSettings>;
+}
+
+export async function updateProject(
+  projectId: string,
+  payload: UpdateProjectPayload
+): Promise<Project> {
+  return request<Project>(`/projects/${projectId}`, { method: 'PATCH', body: payload });
 }
 
 export async function deleteProject(projectId: string): Promise<void> {

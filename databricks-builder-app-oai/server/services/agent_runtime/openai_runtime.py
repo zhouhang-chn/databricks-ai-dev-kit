@@ -95,13 +95,17 @@ class OpenAIAgentRuntime:
     )
     logger.info(
       'OpenAI runtime request context: session=%s project_dir=%s message_len=%s '
-      'enabled_skills=%s tracing_disabled=%s mlflow_tracing=%s',
+      'enabled_skills=%s tracing_disabled=%s mlflow_tracing=%s project_type=%s '
+      'project_status=%s release=%s',
       session_id,
       project_dir,
       len(request.message),
       '<project-default>' if request.enabled_skills is None else len(request.enabled_skills),
       tracing_disabled,
       mlflow_tracing,
+      (request.project_context or {}).get('project_type'),
+      (request.project_context or {}).get('status'),
+      (request.project_context or {}).get('release_id'),
     )
 
     set_databricks_auth(
@@ -157,6 +161,7 @@ class OpenAIAgentRuntime:
         workspace_url=request.databricks_host,
         enabled_skills=enabled_skills,
         skill_guidance=skill_guidance,
+        project_context=request.project_context,
       )
 
       tools = [
@@ -223,6 +228,9 @@ class OpenAIAgentRuntime:
             'conversation_id': conversation_id,
             'workspace_url': request.databricks_host or '',
             'runtime': 'openai_agents',
+            'project_type': str((request.project_context or {}).get('project_type') or ''),
+            'project_status': str((request.project_context or {}).get('status') or ''),
+            'project_release_id': str((request.project_context or {}).get('release_id') or ''),
           },
         ),
       )

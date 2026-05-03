@@ -1,5 +1,7 @@
 """System prompt for the Databricks AI Dev Kit agent."""
 
+from typing import Any
+
 from .skills_manager import get_available_skills
 
 # Mapping of user request patterns to skill names for the selection guide.
@@ -16,6 +18,109 @@ _SKILL_GUIDE_ENTRIES = [
 ]
 
 
+def _format_project_value(value: object) -> str:
+  """Format a project context value for prompt rendering."""
+  return str(value).strip()
+
+
+def _format_project_list(values: object, *, limit: int = 8) -> str:
+  """Render a bounded list of project context values."""
+  if not isinstance(values, list) or not values:
+    return ''
+
+  rendered = [f'- `{_format_project_value(value)}`' for value in values[:limit] if value]
+  if len(values) > limit:
+    rendered.append(f'- ... {len(values) - limit} more')
+  return '\n'.join(rendered)
+
+
+def _render_project_context(project_context: dict[str, Any] | None) -> str:
+  """Render project-management context for the agent prompt."""
+  if not project_context:
+    return ''
+
+  settings = project_context.get('settings') or {}
+  if not isinstance(settings, dict):
+    settings = {}
+
+  resources = project_context.get('effective_resources') or {}
+  if not isinstance(resources, dict):
+    resources = {}
+
+  overrides = project_context.get('conversation_overrides') or {}
+  if not isinstance(overrides, dict):
+    overrides = {}
+
+  semantics = settings.get('semantics') or {}
+  if not isinstance(semantics, dict):
+    semantics = {}
+
+  policy = settings.get('agent_policy') or {}
+  if not isinstance(policy, dict):
+    policy = {}
+
+  resource_rows = [
+    f'- **{key}:** `{value}`'
+    for key, value in resources.items()
+    if value
+  ]
+  override_rows = [
+    f'- **{key}:** `{value}`'
+    for key, value in overrides.items()
+    if value
+  ]
+
+  metric_views = _format_project_list(semantics.get('metric_views'))
+  preferred_tables = _format_project_list(semantics.get('preferred_tables'))
+  caveats = _format_project_list(semantics.get('known_caveats'), limit=5)
+
+  glossary_rows: list[str] = []
+  glossary = semantics.get('glossary')
+  if isinstance(glossary, dict):
+    for term, definition in list(glossary.items())[:8]:
+      if term and definition:
+        glossary_rows.append(f'- **{term}:** {definition}')
+
+  policy_rows = [
+    f'- **Role:** `{policy.get("role")}`' if policy.get('role') else '',
+    f'- **Mode:** `{policy.get("mode")}`' if policy.get('mode') else '',
+    f'- **Write policy:** `{policy.get("write_policy")}`'
+    if policy.get('write_policy')
+    else '',
+  ]
+  policy_rows = [row for row in policy_rows if row]
+
+  section = f"""
+## Project Management Context
+
+The conversation belongs to a durable project. Treat these settings as inherited
+context for this run unless the user explicitly says otherwise.
+
+- **Project:** `{project_context.get('name') or project_context.get('id')}`
+- **Type:** `{project_context.get('project_type') or 'unknown'}`
+- **Status:** `{project_context.get('status') or 'unknown'}`
+- **Release:** `{project_context.get('release_id') or 'draft'}`
+"""
+  if project_context.get('description'):
+    section += f"- **Purpose:** {project_context['description']}\n"
+  if resource_rows:
+    section += f"\n### Effective Databricks Resources\n{chr(10).join(resource_rows)}\n"
+  if override_rows:
+    section += f"\n### Conversation Overrides\n{chr(10).join(override_rows)}\n"
+  if metric_views:
+    section += f"\n### Preferred Metric Views\n{metric_views}\n"
+  if preferred_tables:
+    section += f"\n### Preferred Tables\n{preferred_tables}\n"
+  if glossary_rows:
+    section += f"\n### Glossary\n{chr(10).join(glossary_rows)}\n"
+  if caveats:
+    section += f"\n### Known Caveats\n{caveats}\n"
+  if policy_rows:
+    section += f"\n### Agent Policy\n{chr(10).join(policy_rows)}\n"
+
+  return section
+
+
 def get_system_prompt(
   cluster_id: str | None = None,
   default_catalog: str | None = None,
@@ -25,6 +130,7 @@ def get_system_prompt(
   workspace_url: str | None = None,
   enabled_skills: list[str] | None = None,
   skill_guidance: str = '',
+  project_context: dict[str, Any] | None = None,
 ) -> str:
   """Generate the system prompt for the OpenAI agent runtime.
 
@@ -39,6 +145,7 @@ def get_system_prompt(
       workspace_url: Optional Databricks workspace URL for generating resource links
       enabled_skills: Optional list of enabled skill names. None means all skills.
       skill_guidance: Rendered Markdown guidance from selected project skills.
+      project_context: Optional structured project-management context.
 
   Returns:
       System prompt string
@@ -196,8 +303,10 @@ The Databricks workspace URL is: `{workspace_url}`
 Use this to construct clickable links in your responses (see Resource Links section below).
 """
 
+  project_context_section = _render_project_context(project_context)
+
   return rf"""# Databricks AI Dev Kit
-{cluster_section}{warehouse_section}{workspace_folder_section}{catalog_schema_section}{workspace_url_section}
+{cluster_section}{warehouse_section}{workspace_folder_section}{catalog_schema_section}{workspace_url_section}{project_context_section}
 
 You are a Databricks development assistant with access to app-owned tools for project file editing,
 SQL queries, SQL warehouse inspection, compute inspection, and background operation status.

@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 from typing import AsyncIterator
 
 from .agent_runtime import AgentRunRequest, OpenAIAgentRuntime
@@ -93,6 +94,7 @@ async def stream_agent_response(
   is_cancelled_fn: callable = None,
   enabled_skills: list[str] | None = None,
   mlflow_experiment_name: str | None = None,
+  project_context: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict]:
   """Stream OpenAI Agents SDK events normalized for the Builder App UI."""
   ensure_logger_active(logger, set_propagate_false=True)
@@ -118,6 +120,7 @@ async def stream_agent_response(
     is_cross_workspace=is_cross_workspace,
     enabled_skills=enabled_skills,
     mlflow_experiment_name=mlflow_experiment_name,
+    project_context=project_context,
     is_cancelled_fn=is_cancelled_fn or (lambda: False),
   )
 

@@ -8,6 +8,7 @@ import {
   ClipboardCopy,
   ExternalLink,
   Loader2,
+  Save,
   Settings2,
   Square,
   Sparkles,
@@ -33,6 +34,7 @@ import {
   invokeAgent,
   reconnectToExecution,
   stopExecution,
+  updateProject,
 } from '@/lib/api';
 import type { Cluster, Conversation, Message, Project, Warehouse, TodoItem } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -249,6 +251,8 @@ function ConfigPanel({
   mlflowExperimentName,
   setMlflowExperimentName,
   workspaceUrl,
+  onSaveProjectDefaults,
+  isSavingProjectDefaults,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -267,6 +271,8 @@ function ConfigPanel({
   mlflowExperimentName: string;
   setMlflowExperimentName: (v: string) => void;
   workspaceUrl: string | null;
+  onSaveProjectDefaults: () => void;
+  isSavingProjectDefaults: boolean;
 }) {
   if (!isOpen) return null;
 
@@ -359,6 +365,20 @@ function ConfigPanel({
             className="mt-1.5 w-full h-10 px-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)]/30 focus:border-[var(--color-accent-primary)]/50"
           />
         </div>
+
+        <button
+          type="button"
+          onClick={onSaveProjectDefaults}
+          disabled={isSavingProjectDefaults}
+          className="w-full h-10 inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--color-accent-primary)] text-white text-sm font-medium hover:bg-[var(--color-accent-secondary)] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+        >
+          {isSavingProjectDefaults ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Save className="h-4 w-4" />
+          )}
+          Save as Project Defaults
+        </button>
       </div>
     </div>
   );
@@ -377,6 +397,89 @@ function toSchemaName(email: string | null, projectName: string | null): string 
   if (!projectName) return emailPart;
   const projectPart = sanitizeForSchema(projectName);
   return `${emailPart}_${projectPart}`;
+}
+
+type ResourceDefaults = {
+  cluster_id?: string | null;
+  default_catalog?: string | null;
+  default_schema?: string | null;
+  warehouse_id?: string | null;
+  workspace_folder?: string | null;
+  mlflow_experiment_name?: string | null;
+};
+
+function generatedWorkspaceFolder(
+  user: string | null,
+  projectName: string | null,
+  projectId: string
+): string {
+  if (!user) return '';
+  const projectFolder = projectName ? sanitizeForSchema(projectName) : projectId;
+  return `/Workspace/Users/${user}/ai_dev_kit/${projectFolder}`;
+}
+
+function projectResourceDefaults(project: Project | null | undefined): ResourceDefaults {
+  return project?.settings?.resources ?? {};
+}
+
+function resolveClusterId(
+  conversation: Conversation | null | undefined,
+  project: Project | null | undefined,
+  clusters: Cluster[]
+): string | undefined {
+  return (
+    conversation?.cluster_id
+    || projectResourceDefaults(project).cluster_id
+    || clusters[0]?.cluster_id
+    || undefined
+  );
+}
+
+function resolveWarehouseId(
+  conversation: Conversation | null | undefined,
+  project: Project | null | undefined,
+  warehouses: Warehouse[]
+): string | undefined {
+  return (
+    conversation?.warehouse_id
+    || projectResourceDefaults(project).warehouse_id
+    || warehouses[0]?.warehouse_id
+    || undefined
+  );
+}
+
+function resolveDefaultCatalog(
+  conversation: Conversation | null | undefined,
+  project: Project | null | undefined
+): string {
+  return conversation?.default_catalog || projectResourceDefaults(project).default_catalog || 'ai_dev_kit';
+}
+
+function resolveDefaultSchema(
+  conversation: Conversation | null | undefined,
+  project: Project | null | undefined,
+  fallbackSchema: string
+): string {
+  return conversation?.default_schema || projectResourceDefaults(project).default_schema || fallbackSchema;
+}
+
+function resolveWorkspaceFolder(
+  conversation: Conversation | null | undefined,
+  project: Project | null | undefined,
+  user: string | null,
+  projectId: string
+): string {
+  return (
+    conversation?.workspace_folder
+    || projectResourceDefaults(project).workspace_folder
+    || generatedWorkspaceFolder(user, project?.name ?? null, projectId)
+  );
+}
+
+function resolveMlflowExperimentName(
+  project: Project | null | undefined
+): string {
+  return projectResourceDefaults(project).mlflow_experiment_name || '';
 }
 
 export default function ProjectPage() {
@@ -449,42 +552,26 @@ export default function ProjectPage() {
         setClusters(clustersData);
         setWarehouses(warehousesData);
 
+        const generatedSchema = toSchemaName(user, projectData.name);
+
         // Load first conversation if available
         if (conversationsData.length > 0) {
           const conv = await fetchConversation(projectId, conversationsData[0].id);
           setCurrentConversation(conv);
           setMessages(conv.messages || []);
-          // Restore cluster selection from conversation, or default to first cluster
-          if (conv.cluster_id) {
-            setSelectedClusterId(conv.cluster_id);
-          } else if (clustersData.length > 0) {
-            setSelectedClusterId(clustersData[0].cluster_id);
-          }
-          // Restore warehouse selection from conversation, or default to first warehouse
-          if (conv.warehouse_id) {
-            setSelectedWarehouseId(conv.warehouse_id);
-          } else if (warehousesData.length > 0) {
-            setSelectedWarehouseId(warehousesData[0].warehouse_id);
-          }
-          // Restore catalog/schema from conversation
-          if (conv.default_catalog) {
-            setDefaultCatalog(conv.default_catalog);
-          }
-          if (conv.default_schema) {
-            setDefaultSchema(conv.default_schema);
-          }
-          // Restore workspace folder from conversation
-          if (conv.workspace_folder) {
-            setWorkspaceFolder(conv.workspace_folder);
-          }
+          setSelectedClusterId(resolveClusterId(conv, projectData, clustersData));
+          setSelectedWarehouseId(resolveWarehouseId(conv, projectData, warehousesData));
+          setDefaultCatalog(resolveDefaultCatalog(conv, projectData));
+          setDefaultSchema(resolveDefaultSchema(conv, projectData, generatedSchema));
+          setWorkspaceFolder(resolveWorkspaceFolder(conv, projectData, user, projectId));
+          setMlflowExperimentName(resolveMlflowExperimentName(projectData));
         } else {
-          // No conversation yet, but still select first cluster/warehouse
-          if (clustersData.length > 0) {
-            setSelectedClusterId(clustersData[0].cluster_id);
-          }
-          if (warehousesData.length > 0) {
-            setSelectedWarehouseId(warehousesData[0].warehouse_id);
-          }
+          setSelectedClusterId(resolveClusterId(null, projectData, clustersData));
+          setSelectedWarehouseId(resolveWarehouseId(null, projectData, warehousesData));
+          setDefaultCatalog(resolveDefaultCatalog(null, projectData));
+          setDefaultSchema(resolveDefaultSchema(null, projectData, generatedSchema));
+          setWorkspaceFolder(resolveWorkspaceFolder(null, projectData, user, projectId));
+          setMlflowExperimentName(resolveMlflowExperimentName(projectData));
         }
       } catch (error) {
         console.error('Failed to load project:', error);
@@ -496,7 +583,7 @@ export default function ProjectPage() {
     };
 
     loadData();
-  }, [projectId, navigate]);
+  }, [projectId, navigate, user]);
 
   // Check for active execution when conversation loads and reconnect if needed
   useEffect(() => {
@@ -627,21 +714,28 @@ export default function ProjectPage() {
   // Set default schema from user email once when first available
   const schemaDefaultApplied = useRef(false);
   useEffect(() => {
-    if (userDefaultSchema && !schemaDefaultApplied.current && !defaultSchema) {
-      setDefaultSchema(userDefaultSchema);
+    const projectSchema = projectResourceDefaults(project).default_schema;
+    const fallbackSchema = projectSchema || userDefaultSchema;
+    if (fallbackSchema && !schemaDefaultApplied.current && !defaultSchema) {
+      setDefaultSchema(fallbackSchema);
       schemaDefaultApplied.current = true;
     }
-  }, [userDefaultSchema]);
+  }, [project, userDefaultSchema, defaultSchema]);
 
   // Set default workspace folder from user email and project name once when first available
   const folderDefaultApplied = useRef(false);
   useEffect(() => {
-    if (user && project?.name && !folderDefaultApplied.current && !workspaceFolder) {
-      const projectFolder = sanitizeForSchema(project.name);
-      setWorkspaceFolder(`/Workspace/Users/${user}/ai_dev_kit/${projectFolder}`);
+    const projectFolder = projectResourceDefaults(project).workspace_folder;
+    const fallbackFolder = projectFolder || (
+      user && project?.name && projectId
+        ? generatedWorkspaceFolder(user, project.name, projectId)
+        : ''
+    );
+    if (fallbackFolder && !folderDefaultApplied.current && !workspaceFolder) {
+      setWorkspaceFolder(fallbackFolder);
       folderDefaultApplied.current = true;
     }
-  }, [user, project?.name]);
+  }, [user, project, projectId, workspaceFolder]);
 
   // Select a conversation
   const handleSelectConversation = async (conversationId: string) => {
@@ -678,16 +772,12 @@ export default function ProjectPage() {
         setActiveExecutionId(null);
         setIsReconnecting(false);
       }
-      // Restore cluster selection from conversation, or default to first cluster
-      setSelectedClusterId(conv.cluster_id || (clusters.length > 0 ? clusters[0].cluster_id : undefined));
-      // Restore warehouse selection from conversation, or default to first warehouse
-      setSelectedWarehouseId(conv.warehouse_id || (warehouses.length > 0 ? warehouses[0].warehouse_id : undefined));
-      // Restore catalog/schema from conversation, or use defaults
-      setDefaultCatalog(conv.default_catalog || 'ai_dev_kit');
-      setDefaultSchema(conv.default_schema || userDefaultSchema);
-      // Restore workspace folder from conversation, or use default
-      const projectFolder = project?.name ? sanitizeForSchema(project.name) : projectId;
-      setWorkspaceFolder(conv.workspace_folder || (user ? `/Workspace/Users/${user}/ai_dev_kit/${projectFolder}` : ''));
+      setSelectedClusterId(resolveClusterId(conv, project, clusters));
+      setSelectedWarehouseId(resolveWarehouseId(conv, project, warehouses));
+      setDefaultCatalog(resolveDefaultCatalog(conv, project));
+      setDefaultSchema(resolveDefaultSchema(conv, project, userDefaultSchema));
+      setWorkspaceFolder(resolveWorkspaceFolder(conv, project, user, projectId));
+      setMlflowExperimentName(resolveMlflowExperimentName(project));
     } catch (error) {
       console.error('Failed to load conversation:', error);
       toast.error('Failed to load conversation');
@@ -710,6 +800,12 @@ export default function ProjectPage() {
       setTodos([]);
       setActiveExecutionId(null);
       setIsReconnecting(false);
+      setSelectedClusterId(resolveClusterId(conv, project, clusters));
+      setSelectedWarehouseId(resolveWarehouseId(conv, project, warehouses));
+      setDefaultCatalog(resolveDefaultCatalog(conv, project));
+      setDefaultSchema(resolveDefaultSchema(conv, project, userDefaultSchema));
+      setWorkspaceFolder(resolveWorkspaceFolder(conv, project, user, projectId));
+      setMlflowExperimentName(resolveMlflowExperimentName(project));
       inputRef.current?.focus();
     } catch (error) {
       console.error('Failed to create conversation:', error);
@@ -739,6 +835,12 @@ export default function ProjectPage() {
           const conv = await fetchConversation(projectId, remaining[0].id);
           setCurrentConversation(conv);
           setMessages(conv.messages || []);
+          setSelectedClusterId(resolveClusterId(conv, project, clusters));
+          setSelectedWarehouseId(resolveWarehouseId(conv, project, warehouses));
+          setDefaultCatalog(resolveDefaultCatalog(conv, project));
+          setDefaultSchema(resolveDefaultSchema(conv, project, userDefaultSchema));
+          setWorkspaceFolder(resolveWorkspaceFolder(conv, project, user, projectId));
+          setMlflowExperimentName(resolveMlflowExperimentName(project));
         } else {
           setCurrentConversation(null);
           setMessages([]);
@@ -1066,6 +1168,43 @@ export default function ProjectPage() {
     setSkillsExplorerOpen(true);
   };
 
+  const [isSavingProjectDefaults, setIsSavingProjectDefaults] = useState(false);
+  const handleSaveProjectDefaults = useCallback(async () => {
+    if (!projectId || !project) return;
+
+    setIsSavingProjectDefaults(true);
+    try {
+      const updated = await updateProject(projectId, {
+        settings: {
+          resources: {
+            cluster_id: selectedClusterId ?? null,
+            default_catalog: defaultCatalog || null,
+            default_schema: defaultSchema || null,
+            warehouse_id: selectedWarehouseId ?? null,
+            workspace_folder: workspaceFolder || null,
+            mlflow_experiment_name: mlflowExperimentName || null,
+          },
+        },
+      });
+      setProject(updated);
+      toast.success('Project defaults saved');
+    } catch (error) {
+      console.error('Failed to save project defaults:', error);
+      toast.error('Failed to save project defaults');
+    } finally {
+      setIsSavingProjectDefaults(false);
+    }
+  }, [
+    projectId,
+    project,
+    selectedClusterId,
+    defaultCatalog,
+    defaultSchema,
+    selectedWarehouseId,
+    workspaceFolder,
+    mlflowExperimentName,
+  ]);
+
   // Config panel state
   const [configPanelOpen, setConfigPanelOpen] = useState(false);
   const configPanelRef = useRef<HTMLDivElement>(null);
@@ -1253,6 +1392,8 @@ export default function ProjectPage() {
                 mlflowExperimentName={mlflowExperimentName}
                 setMlflowExperimentName={setMlflowExperimentName}
                 workspaceUrl={workspaceUrl}
+                onSaveProjectDefaults={handleSaveProjectDefaults}
+                isSavingProjectDefaults={isSavingProjectDefaults}
               />
             </div>
           </div>

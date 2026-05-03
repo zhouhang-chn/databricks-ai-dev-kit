@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from ..project_config import build_project_context, get_project_resource_defaults
 from ..services.active_stream import get_stream_manager
 from ..services.agent import get_project_directory, stream_agent_response
 from ..services.backup_manager import mark_for_backup
@@ -110,6 +111,44 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
         logger.error(f'Project not found: {body.project_id}')
         raise HTTPException(status_code=404, detail=f'Project not found: {body.project_id}')
 
+    project_defaults = get_project_resource_defaults(project)
+    effective_cluster_id = body.cluster_id or project_defaults.get('cluster_id')
+    effective_default_catalog = body.default_catalog or project_defaults.get('default_catalog')
+    effective_default_schema = body.default_schema or project_defaults.get('default_schema')
+    effective_warehouse_id = body.warehouse_id or project_defaults.get('warehouse_id')
+    effective_workspace_folder = body.workspace_folder or project_defaults.get('workspace_folder')
+    effective_mlflow_experiment_name = (
+        body.mlflow_experiment_name or project_defaults.get('mlflow_experiment_name')
+    )
+    conversation_overrides = {
+        'cluster_id': body.cluster_id,
+        'default_catalog': body.default_catalog,
+        'default_schema': body.default_schema,
+        'warehouse_id': body.warehouse_id,
+        'workspace_folder': body.workspace_folder,
+        'mlflow_experiment_name': body.mlflow_experiment_name,
+    }
+    project_context = build_project_context(
+        project,
+        effective_resources={
+            'cluster_id': effective_cluster_id,
+            'default_catalog': effective_default_catalog,
+            'default_schema': effective_default_schema,
+            'warehouse_id': effective_warehouse_id,
+            'workspace_folder': effective_workspace_folder,
+            'mlflow_experiment_name': effective_mlflow_experiment_name,
+        },
+        conversation_overrides=conversation_overrides,
+    )
+    logger.info(
+        'Resolved project context: project=%s type=%s status=%s release=%s resources=%s',
+        body.project_id,
+        project_context.get('project_type'),
+        project_context.get('status'),
+        project_context.get('release_id'),
+        project_context.get('effective_resources'),
+    )
+
     # Read enabled skills from project filesystem (not DB)
     from ..services.skills_manager import get_project_enabled_skills
     project_dir = get_project_directory(body.project_id)
@@ -178,17 +217,18 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                 message=body.message,
                 conversation_id=conversation_id,
                 session_id=session_id,
-                cluster_id=body.cluster_id,
-                default_catalog=body.default_catalog,
-                default_schema=body.default_schema,
-                warehouse_id=body.warehouse_id,
-                workspace_folder=body.workspace_folder,
+                cluster_id=effective_cluster_id,
+                default_catalog=effective_default_catalog,
+                default_schema=effective_default_schema,
+                warehouse_id=effective_warehouse_id,
+                workspace_folder=effective_workspace_folder,
                 databricks_host=tools_host,
                 databricks_token=tools_token,
                 is_cross_workspace=is_cross_workspace,
                 is_cancelled_fn=lambda: stream.is_cancelled,
                 enabled_skills=enabled_skills,
-                mlflow_experiment_name=body.mlflow_experiment_name,
+                mlflow_experiment_name=effective_mlflow_experiment_name,
+                project_context=project_context,
             ):
                 # Check if cancelled (also checked in agent thread, but double-check here)
                 if stream.is_cancelled:

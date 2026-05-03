@@ -12,11 +12,52 @@ export interface UserInfo {
 }
 
 /** Project from API (projects list/detail) */
+export interface ProjectSettings {
+  version: number;
+  identity?: {
+    audience?: string | null;
+    success_criteria?: string[];
+  };
+  resources?: {
+    cluster_id?: string | null;
+    default_catalog?: string | null;
+    default_schema?: string | null;
+    warehouse_id?: string | null;
+    workspace_folder?: string | null;
+    mlflow_experiment_name?: string | null;
+  };
+  semantics?: {
+    metric_views?: string[];
+    preferred_tables?: string[];
+    glossary?: Record<string, string>;
+    known_caveats?: string[];
+  };
+  agent_policy?: {
+    mode?: string | null;
+    role?: string | null;
+    enabled_skills?: string[] | null;
+    write_policy?: string | null;
+  };
+  workflows?: {
+    enabled?: string[];
+  };
+  memory?: {
+    approved?: string[];
+    proposed?: string[];
+  };
+}
+
 export interface Project {
   id: string;
   name: string;
+  description?: string | null;
+  project_type?: string;
+  status?: string;
+  settings?: ProjectSettings;
+  current_release_id?: string;
   user_email: string;
   created_at: string | null;
+  updated_at?: string | null;
   conversation_count: number;
 }
 

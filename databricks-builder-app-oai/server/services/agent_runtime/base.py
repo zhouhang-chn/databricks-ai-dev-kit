@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 
 @dataclass(slots=True)
@@ -23,6 +23,7 @@ class AgentRunRequest:
   is_cross_workspace: bool = False
   enabled_skills: list[str] | None = None
   mlflow_experiment_name: str | None = None
+  project_context: dict[str, Any] | None = None
   is_cancelled_fn: Callable[[], bool] | None = None
 
 

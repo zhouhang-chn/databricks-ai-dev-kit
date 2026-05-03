@@ -1,0 +1,103 @@
+"""Tests for project-management settings helpers."""
+
+from dataclasses import dataclass
+
+from server.project_config import (
+  build_project_context,
+  default_project_settings,
+  get_project_resource_defaults,
+  merge_project_settings,
+  parse_project_settings,
+)
+from server.services.system_prompt import get_system_prompt
+
+
+@dataclass
+class ProjectLike:
+  """Small Project stand-in for helper tests."""
+
+  id: str = 'project-1'
+  name: str = 'Revenue Review'
+  description: str | None = 'Monthly revenue workspace'
+  project_type: str = 'analyst_workspace'
+  status: str = 'draft'
+  current_release_id: str = 'draft'
+  settings_json: str | None = None
+
+
+def test_parse_project_settings_returns_full_defaults_for_missing_json():
+  """Missing persisted JSON still returns the full current settings shape."""
+  settings = parse_project_settings(None)
+
+  assert settings['version'] == 1
+  assert settings['resources']['default_catalog'] is None
+  assert settings['agent_policy']['role'] == 'developer'
+
+
+def test_parse_project_settings_recovers_from_invalid_sections():
+  """Malformed settings sections should not break project reads."""
+  settings = parse_project_settings('{"resources": null}')
+
+  assert settings['resources']['default_catalog'] is None
+  assert settings['resources']['warehouse_id'] is None
+
+
+def test_merge_project_settings_deep_merges_without_deleting_existing_values():
+  """Resource patches should preserve unrelated settings sections."""
+  current = default_project_settings()
+  current['semantics']['metric_views'] = ['prod.finance.revenue_metrics']
+
+  merged_json = merge_project_settings(
+    None,
+    {
+      'semantics': {'metric_views': current['semantics']['metric_views']},
+      'resources': {'default_catalog': 'prod'},
+    },
+  )
+  patched_json = merge_project_settings(
+    merged_json,
+    {'resources': {'default_schema': 'finance'}},
+  )
+  patched = parse_project_settings(patched_json)
+
+  assert patched['resources']['default_catalog'] == 'prod'
+  assert patched['resources']['default_schema'] == 'finance'
+  assert patched['semantics']['metric_views'] == ['prod.finance.revenue_metrics']
+
+
+def test_project_context_prefers_effective_resources_and_tracks_overrides():
+  """The context pack exposes effective resources and conversation overrides."""
+  project = ProjectLike(settings_json=merge_project_settings(None, {
+    'resources': {'default_catalog': 'prod'},
+  }))
+
+  context = build_project_context(
+    project,
+    effective_resources={'default_catalog': 'prod', 'default_schema': 'finance'},
+    conversation_overrides={'default_schema': 'finance'},
+  )
+
+  assert get_project_resource_defaults(project)['default_catalog'] == 'prod'
+  assert context['effective_resources']['default_schema'] == 'finance'
+  assert context['conversation_overrides']['default_schema'] == 'finance'
+
+
+def test_system_prompt_renders_project_context():
+  """Agent instructions include the compact project context pack."""
+  project = ProjectLike(settings_json=merge_project_settings(None, {
+    'semantics': {
+      'metric_views': ['prod.finance.revenue_metrics'],
+      'glossary': {'ARR': 'Annual recurring revenue'},
+    },
+  }))
+  context = build_project_context(
+    project,
+    effective_resources={'default_catalog': 'prod', 'default_schema': 'finance'},
+  )
+
+  prompt = get_system_prompt(project_context=context, enabled_skills=[])
+
+  assert 'Project Management Context' in prompt
+  assert 'Revenue Review' in prompt
+  assert 'prod.finance.revenue_metrics' in prompt
+  assert 'Annual recurring revenue' in prompt

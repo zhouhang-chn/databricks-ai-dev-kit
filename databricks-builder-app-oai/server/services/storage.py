@@ -4,12 +4,19 @@ Provides user-scoped CRUD operations using async SQLAlchemy.
 """
 
 import json
-from typing import Optional
+from typing import Any, Optional
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 
 from server.db import Conversation, Execution, Message, Project, session_scope
+from server.project_config import (
+  DEFAULT_PROJECT_STATUS,
+  DEFAULT_PROJECT_TYPE,
+  DEFAULT_RELEASE_ID,
+  merge_project_settings,
+  serialize_project_settings,
+)
 
 
 class ProjectStorage:
@@ -42,16 +49,41 @@ class ProjectStorage:
       )
       return result.scalar_one_or_none()
 
-  async def create(self, name: str) -> Project:
+  async def create(
+    self,
+    name: str,
+    description: str | None = None,
+    project_type: str | None = None,
+    settings: dict[str, Any] | None = None,
+  ) -> Project:
     """Create a new project."""
     async with session_scope() as session:
       project = Project(
         name=name,
+        description=description,
+        project_type=project_type or DEFAULT_PROJECT_TYPE,
+        status=DEFAULT_PROJECT_STATUS,
+        settings_json=serialize_project_settings(settings),
+        current_release_id=DEFAULT_RELEASE_ID,
         user_email=self.user_email,
       )
       session.add(project)
       await session.flush()
-      await session.refresh(project, ['id', 'name', 'user_email', 'created_at'])
+      await session.refresh(
+        project,
+        [
+          'id',
+          'name',
+          'description',
+          'project_type',
+          'status',
+          'settings_json',
+          'current_release_id',
+          'user_email',
+          'created_at',
+          'updated_at',
+        ],
+      )
       # Initialize conversations as empty list for to_dict()
       # (don't use ORM attribute assignment which triggers lazy load)
       project.__dict__['conversations'] = []
@@ -59,18 +91,59 @@ class ProjectStorage:
 
   async def update_name(self, project_id: str, name: str) -> bool:
     """Update project name."""
+    project = await self.update(project_id, {'name': name})
+    return project is not None
+
+  async def update(self, project_id: str, updates: dict[str, Any]) -> Project | None:
+    """Patch project metadata and settings."""
     async with session_scope() as session:
       result = await session.execute(
-        select(Project).where(
+        select(Project)
+        .options(selectinload(Project.conversations))
+        .where(
           Project.id == project_id,
           Project.user_email == self.user_email,
         )
       )
       project = result.scalar_one_or_none()
-      if project:
-        project.name = name
-        return True
-      return False
+      if not project:
+        return None
+
+      for field in (
+        'name',
+        'description',
+        'project_type',
+        'status',
+        'current_release_id',
+      ):
+        if field in updates:
+          setattr(project, field, updates[field])
+
+      if 'settings' in updates:
+        project.settings_json = merge_project_settings(
+          project.settings_json,
+          updates.get('settings'),
+        )
+
+      conversations = list(project.conversations or [])
+      await session.flush()
+      await session.refresh(
+        project,
+        [
+          'id',
+          'name',
+          'description',
+          'project_type',
+          'status',
+          'settings_json',
+          'current_release_id',
+          'user_email',
+          'created_at',
+          'updated_at',
+        ],
+      )
+      project.__dict__['conversations'] = conversations
+      return project
 
   async def delete(self, project_id: str) -> bool:
     """Delete a project and all its conversations."""
