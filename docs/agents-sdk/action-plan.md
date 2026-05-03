@@ -43,9 +43,50 @@ implementation until the OpenAI version is complete and separately validated.
   by prompt instruction only.
 - Keep OpenAI model credentials separate from Databricks tool credentials.
 - Do not enable shell execution in MVP.
-- Use `pnpm` for frontend commands and do not introduce npm lockfiles.
+- Use `npm` for `databricks-builder-app-oai` frontend commands and keep a
+  `package-lock.json` in that project.
 - Before browser or frontend tests, confirm both `127.0.0.1:8000` and the
   frontend server under test are reachable.
+
+## Progress Snapshot
+
+Last updated: 2026-05-02.
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 0: Repository and Docs Setup | Complete | Canonical `docs/agents-sdk/` path exists and the misspelled path search is clean. |
+| Phase 1: Scaffold `databricks-builder-app-oai` | Complete | New sibling app exists with server, client, Alembic, scripts, app config, and package metadata updated. Generated/runtime directories remain ignored. |
+| Phase 2: Dependency and Configuration Cutover | Complete | `claude-agent-sdk` and `anthropic` were removed from the new app dependency set; `openai-agents` and AI Gateway/OpenAI env vars were added. |
+| Phase 3: Runtime Adapter | Implemented, live run pending | OpenAI runtime adapter, model settings, event normalization, cancellation hook, and SDK session helper are in place. A live AI Gateway run still needs credentials. |
+| Phase 4: Project File Tools | Implemented MVP | Explicit project-confined file tools exist with path escape, symlink escape, and size-cap tests. No shell tool is exposed. |
+| Phase 5: Runtime-Neutral Skill Registry | Implemented MVP | Existing `skills_manager.py` now writes `.agents/skills`, reads legacy `.claude/skills` only as fallback, renders selected skill guidance, and filters OpenAI/MCP tools by enabled skills. |
+| Phase 6: Databricks Tool Adapter | Partial | Core wrappers exist for SQL, SQL warehouses, compute listing, and operation polling. Full Databricks parity and generated schema conversion remain follow-up work. |
+| Phase 7: Sessions, Persistence, and Migrations | Partial | Migration/model fields and stable SDK session key exist. The MVP uses `SQLiteSession`; deployed SQL-backed session strategy and live restart validation remain open. |
+| Phase 8: Title Generation and Observability | Partial | Title generation now uses OpenAI-compatible chat completions with `OPENAI_TITLE_MODEL=deepseek-v4-flash`. OpenAI tracing disable handling exists; MLflow export policy remains follow-up. |
+| Phase 9: Optional MCP Gateway Port | Partial | Gateway starts without Claude SDK imports and applies skill filtering to the MCP tool surface. Gateway tests and external MCP client smoke remain open. |
+| Phase 10: Frontend and Documentation Cutover | Mostly complete | In-app docs/copy were updated, `/api/config/runtime` was added, and frontend lint plus build/typecheck pass. Browser workflow tests remain open. |
+| Phase 11: Deployment and Release Readiness | Partial | `app.yaml.example`, bundle name, deploy script, local script, and README were updated. Deployed app smoke tests still need a configured workspace and AI Gateway credentials. |
+
+Current verified checks:
+
+```bash
+cd databricks-builder-app-oai
+UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run pytest tests -q
+UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run python -c "import agents; import server.app; print('openai agents and server import ok')"
+UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run ruff check server/services/agent.py server/services/agent_runtime server/services/tools server/services/title_generator.py server/routers/config.py server/routers/agent.py server/mcp_gateway.py --select F,E9
+cd client
+npm run lint --cache /tmp/npm-cache-ai-dev-kit
+npm run build:typecheck --cache /tmp/npm-cache-ai-dev-kit
+```
+
+Known validation gaps:
+
+- Live AI Gateway invocation is blocked until `OPENAI_BASE_URL` and
+  `OPENAI_API_KEY` are available in the environment.
+- Live Databricks tool smoke tests are blocked until Databricks auth and a safe
+  target warehouse/workspace are configured.
+- Browser workflow testing has not been run because backend/frontend servers
+  were not started for this docs update.
 
 ## Phase 0: Repository and Docs Setup
 
@@ -87,7 +128,7 @@ Tasks:
   - `client/out/`
   - build caches
   - local `.env*` files containing secrets
-- Remove copied `client/package-lock.json` from the new app if present.
+- Keep `client/package-lock.json` as the frontend lockfile for the new app.
 - Update package metadata and app labels:
   - Python project name: `databricks-builder-app-oai`
   - FastAPI title and description
@@ -99,13 +140,14 @@ Suggested checks:
 
 ```bash
 rg -n "Claude|claude|Anthropic|anthropic|ANTHROPIC|claude_agent_sdk" databricks-builder-app-oai
-rg -n "npm|npx|package-lock" databricks-builder-app-oai/client databricks-builder-app-oai/scripts
+rg -n "pnpm|pnpm-lock" databricks-builder-app-oai/client databricks-builder-app-oai/scripts
 ```
 
 Acceptance gates:
 
 - `databricks-builder-app-oai/` imports as a separate app tree.
-- No copied npm lockfile exists in `databricks-builder-app-oai/client/`.
+- `databricks-builder-app-oai/client/package-lock.json` exists.
+- No `pnpm-lock.yaml` exists in `databricks-builder-app-oai/client/`.
 - Remaining Claude references are documented migration targets, not active
   runtime dependencies.
 
@@ -432,7 +474,7 @@ Tasks:
 - Add `/api/config/runtime` if the UI needs runtime metadata.
 - Update local development docs for:
   - AI Gateway OpenAI-compatible env vars
-  - pnpm commands
+  - npm commands
   - backend/frontend service checks
 - Update deployment docs for `databricks-builder-app-oai`.
 - Update app examples and screenshots only after the runtime works.
@@ -441,9 +483,9 @@ Frontend checks:
 
 ```bash
 cd databricks-builder-app-oai/client
-pnpm install
-pnpm lint
-pnpm build:typecheck
+npm install
+npm run lint
+npm run build:typecheck
 ```
 
 Browser test prerequisites:
@@ -487,7 +529,7 @@ Acceptance gates:
 
 | Area | Primary files | Main risk |
 |------|---------------|-----------|
-| Scaffold/config | `databricks-builder-app-oai/pyproject.toml`, scripts, app yaml | accidentally carrying Claude or npm artifacts |
+| Scaffold/config | `databricks-builder-app-oai/pyproject.toml`, scripts, app yaml | accidentally carrying Claude or pnpm artifacts |
 | Runtime | `server/services/agent_runtime/*` | SDK event and session semantics |
 | File tools | `server/services/tools/project_files.py` | path escape or oversized file handling |
 | Databricks tools | `server/services/tools/databricks_openai.py` | schema parity and long-running operations |
@@ -501,16 +543,20 @@ Acceptance gates:
 
 The first useful milestone is not full feature parity. It is:
 
-- `databricks-builder-app-oai` exists and imports.
-- OpenAI Agents SDK is the only agent runtime dependency.
-- AI Gateway config works with `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and
-  `OPENAI_AGENT_MODEL=deepseek-v4-pro`.
-- `/api/invoke_agent` starts a mocked or live OpenAI run.
-- SSE emits normalized `text_delta`, `tool_use`, `tool_result`, and `result`
-  events.
-- Project file tools can read and edit files safely.
-- At least one Databricks tool works through the OpenAI runtime.
-- Conversation history persists in app tables.
+- [x] `databricks-builder-app-oai` exists and imports.
+- [x] OpenAI Agents SDK is the only agent runtime dependency.
+- [x] AI Gateway config is represented by `OPENAI_BASE_URL`,
+  `OPENAI_API_KEY`, and `OPENAI_AGENT_MODEL=deepseek-v4-pro`.
+- [x] Config validation fails clearly when required AI Gateway values are
+  missing.
+- [ ] `/api/invoke_agent` starts a mocked or live OpenAI run.
+- [x] SDK event normalization emits frontend-compatible `text_delta`,
+  `tool_use`, `tool_result`, and `result`-compatible events.
+- [x] Project file tools can read and edit files safely.
+- [ ] At least one Databricks tool works through the OpenAI runtime in a live
+  workspace smoke test.
+- [x] Conversation history has app-table persistence support with
+  `agent_runtime` and `agent_session_id` fields.
 
 After this milestone, broaden Databricks tool parity, frontend polish, and
 deployment automation. Treat any SandboxAgent exploration as a separate
@@ -518,18 +564,21 @@ post-MVP branch.
 
 ## Final Validation Checklist
 
-- [ ] `rg -n "claude_agent_sdk|anthropic|ANTHROPIC|ClaudeSDKClient" databricks-builder-app-oai`
-  returns no active runtime dependency.
-- [ ] `rg -n "npm|npx|package-lock" databricks-builder-app-oai/client databricks-builder-app-oai/scripts`
+- [x] `rg -n "claude_agent_sdk|anthropic|ANTHROPIC|ClaudeSDKClient" databricks-builder-app-oai`
+  returns no active runtime dependency. Remaining `.claude` references are
+  legacy skill-migration fallback paths only.
+- [x] `rg -n "pnpm|pnpm-lock" databricks-builder-app-oai/client databricks-builder-app-oai/scripts`
   returns no new package-management violations.
-- [ ] Backend unit tests pass.
-- [ ] Frontend `pnpm lint` passes.
-- [ ] Frontend `pnpm build:typecheck` passes.
+- [x] Backend unit tests pass.
+- [x] Frontend `npm run lint` passes.
+- [x] Frontend `npm run build:typecheck` passes.
 - [ ] API integration tests pass.
 - [ ] Browser tests pass after confirming both backend and frontend servers are
   reachable.
 - [ ] Live Databricks smoke tests pass when credentials are present.
-- [ ] OpenAI tracing can be disabled.
+- [x] OpenAI tracing can be disabled through `OPENAI_AGENTS_DISABLE_TRACING`;
+  live trace export still needs policy validation.
 - [ ] Secrets are redacted from logs, traces, and execution records.
-- [ ] Optional MCP gateway starts and serves tools when enabled.
+- [x] Optional MCP gateway imports/constructs without Claude SDK imports and
+  applies enabled-skill filtering.
 - [ ] Legacy `databricks-builder-app` remains untouched and runnable.

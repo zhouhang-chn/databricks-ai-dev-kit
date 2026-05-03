@@ -1,0 +1,98 @@
+# Databricks Apps configuration for Builder App
+# Copy this file to app.yaml and customize for your deployment
+#
+# Prerequisites:
+#   1. Create the app: databricks apps create <your-app-name>
+#   2. Add Lakebase as a resource (see instructions below)
+#   3. Configure your AI Gateway/OpenAI-compatible model settings
+
+command:
+  - "uvicorn"
+  - "server.app:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "$DATABRICKS_APP_PORT"
+
+env:
+  # =============================================================================
+  # Application Settings
+  # =============================================================================
+  - name: ENV
+    value: "production"
+  - name: PROJECTS_BASE_DIR
+    value: "./projects"
+  - name: PYTHONPATH
+    value: "/app/python/source_code/packages"
+
+  # =============================================================================
+  # Skills Configuration
+  # =============================================================================
+  # Comma-separated list of skills to enable.
+  # AUTO-POPULATED by deploy.sh at deploy time based on installed skills.
+  # To override, set a specific list here before deploying.
+  - name: ENABLED_SKILLS
+    value: ""
+  - name: SKILLS_ONLY_MODE
+    value: "false"
+
+  # =============================================================================
+  # Database Configuration (Lakebase)
+  # =============================================================================
+  # Choose ONE of the two options below.
+  #
+  # --- Option A: Autoscale Lakebase (recommended) ---
+  # Scales to zero when idle. No add-resource step needed — connects via OAuth.
+  # Find endpoint name in: Catalog → Lakebase → your project → Branches → Endpoints
+  #
+  # - name: LAKEBASE_ENDPOINT
+  #   value: "projects/<project-name>/branches/production/endpoints/<endpoint>"
+  # - name: LAKEBASE_DATABASE_NAME
+  #   value: "databricks_postgres"
+  #
+  # --- Option B: Provisioned Lakebase ---
+  # Fixed-capacity instance. Must add as an app resource:
+  #   databricks apps add-resource <app-name> \
+  #     --resource-type database \
+  #     --resource-name lakebase \
+  #     --database-instance <your-lakebase-instance-name>
+  #
+  - name: LAKEBASE_INSTANCE_NAME
+    value: "<your-lakebase-instance-name>"
+  - name: LAKEBASE_DATABASE_NAME
+    value: "databricks_postgres"
+
+  # =============================================================================
+  # Model Configuration
+  # =============================================================================
+  # Primary path: Databricks AI Gateway OpenAI-compatible endpoint.
+  # Configure OPENAI_BASE_URL and OPENAI_API_KEY from .env.local or app secrets.
+  - name: OPENAI_BASE_URL
+    value: "<your-ai-gateway-openai-compatible-base-url>"
+  - name: OPENAI_API_KEY
+    value: "<your-ai-gateway-api-key>"
+  - name: OPENAI_AGENT_MODEL
+    value: "deepseek-v4-pro"
+  - name: OPENAI_TITLE_MODEL
+    value: "deepseek-v4-flash"
+  - name: BUILDER_AGENT_RUNTIME
+    value: "openai_agents"
+  - name: OPENAI_AGENTS_DISABLE_TRACING
+    value: "1"
+
+  # =============================================================================
+  # MLflow Tracing Configuration
+  # =============================================================================
+  # Optional: use MLflow for application-level traces and diagnostics.
+  - name: MLFLOW_TRACKING_URI
+    value: "databricks"
+  # Optional: Specify a custom experiment for traces
+  # - name: MLFLOW_EXPERIMENT_NAME
+  #   value: "/Users/your-email@company.com/builder-app-openai-traces"
+
+  # =============================================================================
+  # Permission Configuration
+  # =============================================================================
+  # Grant created resources to this principal (e.g., "account users" for all)
+  - name: AUTO_GRANT_PERMISSIONS_TO
+    value: "account users"
