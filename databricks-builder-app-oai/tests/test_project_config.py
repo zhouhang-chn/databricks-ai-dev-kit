@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from server.project_config import (
   build_project_context,
   default_project_settings,
+  get_project_settings_for_run,
   get_project_resource_defaults,
   merge_project_settings,
   parse_project_settings,
@@ -80,6 +81,29 @@ def test_project_context_prefers_effective_resources_and_tracks_overrides():
   assert get_project_resource_defaults(project)['default_catalog'] == 'prod'
   assert context['effective_resources']['default_schema'] == 'finance'
   assert context['conversation_overrides']['default_schema'] == 'finance'
+
+
+def test_user_preview_uses_published_release_snapshot():
+  """User preview runs pin to the current release snapshot when present."""
+  release_settings = default_project_settings()
+  release_settings['resources']['default_catalog'] = 'published'
+  draft_settings = merge_project_settings(None, {
+    'resources': {'default_catalog': 'draft'},
+    'releases': [{
+      'id': 'rel_1',
+      'status': 'published',
+      'settings_snapshot': release_settings,
+    }],
+  })
+  project = ProjectLike(current_release_id='rel_1', settings_json=draft_settings)
+
+  settings, source = get_project_settings_for_run(project, run_role='user_preview')
+  context = build_project_context(project, run_role='user_preview')
+
+  assert settings['resources']['default_catalog'] == 'published'
+  assert source == 'release:rel_1'
+  assert context['settings']['agent_policy']['write_policy'] == 'read_only'
+  assert context['role'] == 'user_preview'
 
 
 def test_system_prompt_renders_project_context():

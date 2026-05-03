@@ -8,6 +8,7 @@ from server.services.agent_runtime.openai_events import normalize_openai_event
 from server.services.agent_runtime.openai_models import load_model_settings
 from server.services.agent_runtime.openai_runtime import _resolve_enabled_skills
 from server.services.logging_utils import ensure_logger_active
+from server.services.tools.databricks_openai import _is_read_only_tool_name
 from server.services.skills_manager import filter_openai_tools_by_skills
 from server.services.tools.project_files import (
   MAX_READ_BYTES,
@@ -126,6 +127,20 @@ def test_project_file_tools_expose_expected_names(tmp_path):
   assert 'bash' not in {name.lower() for name in tool_names}
 
 
+def test_project_file_tools_respect_read_only_mode(tmp_path):
+  """User-preview runs should not expose project file mutation tools."""
+  tool_names = {tool.name for tool in create_project_file_tools(tmp_path, read_only=True)}
+
+  assert {
+    'read_project_file',
+    'list_project_files',
+    'grep_project_files',
+    'get_project_tree',
+  } <= tool_names
+  assert 'write_project_file' not in tool_names
+  assert 'edit_project_file' not in tool_names
+
+
 def test_project_file_read_size_cap_constant_is_bounded():
   """Guard against accidentally removing file read limits."""
   assert MAX_READ_BYTES <= 1_000_000
@@ -146,6 +161,14 @@ def test_openai_tool_filter_blocks_disabled_skill_tools():
   )
 
   assert [tool.name for tool in allowed] == ['manage_dashboard', 'execute_sql']
+
+
+def test_user_preview_databricks_tool_filter_blocks_write_tools():
+  """Generated Databricks tools in user preview should be read-oriented."""
+  assert _is_read_only_tool_name('get_table_stats_and_schema') is True
+  assert _is_read_only_tool_name('query_vs_index') is True
+  assert _is_read_only_tool_name('manage_jobs') is False
+  assert _is_read_only_tool_name('delete_tracked_resource') is False
 
 
 def test_agent_logger_guard_writes_to_configured_file(tmp_path, monkeypatch):

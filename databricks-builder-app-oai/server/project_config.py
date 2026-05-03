@@ -17,6 +17,7 @@ DEFAULT_PROJECT_TYPE = 'databricks_app_build'
 DEFAULT_PROJECT_STATUS = 'draft'
 DEFAULT_RELEASE_ID = 'draft'
 PROJECT_SETTINGS_VERSION = 1
+USER_PREVIEW_ROLES = {'user', 'user_preview', 'viewer'}
 
 RESOURCE_SETTING_KEYS = (
   'cluster_id',
@@ -37,10 +38,16 @@ def default_project_settings() -> dict[str, Any]:
       'success_criteria': [],
     },
     'resources': {key: None for key in RESOURCE_SETTING_KEYS},
+    'resource_registry': {
+      'pinned': [],
+      'metadata_cache_status': 'not_configured',
+    },
     'semantics': {
       'metric_views': [],
       'preferred_tables': [],
+      'deprecated_tables': [],
       'glossary': {},
+      'sample_queries': [],
       'known_caveats': [],
     },
     'agent_policy': {
@@ -49,8 +56,33 @@ def default_project_settings() -> dict[str, Any]:
       'enabled_skills': None,
       'write_policy': 'approval_required',
     },
+    'roles': {
+      'owners': [],
+      'developers': [],
+      'reviewers': [],
+      'users': [],
+      'viewers': [],
+    },
+    'releases': [],
+    'release_policy': {
+      'require_review': False,
+      'require_eval_pass': False,
+      'user_sessions_pin_release': True,
+      'allowed_user_overrides': [],
+    },
     'workflows': {
       'enabled': [],
+      'templates': [],
+      'runs': [],
+    },
+    'artifacts': [],
+    'feedback': [],
+    'eval_cases': [],
+    'governance': {
+      'retention_policy': 'project_default',
+      'export_policy': 'exclude_secrets',
+      'readiness': {},
+      'audit_events': [],
     },
     'memory': {
       'approved': [],
@@ -88,6 +120,44 @@ def normalize_project_settings(settings: Mapping[str, Any] | None) -> dict[str, 
   return normalized
 
 
+def _release_snapshot_settings(
+  settings: dict[str, Any],
+  release_id: str | None,
+) -> dict[str, Any] | None:
+  """Return normalized settings for a stored release snapshot."""
+  if not release_id:
+    return None
+
+  releases = settings.get('releases')
+  if not isinstance(releases, list):
+    return None
+
+  for release in releases:
+    if not isinstance(release, dict):
+      continue
+    if release.get('id') != release_id:
+      continue
+    snapshot = release.get('settings_snapshot')
+    if isinstance(snapshot, Mapping):
+      return normalize_project_settings(snapshot)
+  return None
+
+
+def get_project_settings_for_run(
+  project: Any,
+  *,
+  run_role: str | None = None,
+) -> tuple[dict[str, Any], str]:
+  """Return draft or release-pinned settings for one agent run."""
+  settings = parse_project_settings(getattr(project, 'settings_json', None))
+  release_id = getattr(project, 'current_release_id', DEFAULT_RELEASE_ID)
+  if run_role in USER_PREVIEW_ROLES:
+    snapshot = _release_snapshot_settings(settings, release_id)
+    if snapshot:
+      return snapshot, f'release:{release_id}'
+  return settings, 'draft'
+
+
 def parse_project_settings(settings_json: str | None) -> dict[str, Any]:
   """Parse persisted project settings JSON with a default fallback."""
   if not settings_json:
@@ -120,9 +190,13 @@ def merge_project_settings(
   return serialize_project_settings(current)
 
 
-def get_project_resource_defaults(project: Any) -> dict[str, str | None]:
+def get_project_resource_defaults(
+  project: Any,
+  *,
+  run_role: str | None = None,
+) -> dict[str, str | None]:
   """Return normalized resource defaults from a Project-like object."""
-  settings = parse_project_settings(getattr(project, 'settings_json', None))
+  settings, _ = get_project_settings_for_run(project, run_role=run_role)
   resources = settings.get('resources', {})
   return {
     key: value if isinstance(value, str) and value.strip() else None
@@ -134,11 +208,24 @@ def get_project_resource_defaults(project: Any) -> dict[str, str | None]:
 def build_project_context(
   project: Any,
   *,
+  run_role: str | None = None,
   effective_resources: Mapping[str, Any] | None = None,
   conversation_overrides: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
   """Build the agent-visible context pack for one project run."""
-  settings = parse_project_settings(getattr(project, 'settings_json', None))
+  settings, settings_source = get_project_settings_for_run(project, run_role=run_role)
+  normalized_role = run_role or 'developer'
+  if normalized_role in USER_PREVIEW_ROLES:
+    settings = normalize_project_settings({
+      **settings,
+      'agent_policy': {
+        **(settings.get('agent_policy') or {}),
+        'role': normalized_role,
+        'mode': 'read_only_analysis',
+        'write_policy': 'read_only',
+      },
+    })
+
   return {
     'id': getattr(project, 'id', None),
     'name': getattr(project, 'name', None),
@@ -146,6 +233,8 @@ def build_project_context(
     'project_type': getattr(project, 'project_type', DEFAULT_PROJECT_TYPE),
     'status': getattr(project, 'status', DEFAULT_PROJECT_STATUS),
     'release_id': getattr(project, 'current_release_id', DEFAULT_RELEASE_ID),
+    'role': normalized_role,
+    'settings_source': settings_source,
     'settings': settings,
     'effective_resources': {
       key: value

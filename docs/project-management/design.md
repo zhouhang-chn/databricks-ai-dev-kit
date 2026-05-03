@@ -226,6 +226,10 @@ MVP behavior:
 - project detail loads resource defaults from project settings
 - conversation values override project defaults
 - config panel can save current resource selections as project defaults
+- project management panel edits setup, role, release, semantic, workflow,
+  artifact, memory, feedback, and governance settings
+- developers can switch the current chat to user-preview mode or start a new
+  user-preview chat
 - header chips reflect effective resources
 - project cards can show type/status when useful
 
@@ -269,6 +273,8 @@ Future migrations can normalize settings into:
 - Tool access must continue to be enforced by constructing the actual tool list
   per run.
 - Read-only user sessions should never expose developer-only write tools.
+- User-preview runs should use read-oriented project file and Databricks tools
+  and should pin to the current release snapshot when one exists.
 - Release snapshots should record the settings used for a user session.
 - Project settings should narrow resource use, but Unity Catalog and workspace
   permissions remain the final access control.

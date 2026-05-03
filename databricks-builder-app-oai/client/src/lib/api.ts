@@ -153,6 +153,7 @@ export interface InvokeAgentParams {
   warehouseId?: string | null;
   workspaceFolder?: string | null;
   mlflowExperimentName?: string | null;
+  runRole?: string | null;
   signal?: AbortSignal;
   onEvent: (event: Record<string, unknown>) => void;
   onError: (error: Error) => void;
@@ -171,6 +172,7 @@ export async function invokeAgent(params: InvokeAgentParams): Promise<void> {
     warehouseId,
     workspaceFolder,
     mlflowExperimentName,
+    runRole,
     signal,
     onEvent,
     onError,
@@ -190,6 +192,7 @@ export async function invokeAgent(params: InvokeAgentParams): Promise<void> {
       warehouse_id: warehouseId ?? null,
       workspace_folder: workspaceFolder ?? null,
       mlflow_experiment_name: mlflowExperimentName ?? null,
+      run_role: runRole ?? null,
     },
   });
 

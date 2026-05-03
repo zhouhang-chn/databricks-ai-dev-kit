@@ -33,12 +33,12 @@ Last updated: 2026-05-03.
 | Phase 1: Project Metadata And Settings MVP | Complete | Project fields, JSON settings helpers, API patch support, Alembic migration, and tests are implemented. |
 | Phase 2: Project Defaults In Agent Runs | Complete | Agent routes resolve project defaults plus conversation overrides and pass a project context pack into the OpenAI runtime prompt. |
 | Phase 3: Project Settings UI Slice | Complete | Project page inherits defaults and the config panel can save current resource selections as project defaults. |
-| Phase 4: Project Home And Creation Wizard | Pending | Add a project landing surface and guided setup. |
-| Phase 5: Resource And Semantic Registry | Pending | Pin Databricks resources, metric views, tables, glossary, sample queries, and caveats. |
-| Phase 6: Developer/User Roles | Pending | Add memberships and role-specific UI/action policies. |
-| Phase 7: Releases And User Sessions | Pending | Add release snapshots, publish flow, and user-session release pinning. |
-| Phase 8: Workflows, Artifacts, Memory, Feedback | Pending | Add reusable workflows, artifact registry, approved memories, and feedback-to-eval flow. |
-| Phase 9: Governance And Readiness | Pending | Add diagnostics, retention/export rules, and readiness checks. |
+| Phase 4: Project Home And Creation Wizard | Complete | Project management panel now edits setup fields, purpose, type/status, audience, success criteria, and readiness. |
+| Phase 5: Resource And Semantic Registry | Complete | JSON-backed registry supports pinned resources, metric views, preferred/deprecated tables, sample queries, glossary, and caveats. |
+| Phase 6: Developer/User Roles | Complete | Settings support role lists, the UI can switch between developer and user-preview roles, and user-preview runs receive read-oriented tools. |
+| Phase 7: Releases And User Sessions | Complete | Project panel can publish settings snapshots; user-preview runs pin to the current release snapshot when present. |
+| Phase 8: Workflows, Artifacts, Memory, Feedback | Complete | Project settings now capture workflows, artifacts, approved memory, feedback, and eval cases and render them into agent context. |
+| Phase 9: Governance And Readiness | Complete | Project settings capture retention/export policies, readiness diagnostics, and audit events for release publication. |
 
 ## Phase 0: Document Target Model
 
@@ -278,12 +278,12 @@ Acceptance gates:
 
 ## Current Implementation Checks
 
-Run after phases 1-3:
+Run after phases 1-9:
 
 ```bash
 cd databricks-builder-app-oai
 UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run pytest tests -q
-UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run ruff check server/project_config.py server/db/models.py server/services/agent.py server/services/agent_runtime/base.py server/services/agent_runtime/openai_runtime.py server/services/system_prompt.py server/routers/projects.py server/routers/agent.py tests --select F,E9
+UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run ruff check server/project_config.py server/db/models.py server/services/agent.py server/services/agent_runtime/base.py server/services/agent_runtime/openai_runtime.py server/services/system_prompt.py server/services/tools/project_files.py server/services/tools/databricks_openai.py server/routers/projects.py server/routers/agent.py tests --select F,E9
 cd client
 npm run lint --cache /tmp/npm-cache-ai-dev-kit
 npm run build:typecheck --cache /tmp/npm-cache-ai-dev-kit

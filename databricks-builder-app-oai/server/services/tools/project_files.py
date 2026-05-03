@@ -31,7 +31,7 @@ def _relative(project_dir: Path, path: Path) -> str:
   return str(path.resolve().relative_to(project_dir.resolve()))
 
 
-def create_project_file_tools(project_dir: Path) -> list:
+def create_project_file_tools(project_dir: Path, *, read_only: bool = False) -> list:
   """Create function tools bound to a single project directory."""
   from agents import function_tool
 
@@ -144,6 +144,14 @@ def create_project_file_tools(project_dir: Path) -> list:
         break
     return files
 
+  read_tools = [
+    read_project_file,
+    list_project_files,
+    grep_project_files,
+    get_project_tree,
+  ]
+  if read_only:
+    return read_tools
   return [
     read_project_file,
     write_project_file,

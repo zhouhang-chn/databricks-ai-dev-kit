@@ -66,6 +66,16 @@ def _resolve_enabled_skills(
   return None, 'all'
 
 
+def _is_user_preview_run(project_context: dict[str, Any] | None) -> bool:
+  """Return true when the run should expose only read-oriented tools."""
+  if not project_context:
+    return False
+  role = str(project_context.get('role') or '').lower()
+  policy = (project_context.get('settings') or {}).get('agent_policy') or {}
+  write_policy = str(policy.get('write_policy') or '').lower() if isinstance(policy, dict) else ''
+  return role in {'user', 'user_preview', 'viewer'} or write_policy == 'read_only'
+
+
 class OpenAIAgentRuntime:
   """Agent runtime backed by OpenAI Agents SDK."""
 
@@ -151,6 +161,8 @@ class OpenAIAgentRuntime:
         project_dir,
         enabled_skills=enabled_skills,
       )
+      read_only_run = _is_user_preview_run(request.project_context)
+      logger.info('OpenAI runtime tool policy: read_only=%s', read_only_run)
 
       instructions = get_system_prompt(
         cluster_id=request.cluster_id,
@@ -165,11 +177,12 @@ class OpenAIAgentRuntime:
       )
 
       tools = [
-        *create_project_file_tools(project_dir),
+        *create_project_file_tools(project_dir, read_only=read_only_run),
         *create_databricks_tools(
           default_catalog=request.default_catalog,
           default_schema=request.default_schema,
           default_warehouse_id=request.warehouse_id,
+          read_only=read_only_run,
         ),
         *create_operation_tools(),
       ]

@@ -53,6 +53,7 @@ class InvokeAgentRequest(BaseModel):
     warehouse_id: Optional[str] = None  # Databricks SQL warehouse for queries
     workspace_folder: Optional[str] = None  # Workspace folder for file uploads
     mlflow_experiment_name: Optional[str] = None  # MLflow experiment name for tracing
+    run_role: Optional[str] = None  # developer, user_preview, user, or viewer
     target_databricks_host: Optional[str] = None  # Target workspace URL for cross-workspace ops
     target_databricks_token: Optional[str] = None  # Pre-generated OAuth token for target workspace
 
@@ -111,7 +112,8 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
         logger.error(f'Project not found: {body.project_id}')
         raise HTTPException(status_code=404, detail=f'Project not found: {body.project_id}')
 
-    project_defaults = get_project_resource_defaults(project)
+    run_role = body.run_role or 'developer'
+    project_defaults = get_project_resource_defaults(project, run_role=run_role)
     effective_cluster_id = body.cluster_id or project_defaults.get('cluster_id')
     effective_default_catalog = body.default_catalog or project_defaults.get('default_catalog')
     effective_default_schema = body.default_schema or project_defaults.get('default_schema')
@@ -130,6 +132,7 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
     }
     project_context = build_project_context(
         project,
+        run_role=run_role,
         effective_resources={
             'cluster_id': effective_cluster_id,
             'default_catalog': effective_default_catalog,
@@ -141,11 +144,14 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
         conversation_overrides=conversation_overrides,
     )
     logger.info(
-        'Resolved project context: project=%s type=%s status=%s release=%s resources=%s',
+        'Resolved project context: project=%s type=%s status=%s release=%s role=%s '
+        'source=%s resources=%s',
         body.project_id,
         project_context.get('project_type'),
         project_context.get('status'),
         project_context.get('release_id'),
+        project_context.get('role'),
+        project_context.get('settings_source'),
         project_context.get('effective_resources'),
     )
 

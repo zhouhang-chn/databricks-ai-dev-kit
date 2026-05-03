@@ -55,9 +55,21 @@ def _render_project_context(project_context: dict[str, Any] | None) -> str:
   if not isinstance(semantics, dict):
     semantics = {}
 
+  resource_registry = settings.get('resource_registry') or {}
+  if not isinstance(resource_registry, dict):
+    resource_registry = {}
+
   policy = settings.get('agent_policy') or {}
   if not isinstance(policy, dict):
     policy = {}
+
+  workflows = settings.get('workflows') or {}
+  if not isinstance(workflows, dict):
+    workflows = {}
+
+  governance = settings.get('governance') or {}
+  if not isinstance(governance, dict):
+    governance = {}
 
   resource_rows = [
     f'- **{key}:** `{value}`'
@@ -72,7 +84,12 @@ def _render_project_context(project_context: dict[str, Any] | None) -> str:
 
   metric_views = _format_project_list(semantics.get('metric_views'))
   preferred_tables = _format_project_list(semantics.get('preferred_tables'))
+  deprecated_tables = _format_project_list(semantics.get('deprecated_tables'))
+  sample_queries = _format_project_list(semantics.get('sample_queries'), limit=5)
   caveats = _format_project_list(semantics.get('known_caveats'), limit=5)
+  pinned_resources = _format_project_list(resource_registry.get('pinned'), limit=10)
+  workflow_templates = _format_project_list(workflows.get('enabled'), limit=8)
+  approved_memory = _format_project_list((settings.get('memory') or {}).get('approved'), limit=8)
 
   glossary_rows: list[str] = []
   glossary = semantics.get('glossary')
@@ -100,6 +117,8 @@ context for this run unless the user explicitly says otherwise.
 - **Type:** `{project_context.get('project_type') or 'unknown'}`
 - **Status:** `{project_context.get('status') or 'unknown'}`
 - **Release:** `{project_context.get('release_id') or 'draft'}`
+- **Run Role:** `{project_context.get('role') or 'developer'}`
+- **Settings Source:** `{project_context.get('settings_source') or 'draft'}`
 """
   if project_context.get('description'):
     section += f"- **Purpose:** {project_context['description']}\n"
@@ -111,12 +130,28 @@ context for this run unless the user explicitly says otherwise.
     section += f"\n### Preferred Metric Views\n{metric_views}\n"
   if preferred_tables:
     section += f"\n### Preferred Tables\n{preferred_tables}\n"
+  if deprecated_tables:
+    section += f"\n### Deprecated Or Blocked Tables\nAvoid these unless the user explicitly overrides:\n{deprecated_tables}\n"
+  if pinned_resources:
+    section += f"\n### Pinned Resources\n{pinned_resources}\n"
+  if sample_queries:
+    section += f"\n### Known-Good Query Patterns\n{sample_queries}\n"
   if glossary_rows:
     section += f"\n### Glossary\n{chr(10).join(glossary_rows)}\n"
   if caveats:
     section += f"\n### Known Caveats\n{caveats}\n"
+  if workflow_templates:
+    section += f"\n### Available Project Workflows\n{workflow_templates}\n"
+  if approved_memory:
+    section += f"\n### Approved Project Memory\n{approved_memory}\n"
   if policy_rows:
     section += f"\n### Agent Policy\n{chr(10).join(policy_rows)}\n"
+  if governance.get('export_policy') or governance.get('retention_policy'):
+    section += '\n### Governance\n'
+    if governance.get('retention_policy'):
+      section += f"- **Retention:** `{governance.get('retention_policy')}`\n"
+    if governance.get('export_policy'):
+      section += f"- **Export policy:** `{governance.get('export_policy')}`\n"
 
   return section
 

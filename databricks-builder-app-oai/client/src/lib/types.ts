@@ -26,10 +26,16 @@ export interface ProjectSettings {
     workspace_folder?: string | null;
     mlflow_experiment_name?: string | null;
   };
+  resource_registry?: {
+    pinned?: string[];
+    metadata_cache_status?: string | null;
+  };
   semantics?: {
     metric_views?: string[];
     preferred_tables?: string[];
+    deprecated_tables?: string[];
     glossary?: Record<string, string>;
+    sample_queries?: string[];
     known_caveats?: string[];
   };
   agent_policy?: {
@@ -38,13 +44,48 @@ export interface ProjectSettings {
     enabled_skills?: string[] | null;
     write_policy?: string | null;
   };
+  roles?: {
+    owners?: string[];
+    developers?: string[];
+    reviewers?: string[];
+    users?: string[];
+    viewers?: string[];
+  };
+  releases?: ProjectRelease[];
+  release_policy?: {
+    require_review?: boolean;
+    require_eval_pass?: boolean;
+    user_sessions_pin_release?: boolean;
+    allowed_user_overrides?: string[];
+  };
   workflows?: {
     enabled?: string[];
+    templates?: string[];
+    runs?: string[];
+  };
+  artifacts?: string[];
+  feedback?: string[];
+  eval_cases?: string[];
+  governance?: {
+    retention_policy?: string | null;
+    export_policy?: string | null;
+    readiness?: Record<string, boolean>;
+    audit_events?: string[];
   };
   memory?: {
     approved?: string[];
     proposed?: string[];
   };
+}
+
+export interface ProjectRelease {
+  id: string;
+  status: 'draft' | 'review' | 'published' | 'deprecated' | 'archived';
+  notes?: string;
+  released_at?: string;
+  released_by?: string;
+  eval_status?: string;
+  settings_snapshot?: ProjectSettings;
 }
 
 export interface Project {

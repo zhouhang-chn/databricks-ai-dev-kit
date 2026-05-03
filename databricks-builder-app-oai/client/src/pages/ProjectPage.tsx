@@ -3,15 +3,21 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useUser } from '@/contexts/UserContext';
 import {
   ArrowUp,
+  BookOpen,
   Check,
   ChevronDown,
   ClipboardCopy,
+  Code2,
+  Eye,
   ExternalLink,
+  FolderCog,
   Loader2,
   Save,
   Settings2,
+  ShieldCheck,
   Square,
   Sparkles,
+  UserRound,
   Wrench,
   X,
 } from 'lucide-react';
@@ -36,7 +42,16 @@ import {
   stopExecution,
   updateProject,
 } from '@/lib/api';
-import type { Cluster, Conversation, Message, Project, Warehouse, TodoItem } from '@/lib/types';
+import type {
+  Cluster,
+  Conversation,
+  Message,
+  Project,
+  ProjectRelease,
+  ProjectSettings,
+  Warehouse,
+  TodoItem,
+} from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 // Combined activity item for display
@@ -408,6 +423,67 @@ type ResourceDefaults = {
   mlflow_experiment_name?: string | null;
 };
 
+type RunRole = 'developer' | 'user_preview';
+
+type ProjectManagementPayload = {
+  description?: string | null;
+  project_type?: string;
+  status?: string;
+  current_release_id?: string;
+  settings: Partial<ProjectSettings>;
+};
+
+function splitLines(value: string): string[] {
+  return value
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function joinLines(values?: string[] | null): string {
+  return (values || []).join('\n');
+}
+
+function stringifyGlossary(glossary?: Record<string, string>): string {
+  return Object.entries(glossary || {})
+    .map(([term, definition]) => `${term}: ${definition}`)
+    .join('\n');
+}
+
+function parseGlossary(value: string): Record<string, string> {
+  const glossary: Record<string, string> = {};
+  for (const line of splitLines(value)) {
+    const separatorIndex = line.indexOf(':');
+    if (separatorIndex < 1) continue;
+    const term = line.slice(0, separatorIndex).trim();
+    const definition = line.slice(separatorIndex + 1).trim();
+    if (term && definition) glossary[term] = definition;
+  }
+  return glossary;
+}
+
+function computeReadiness(project: Project | null): Record<string, boolean> {
+  const settings = project?.settings;
+  const resources = settings?.resources || {};
+  const semantics = settings?.semantics || {};
+  return {
+    purpose: Boolean(project?.description?.trim()),
+    catalogSchema: Boolean(resources.default_catalog && resources.default_schema),
+    warehouse: Boolean(resources.warehouse_id),
+    workspaceFolder: Boolean(resources.workspace_folder),
+    semanticScope: Boolean(
+      (semantics.metric_views?.length || 0) > 0
+      || (semantics.preferred_tables?.length || 0) > 0
+    ),
+    release: Boolean(project?.current_release_id && project.current_release_id !== 'draft'),
+  };
+}
+
+function makeReleaseId(): string {
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 13);
+  return `rel_${stamp}`;
+}
+
 function generatedWorkspaceFolder(
   user: string | null,
   projectName: string | null,
@@ -482,6 +558,252 @@ function resolveMlflowExperimentName(
   return projectResourceDefaults(project).mlflow_experiment_name || '';
 }
 
+function ProjectManagementPanel({
+  isOpen,
+  onClose,
+  project,
+  onSave,
+  onPublish,
+  onStartUserPreview,
+  isSaving,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  project: Project | null;
+  onSave: (payload: ProjectManagementPayload) => void;
+  onPublish: (releaseId: string, notes: string) => void;
+  onStartUserPreview: () => void;
+  isSaving: boolean;
+}) {
+  const [description, setDescription] = useState('');
+  const [projectType, setProjectType] = useState('databricks_app_build');
+  const [status, setStatus] = useState('draft');
+  const [audience, setAudience] = useState('developer');
+  const [successCriteria, setSuccessCriteria] = useState('');
+  const [metricViews, setMetricViews] = useState('');
+  const [preferredTables, setPreferredTables] = useState('');
+  const [deprecatedTables, setDeprecatedTables] = useState('');
+  const [sampleQueries, setSampleQueries] = useState('');
+  const [glossary, setGlossary] = useState('');
+  const [caveats, setCaveats] = useState('');
+  const [pinnedResources, setPinnedResources] = useState('');
+  const [users, setUsers] = useState('');
+  const [viewers, setViewers] = useState('');
+  const [workflows, setWorkflows] = useState('');
+  const [artifacts, setArtifacts] = useState('');
+  const [approvedMemory, setApprovedMemory] = useState('');
+  const [feedback, setFeedback] = useState('');
+  const [evalCases, setEvalCases] = useState('');
+  const [retentionPolicy, setRetentionPolicy] = useState('project_default');
+  const [exportPolicy, setExportPolicy] = useState('exclude_secrets');
+  const [releaseId, setReleaseId] = useState(makeReleaseId());
+  const [releaseNotes, setReleaseNotes] = useState('');
+
+  useEffect(() => {
+    if (!project || !isOpen) return;
+    const settings = project.settings || { version: 1 };
+    setDescription(project.description || '');
+    setProjectType(project.project_type || 'databricks_app_build');
+    setStatus(project.status || 'draft');
+    setAudience(settings.identity?.audience || 'developer');
+    setSuccessCriteria(joinLines(settings.identity?.success_criteria));
+    setMetricViews(joinLines(settings.semantics?.metric_views));
+    setPreferredTables(joinLines(settings.semantics?.preferred_tables));
+    setDeprecatedTables(joinLines(settings.semantics?.deprecated_tables));
+    setSampleQueries(joinLines(settings.semantics?.sample_queries));
+    setGlossary(stringifyGlossary(settings.semantics?.glossary));
+    setCaveats(joinLines(settings.semantics?.known_caveats));
+    setPinnedResources(joinLines(settings.resource_registry?.pinned));
+    setUsers(joinLines(settings.roles?.users));
+    setViewers(joinLines(settings.roles?.viewers));
+    setWorkflows(joinLines(settings.workflows?.enabled));
+    setArtifacts(joinLines(settings.artifacts));
+    setApprovedMemory(joinLines(settings.memory?.approved));
+    setFeedback(joinLines(settings.feedback));
+    setEvalCases(joinLines(settings.eval_cases));
+    setRetentionPolicy(settings.governance?.retention_policy || 'project_default');
+    setExportPolicy(settings.governance?.export_policy || 'exclude_secrets');
+    setReleaseId(makeReleaseId());
+    setReleaseNotes('');
+  }, [project, isOpen]);
+
+  if (!isOpen) return null;
+
+  const readiness = computeReadiness(project);
+  const releaseCount = project?.settings?.releases?.length || 0;
+
+  const handleSave = () => {
+    onSave({
+      description: description || null,
+      project_type: projectType,
+      status,
+      settings: {
+        identity: {
+          audience,
+          success_criteria: splitLines(successCriteria),
+        },
+        resource_registry: {
+          pinned: splitLines(pinnedResources),
+          metadata_cache_status: splitLines(pinnedResources).length > 0 ? 'configured' : 'not_configured',
+        },
+        semantics: {
+          metric_views: splitLines(metricViews),
+          preferred_tables: splitLines(preferredTables),
+          deprecated_tables: splitLines(deprecatedTables),
+          sample_queries: splitLines(sampleQueries),
+          glossary: parseGlossary(glossary),
+          known_caveats: splitLines(caveats),
+        },
+        roles: {
+          users: splitLines(users),
+          viewers: splitLines(viewers),
+        },
+        workflows: {
+          enabled: splitLines(workflows),
+        },
+        artifacts: splitLines(artifacts),
+        memory: {
+          approved: splitLines(approvedMemory),
+        },
+        feedback: splitLines(feedback),
+        eval_cases: splitLines(evalCases),
+        governance: {
+          retention_policy: retentionPolicy || 'project_default',
+          export_policy: exportPolicy || 'exclude_secrets',
+          readiness,
+        },
+      },
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[80] bg-black/30 backdrop-blur-sm">
+      <div className="absolute right-0 top-0 h-full w-full max-w-2xl overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-2xl">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-bg-elevated)] px-6 py-4">
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-[var(--color-text-heading)]">Project Management</h3>
+            <p className="text-xs text-[var(--color-text-muted)] truncate">
+              {project?.name || 'Project'} · {releaseCount} release{releaseCount === 1 ? '' : 's'}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-md hover:bg-[var(--color-bg-secondary)]">
+            <X className="h-4 w-4 text-[var(--color-text-muted)]" />
+          </button>
+        </div>
+
+        <div className="space-y-6 p-6">
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-heading)]">
+              <FolderCog className="h-4 w-4 text-[var(--color-accent-primary)]" />
+              Setup
+            </div>
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Project purpose..." className="min-h-20 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+            <div className="grid grid-cols-2 gap-3">
+              <select value={projectType} onChange={(e) => setProjectType(e.target.value)} className="h-10 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm">
+                <option value="databricks_app_build">Databricks app build</option>
+                <option value="analyst_workspace">Analyst workspace</option>
+                <option value="dashboard_companion">Dashboard companion</option>
+                <option value="data_product_build">Data product build</option>
+                <option value="investigation_ops">Investigation / ops</option>
+              </select>
+              <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-10 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm">
+                <option value="draft">Draft</option>
+                <option value="active">Active</option>
+                <option value="paused">Paused</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
+            <input value={audience} onChange={(e) => setAudience(e.target.value)} placeholder="Audience or persona" className="h-10 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm" />
+            <textarea value={successCriteria} onChange={(e) => setSuccessCriteria(e.target.value)} placeholder="Success criteria, one per line" className="min-h-20 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-heading)]">
+              <BookOpen className="h-4 w-4 text-[var(--color-accent-primary)]" />
+              Resource And Semantic Registry
+            </div>
+            <textarea value={pinnedResources} onChange={(e) => setPinnedResources(e.target.value)} placeholder="Pinned Databricks resources, one per line" className="min-h-20 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+            <div className="grid grid-cols-2 gap-3">
+              <textarea value={metricViews} onChange={(e) => setMetricViews(e.target.value)} placeholder="Metric views, one per line" className="min-h-24 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+              <textarea value={preferredTables} onChange={(e) => setPreferredTables(e.target.value)} placeholder="Preferred tables, one per line" className="min-h-24 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+              <textarea value={deprecatedTables} onChange={(e) => setDeprecatedTables(e.target.value)} placeholder="Deprecated/blocked tables" className="min-h-24 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+              <textarea value={sampleQueries} onChange={(e) => setSampleQueries(e.target.value)} placeholder="Known-good SQL/query patterns" className="min-h-24 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+            </div>
+            <textarea value={glossary} onChange={(e) => setGlossary(e.target.value)} placeholder="Glossary lines: ARR: Annual recurring revenue" className="min-h-24 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+            <textarea value={caveats} onChange={(e) => setCaveats(e.target.value)} placeholder="Known caveats, one per line" className="min-h-20 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-heading)]">
+              <UserRound className="h-4 w-4 text-[var(--color-accent-primary)]" />
+              Roles And User Preview
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <textarea value={users} onChange={(e) => setUsers(e.target.value)} placeholder="Users, one email/group per line" className="min-h-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+              <textarea value={viewers} onChange={(e) => setViewers(e.target.value)} placeholder="Viewers, one email/group per line" className="min-h-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+            </div>
+            <button type="button" onClick={onStartUserPreview} className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 text-sm hover:bg-[var(--color-bg-secondary)]">
+              <Eye className="h-4 w-4" />
+              Start User Preview Chat
+            </button>
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-heading)]">
+              <ShieldCheck className="h-4 w-4 text-[var(--color-accent-primary)]" />
+              Releases And Governance
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <input value={releaseId} onChange={(e) => setReleaseId(e.target.value)} className="h-10 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm" />
+              <button type="button" onClick={() => onPublish(releaseId, releaseNotes)} className="h-10 rounded-lg border border-[var(--color-border)] px-3 text-sm hover:bg-[var(--color-bg-secondary)]">
+                Publish Snapshot
+              </button>
+            </div>
+            <textarea value={releaseNotes} onChange={(e) => setReleaseNotes(e.target.value)} placeholder="Release notes" className="min-h-20 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+            <div className="grid grid-cols-2 gap-3">
+              <input value={retentionPolicy} onChange={(e) => setRetentionPolicy(e.target.value)} placeholder="Retention policy" className="h-10 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm" />
+              <input value={exportPolicy} onChange={(e) => setExportPolicy(e.target.value)} placeholder="Export policy" className="h-10 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm" />
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-heading)]">
+              <Code2 className="h-4 w-4 text-[var(--color-accent-primary)]" />
+              Workflows, Artifacts, Memory
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <textarea value={workflows} onChange={(e) => setWorkflows(e.target.value)} placeholder="Enabled workflows" className="min-h-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+              <textarea value={artifacts} onChange={(e) => setArtifacts(e.target.value)} placeholder="Artifacts" className="min-h-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+              <textarea value={approvedMemory} onChange={(e) => setApprovedMemory(e.target.value)} placeholder="Approved memory" className="min-h-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+              <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} placeholder="Feedback queue" className="min-h-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+            </div>
+            <textarea value={evalCases} onChange={(e) => setEvalCases(e.target.value)} placeholder="Eval cases, one per line" className="min-h-20 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+          </section>
+
+          <section className="space-y-3">
+            <div className="text-sm font-semibold text-[var(--color-text-heading)]">Readiness</div>
+            <div className="grid grid-cols-2 gap-2">
+              {Object.entries(readiness).map(([key, ready]) => (
+                <div key={key} className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-xs">
+                  <span className={cn('h-2 w-2 rounded-full', ready ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-muted)]/40')} />
+                  <span className="capitalize text-[var(--color-text-muted)]">{key.replace(/([A-Z])/g, ' $1')}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <div className="sticky bottom-0 -mx-6 border-t border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-4">
+            <button type="button" onClick={handleSave} disabled={isSaving} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-accent-primary)] text-sm font-medium text-white hover:bg-[var(--color-accent-secondary)] disabled:opacity-60">
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Save Project Management Settings
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ProjectPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -506,7 +828,9 @@ export default function ProjectPage() {
   const [defaultSchema, setDefaultSchema] = useState<string>('');
   const [workspaceFolder, setWorkspaceFolder] = useState<string>('');
   const [mlflowExperimentName, setMlflowExperimentName] = useState<string>('');
+  const [runRole, setRunRole] = useState<RunRole>('developer');
   const [skillsExplorerOpen, setSkillsExplorerOpen] = useState(false);
+  const [projectPanelOpen, setProjectPanelOpen] = useState(false);
   const [, setActiveExecutionId] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [messageTools, setMessageTools] = useState<Record<string, string[]>>({});
@@ -911,6 +1235,7 @@ export default function ProjectPage() {
         warehouseId: selectedWarehouseId,
         workspaceFolder,
         mlflowExperimentName: mlflowExperimentName || null,
+        runRole,
         signal: abortController.signal,
         onExecutionId: (executionId) => {
           const stream = allStreamsRef.current[streamKey];
@@ -1105,7 +1430,18 @@ export default function ProjectPage() {
         setTodos([]);
       }
     }
-  }, [projectId, input, currentConversation?.id, selectedClusterId, defaultCatalog, defaultSchema, selectedWarehouseId, workspaceFolder, mlflowExperimentName]);
+  }, [
+    projectId,
+    input,
+    currentConversation?.id,
+    selectedClusterId,
+    defaultCatalog,
+    defaultSchema,
+    selectedWarehouseId,
+    workspaceFolder,
+    mlflowExperimentName,
+    runRole,
+  ]);
 
   // Stop generation - abort client stream AND tell backend to cancel
   const handleStopGeneration = useCallback(async () => {
@@ -1169,6 +1505,7 @@ export default function ProjectPage() {
   };
 
   const [isSavingProjectDefaults, setIsSavingProjectDefaults] = useState(false);
+  const [isSavingProjectManagement, setIsSavingProjectManagement] = useState(false);
   const handleSaveProjectDefaults = useCallback(async () => {
     if (!projectId || !project) return;
 
@@ -1204,6 +1541,67 @@ export default function ProjectPage() {
     workspaceFolder,
     mlflowExperimentName,
   ]);
+
+  const handleSaveProjectManagement = useCallback(async (payload: ProjectManagementPayload) => {
+    if (!projectId || !project) return;
+
+    setIsSavingProjectManagement(true);
+    try {
+      const updated = await updateProject(projectId, payload);
+      setProject(updated);
+      toast.success('Project settings saved');
+    } catch (error) {
+      console.error('Failed to save project settings:', error);
+      toast.error('Failed to save project settings');
+    } finally {
+      setIsSavingProjectManagement(false);
+    }
+  }, [projectId, project]);
+
+  const handlePublishRelease = useCallback(async (releaseId: string, notes: string) => {
+    if (!projectId || !project || !releaseId.trim()) return;
+
+    setIsSavingProjectManagement(true);
+    try {
+      const release: ProjectRelease = {
+        id: releaseId.trim(),
+        status: 'published',
+        notes,
+        released_at: new Date().toISOString(),
+        released_by: user || undefined,
+        eval_status: 'not_run',
+        settings_snapshot: project.settings,
+      };
+      const existing = (project.settings?.releases || []).filter((item) => item.id !== release.id);
+      const updated = await updateProject(projectId, {
+        status: 'active',
+        current_release_id: release.id,
+        settings: {
+          releases: [release, ...existing],
+          governance: {
+            audit_events: [
+              `Published ${release.id} by ${user || 'unknown'} at ${release.released_at}`,
+              ...(project.settings?.governance?.audit_events || []),
+            ],
+          },
+        },
+      });
+      setProject(updated);
+      toast.success('Project release published');
+    } catch (error) {
+      console.error('Failed to publish release:', error);
+      toast.error('Failed to publish release');
+    } finally {
+      setIsSavingProjectManagement(false);
+    }
+  }, [projectId, project, user]);
+
+  const handleStartUserPreview = useCallback(async () => {
+    setRunRole('user_preview');
+    setProjectPanelOpen(false);
+    await handleNewConversation();
+    toast.success('User preview chat started');
+  }, [handleNewConversation]);
 
   // Config panel state
   const [configPanelOpen, setConfigPanelOpen] = useState(false);
@@ -1349,6 +1747,34 @@ export default function ProjectPage() {
             </h2>
           </div>
           <div className="flex items-center gap-2.5">
+            <div className="hidden lg:flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-0.5">
+              <button
+                type="button"
+                onClick={() => setRunRole('developer')}
+                className={cn(
+                  'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors',
+                  runRole === 'developer'
+                    ? 'bg-[var(--color-background)] text-[var(--color-text-heading)] shadow-sm'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-heading)]'
+                )}
+              >
+                <Code2 className="h-3.5 w-3.5" />
+                Developer
+              </button>
+              <button
+                type="button"
+                onClick={() => setRunRole('user_preview')}
+                className={cn(
+                  'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors',
+                  runRole === 'user_preview'
+                    ? 'bg-[var(--color-background)] text-[var(--color-text-heading)] shadow-sm'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-heading)]'
+                )}
+              >
+                <Eye className="h-3.5 w-3.5" />
+                User Preview
+              </button>
+            </div>
             {/* Config summary chips */}
             <div className="hidden md:flex items-center gap-1.5">
               {configChips.map((chip, i) => (
@@ -1360,6 +1786,13 @@ export default function ProjectPage() {
                 </span>
               ))}
             </div>
+            <button
+              onClick={() => setProjectPanelOpen(true)}
+              className="flex items-center justify-center h-9 w-9 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] transition-all"
+              title="Project management"
+            >
+              <FolderCog className="h-4.5 w-4.5" />
+            </button>
             {/* Settings button */}
             <div className="relative" ref={configPanelRef}>
               <button
@@ -1399,6 +1832,16 @@ export default function ProjectPage() {
           </div>
         </div>
 
+        <ProjectManagementPanel
+          isOpen={projectPanelOpen}
+          onClose={() => setProjectPanelOpen(false)}
+          project={project}
+          onSave={handleSaveProjectManagement}
+          onPublish={handlePublishRelease}
+          onStartUserPreview={handleStartUserPreview}
+          isSaving={isSavingProjectManagement}
+        />
+
         {/* Messages */}
         <div className="flex-1 overflow-y-auto">
           {messages.length === 0 && !isStreamingHere ? (
@@ -1413,10 +1856,12 @@ export default function ProjectPage() {
                   </div>
                 </div>
                 <h3 className="text-2xl font-bold text-[var(--color-text-heading)]">
-                  What can I help you build?
+                  {runRole === 'user_preview' ? 'What would a user ask?' : 'What can I help you build?'}
                 </h3>
                 <p className="mt-3 text-sm text-[var(--color-text-muted)] max-w-md mx-auto leading-relaxed">
-                  Build data pipelines, generate synthetic data, create dashboards, and more on Databricks.
+                  {runRole === 'user_preview'
+                    ? 'Preview the published project with read-only tools and release-pinned context.'
+                    : 'Build data pipelines, generate synthetic data, create dashboards, and more on Databricks.'}
                 </p>
 
                 {/* Example prompts - 2x2 grid */}

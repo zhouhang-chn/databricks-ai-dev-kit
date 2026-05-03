@@ -66,9 +66,22 @@ def create_databricks_tools(
   default_catalog: str | None = None,
   default_schema: str | None = None,
   default_warehouse_id: str | None = None,
+  read_only: bool = False,
 ) -> list:
   """Create the full Databricks tool set: typed wrappers + generated FastMCP."""
   from agents import function_tool
+
+  def _is_read_only_sql(sql_query: str) -> bool:
+    normalized = sql_query.strip().lower()
+    return normalized.startswith((
+      'select ',
+      'with ',
+      'show ',
+      'describe ',
+      'desc ',
+      'explain ',
+      'values ',
+    ))
 
   @function_tool
   async def execute_sql(
@@ -80,6 +93,14 @@ def create_databricks_tools(
   ) -> str:
     """Execute SQL on a Databricks SQL warehouse and return result rows as JSON."""
     from databricks_tools_core.sql.sql import execute_sql as _execute_sql
+
+    if read_only and not _is_read_only_sql(sql_query):
+      return json.dumps({
+        'error': (
+          'This project run is in read-only user preview mode. '
+          'Only SELECT, WITH, SHOW, DESCRIBE, EXPLAIN, and VALUES SQL is allowed.'
+        )
+      })
 
     rows = await _to_thread_with_context(
       _execute_sql,
@@ -129,7 +150,54 @@ def create_databricks_tools(
 
   typed = [execute_sql, list_sql_warehouses, get_best_sql_warehouse, list_compute]
   generated = _load_fastmcp_tools(skip_names=_TYPED_WRAPPER_NAMES)
+  if read_only:
+    generated = [
+      tool for tool in generated
+      if _is_read_only_tool_name(getattr(tool, 'name', ''))
+    ]
   return typed + generated
+
+
+def _is_read_only_tool_name(name: str) -> bool:
+  """Return true when a generated Databricks tool is safe for user preview."""
+  exact = {
+    'ask_genie',
+    'execute_sql',
+    'get_table_stats_and_schema',
+    'get_volume_folder_details',
+    'list_compute',
+    'list_tracked_resources',
+    'list_sql_warehouses',
+    'get_best_sql_warehouse',
+    'query_vs_index',
+  }
+  prefixes = (
+    'get_',
+    'list_',
+    'query_',
+    'describe_',
+    'scan_',
+  )
+  blocked_prefixes = (
+    'create',
+    'update',
+    'delete',
+    'drop',
+    'grant',
+    'revoke',
+    'manage',
+    'start',
+    'stop',
+    'upload',
+    'download',
+    'execute_code',
+  )
+  lowered = name.lower()
+  if lowered in exact:
+    return True
+  if lowered.startswith(blocked_prefixes):
+    return False
+  return lowered.startswith(prefixes)
 
 
 # ---------------------------------------------------------------------------
