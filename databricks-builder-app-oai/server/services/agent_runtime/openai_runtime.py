@@ -38,6 +38,20 @@ def _preview_value(value: object, max_chars: int = 2000) -> str:
   return text if len(text) <= max_chars else f'{text[:max_chars]}...'
 
 
+def _with_run_metadata(event: dict, request: AgentRunRequest, trace_id: str | None) -> dict:
+  """Attach run identity fields used by logs, SSE replay, and story inspection."""
+  enriched = dict(event)
+  enriched.setdefault('project_id', request.project_id)
+  enriched.setdefault('conversation_id', request.conversation_id)
+  if request.execution_id:
+    enriched.setdefault('execution_id', request.execution_id)
+  if request.story_id:
+    enriched.setdefault('story_id', request.story_id)
+  if trace_id:
+    enriched.setdefault('trace_id', trace_id)
+  return enriched
+
+
 def _tool_name(tool: Any) -> str:
   """Best-effort tool name for OpenAI SDK tool objects."""
   return str(
@@ -95,6 +109,7 @@ class OpenAIAgentRuntime:
       not mlflow_tracing
       and (settings.tracing_disabled or bool(settings.base_url))
     )
+    trace_id: str | None = None
 
     logger.info(
       'OpenAI runtime starting: project=%s conversation=%s model=%s base_url=%s',
@@ -138,6 +153,7 @@ class OpenAIAgentRuntime:
         ModelSettings,
         RunConfig,
         Runner,
+        gen_trace_id,
         retry_policies,
       )
 
@@ -226,12 +242,15 @@ class OpenAIAgentRuntime:
         ),
       )
 
+      trace_id = None if tracing_disabled else gen_trace_id()
+
       result = Runner.run_streamed(
         agent,
         input=request.message,
         session=session,
         run_config=RunConfig(
           workflow_name='Databricks Builder App',
+          trace_id=trace_id,
           group_id=conversation_id,
           trace_include_sensitive_data=False,
           tracing_disabled=tracing_disabled,
@@ -239,6 +258,8 @@ class OpenAIAgentRuntime:
           trace_metadata={
             'project_id': request.project_id,
             'conversation_id': conversation_id,
+            'execution_id': request.execution_id or '',
+            'story_id': request.story_id or '',
             'workspace_url': request.databricks_host or '',
             'runtime': 'openai_agents',
             'project_type': str((request.project_context or {}).get('project_type') or ''),
@@ -247,12 +268,27 @@ class OpenAIAgentRuntime:
           },
         ),
       )
+      trace_obj = getattr(result, 'trace', None)
+      trace_id = trace_id or getattr(trace_obj, 'trace_id', None)
       logger.info(
-        'OpenAI streamed run created: conversation=%s session=%s model=%s',
+        'OpenAI streamed run created: conversation=%s execution=%s story=%s '
+        'session=%s model=%s trace_id=%s mlflow_experiment=%s',
         conversation_id,
+        request.execution_id,
+        request.story_id,
         session_id,
         settings.agent_model,
+        trace_id,
+        request.mlflow_experiment_name,
       )
+      yield _with_run_metadata({
+        'type': 'system',
+        'subtype': 'trace_started',
+        'data': {
+          'trace_id': trace_id,
+          'mlflow_experiment_name': request.mlflow_experiment_name,
+        },
+      }, request, trace_id)
 
       started_at = time.time()
       cancelled = False
@@ -262,7 +298,7 @@ class OpenAIAgentRuntime:
       async for sdk_event in result.stream_events():
         sdk_event_count += 1
         sdk_event_type = getattr(sdk_event, 'type', type(sdk_event).__name__)
-        logger.info(
+        logger.debug(
           '[OPENAI_SDK] Event #%s: %s preview=%s',
           sdk_event_count,
           sdk_event_type,
@@ -274,19 +310,19 @@ class OpenAIAgentRuntime:
           cancel = getattr(result, 'cancel', None)
           if callable(cancel):
             cancel()
-          yield {'type': 'cancelled'}
+          yield _with_run_metadata({'type': 'cancelled'}, request, trace_id)
 
         for event in normalize_openai_event(sdk_event):
           if cancelled and event.get('type') not in {'system', 'result'}:
             continue
           if event.get('type') in {'text', 'text_delta'}:
             emitted_text = True
-          yield event
+          yield _with_run_metadata(event, request, trace_id)
 
       if not cancelled:
         final_output = getattr(result, 'final_output', None)
         if final_output and not emitted_text:
-          yield {'type': 'text', 'text': str(final_output)}
+          yield _with_run_metadata({'type': 'text', 'text': str(final_output)}, request, trace_id)
 
       duration_ms = int((time.time() - started_at) * 1000)
       result_event = {
@@ -297,18 +333,22 @@ class OpenAIAgentRuntime:
         'num_turns': None,
       }
       logger.info(
-        'OpenAI runtime completed: conversation=%s session=%s sdk_events=%s duration_ms=%s',
+        'OpenAI runtime completed: conversation=%s execution=%s story=%s session=%s '
+        'trace_id=%s sdk_events=%s duration_ms=%s',
         conversation_id,
+        request.execution_id,
+        request.story_id,
         session_id,
+        trace_id,
         sdk_event_count,
         duration_ms,
       )
-      yield result_event
+      yield _with_run_metadata(result_event, request, trace_id)
 
     except Exception as e:
       ensure_logger_active(logger, set_propagate_false=True)
       logger.exception('OpenAI agent runtime failed: %s', e)
-      yield {'type': 'error', 'error': str(e)}
+      yield _with_run_metadata({'type': 'error', 'error': str(e)}, request, trace_id)
     finally:
       logger.info('Clearing Databricks auth context for conversation=%s', conversation_id)
       clear_databricks_auth()

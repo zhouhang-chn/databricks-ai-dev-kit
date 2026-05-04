@@ -50,6 +50,7 @@ class ActiveStream:
     is_complete: bool = False
     is_cancelled: bool = False
     error: str | None = None
+    event_metadata: dict[str, Any] = field(default_factory=dict)
     task: asyncio.Task | None = None
     persist_task: asyncio.Task | None = None
     created_at: float = field(default_factory=time.time)
@@ -59,15 +60,18 @@ class ActiveStream:
 
     def add_event(self, event_data: dict[str, Any]) -> None:
         """Add an event to the stream and queue for persistence."""
+        enriched = dict(event_data)
+        for key, value in self.event_metadata.items():
+            enriched.setdefault(key, value)
         event = StreamEvent(
             timestamp=time.time(),
-            data=event_data,
+            data=enriched,
         )
         self.events.append(event)
         # Queue event for database persistence
         self._pending_events.append({
             'timestamp': event.timestamp,
-            **event_data,
+            **enriched,
         })
 
     def get_events_since(self, cursor: float = 0.0) -> tuple[list[dict[str, Any]], float]:
@@ -93,11 +97,12 @@ class ActiveStream:
         self.is_complete = True
         self.add_event({'type': 'stream.completed', 'is_error': False})
 
-    def mark_error(self, error: str) -> None:
+    def mark_error(self, error: str, *, emit_error_event: bool = True) -> None:
         """Mark the stream as failed with an error."""
         self.error = error
         self.is_complete = True
-        self.add_event({'type': 'error', 'error': error})
+        if emit_error_event:
+            self.add_event({'type': 'error', 'error': error})
         self.add_event({'type': 'stream.completed', 'is_error': True})
 
     def cancel(self) -> bool:

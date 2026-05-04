@@ -13,6 +13,8 @@ class AgentRunRequest:
   conversation_id: str
   session_id: str | None
   message: str
+  execution_id: str | None = None
+  story_id: str | None = None
   cluster_id: str | None = None
   default_catalog: str | None = None
   default_schema: str | None = None

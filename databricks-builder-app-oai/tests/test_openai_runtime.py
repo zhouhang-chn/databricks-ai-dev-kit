@@ -4,12 +4,13 @@ import logging
 from dataclasses import dataclass
 
 import pytest
+from server.services.active_stream import ActiveStream
 from server.services.agent_runtime.openai_events import normalize_openai_event
 from server.services.agent_runtime.openai_models import load_model_settings
 from server.services.agent_runtime.openai_runtime import _resolve_enabled_skills
 from server.services.logging_utils import ensure_logger_active
-from server.services.tools.databricks_openai import _is_read_only_tool_name
 from server.services.skills_manager import filter_openai_tools_by_skills
+from server.services.tools.databricks_openai import _is_read_only_tool_name
 from server.services.tools.project_files import (
   MAX_READ_BYTES,
   ProjectFileError,
@@ -42,6 +43,7 @@ class Item:
 
   type: str
   raw_item: object
+  output: object | None = None
 
 
 def test_raw_text_delta_event_normalizes_to_text_delta():
@@ -76,6 +78,73 @@ def test_tool_call_event_normalizes_to_tool_use():
   }]
 
 
+def test_tool_call_event_prefers_call_id_and_parses_json_arguments():
+  """Tool IDs must match later output call IDs for trace/evidence linking."""
+  events = normalize_openai_event(
+    Event(
+      type='run_item_stream_event',
+      item=Item(
+        type='tool_call_item',
+        raw_item={
+          'id': '__fake_id__',
+          'call_id': 'call_1',
+          'name': 'execute_sql',
+          'arguments': '{"sql_query": "SELECT 1"}',
+        },
+      ),
+    )
+  )
+
+  assert events == [{
+    'type': 'tool_use',
+    'tool_id': 'call_1',
+    'tool_name': 'execute_sql',
+    'tool_input': {'sql_query': 'SELECT 1'},
+  }]
+
+
+def test_tool_output_event_normalizes_to_tool_result():
+  """SDK tool outputs become Builder App evidence events, not fake tool calls."""
+  events = normalize_openai_event(
+    Event(
+      type='run_item_stream_event',
+      item=Item(
+        type='tool_call_output_item',
+        raw_item={'call_id': 'call_1'},
+        output={'rows': [{'answer': 1}]},
+      ),
+    )
+  )
+
+  assert events == [{
+    'type': 'tool_result',
+    'tool_use_id': 'call_1',
+    'content': '{"rows": [{"answer": 1}]}',
+    'is_error': False,
+  }]
+
+
+def test_tool_output_event_detects_error_status():
+  """Tool output status is preserved for story error evidence."""
+  events = normalize_openai_event(
+    Event(
+      type='run_item_stream_event',
+      item=Item(
+        type='tool_call_output_item',
+        raw_item={'call_id': 'call_1', 'status': 'failed'},
+        output='Timed out',
+      ),
+    )
+  )
+
+  assert events == [{
+    'type': 'tool_result',
+    'tool_use_id': 'call_1',
+    'content': 'Timed out',
+    'is_error': True,
+  }]
+
+
 def test_model_settings_require_ai_gateway_env(monkeypatch):
   """Missing AI Gateway env vars fail clearly."""
   monkeypatch.delenv('OPENAI_API_KEY', raising=False)
@@ -93,6 +162,28 @@ def test_runtime_enabled_skills_missing_config_means_all_skills(tmp_path, monkey
 
   assert enabled_skills is None
   assert source == 'all'
+
+
+def test_active_stream_metadata_and_error_completion_are_persisted():
+  """Terminal stream events should keep run identity and error state."""
+  stream = ActiveStream(
+    execution_id='exec_1',
+    conversation_id='conv_1',
+    project_id='proj_1',
+    event_metadata={'story_id': 'story_1', 'execution_id': 'exec_1'},
+  )
+
+  stream.mark_error('failed', emit_error_event=False)
+  events, _ = stream.get_events_since()
+
+  assert events == [{
+    'type': 'stream.completed',
+    'is_error': True,
+    'story_id': 'story_1',
+    'execution_id': 'exec_1',
+    '_cursor': events[0]['_cursor'],
+  }]
+  assert stream.error == 'failed'
 
 
 def test_project_path_escape_is_rejected(tmp_path):

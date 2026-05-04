@@ -50,6 +50,16 @@ function defaultNextMoves(question: string): NextMove[] {
   ];
 }
 
+function nextMoveType(value: unknown): NextMove['actionType'] {
+  return (
+    value === 'drill'
+    || value === 'compare'
+    || value === 'validate'
+    || value === 'explain'
+    || value === 'pivot'
+  ) ? value : 'pivot';
+}
+
 export function createAnalysisStory(args: {
   id?: string;
   conversationId?: string;
@@ -262,6 +272,18 @@ export function storyEventsFromStreamEvent(
         label: todo.content,
         prompt: todo.content,
         actionType: 'pivot' as const,
+      }));
+    return moves.length > 0 ? [{ type: 'next_moves.updated', storyId, moves }] : [];
+  }
+  if (type === 'next_moves.updated' && Array.isArray(event.moves)) {
+    const moves = (event.moves as Array<Record<string, unknown>>)
+      .filter((move) => move.label || move.prompt)
+      .slice(0, 3)
+      .map((move, index) => ({
+        id: String(move.id || makeId(`move-${index}`)),
+        label: String(move.label || move.prompt || 'Next move'),
+        prompt: String(move.prompt || move.label || ''),
+        actionType: nextMoveType(move.actionType),
       }));
     return moves.length > 0 ? [{ type: 'next_moves.updated', storyId, moves }] : [];
   }

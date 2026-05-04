@@ -1,5 +1,6 @@
 """Map OpenAI Agents SDK stream events to Builder App events."""
 
+import json
 from typing import Any
 
 
@@ -18,11 +19,52 @@ def _text_from_content(content: Any) -> str:
     parts = []
     for item in content:
       text = _get(item, 'text') or _get(item, 'content')
-      if text:
-        parts.append(str(text))
+      if text is not None and text != '':
+        parts.append(text if isinstance(text, str) else _json_preview(text))
+      elif isinstance(item, str):
+        parts.append(item)
+      else:
+        parts.append(_json_preview(item))
     return '\n'.join(parts)
+  if isinstance(content, dict):
+    text = _get(content, 'text') or _get(content, 'content') or _get(content, 'output')
+    return text if isinstance(text, str) else _json_preview(text or content)
   text = _get(content, 'text') or _get(content, 'content')
-  return str(text) if text else ''
+  return text if isinstance(text, str) else _json_preview(text) if text else ''
+
+
+def _json_preview(value: Any) -> str:
+  """Serialize structured tool values for evidence/debug display."""
+  try:
+    return json.dumps(value, ensure_ascii=False, default=str)
+  except TypeError:
+    return str(value)
+
+
+def _parse_tool_arguments(arguments: Any) -> Any:
+  """Return tool arguments as structured data when the SDK gives JSON text."""
+  if not isinstance(arguments, str):
+    return arguments or {}
+  stripped = arguments.strip()
+  if not stripped:
+    return {}
+  try:
+    return json.loads(stripped)
+  except json.JSONDecodeError:
+    return arguments
+
+
+def _is_error_output(raw_item: Any, output: Any) -> bool:
+  """Best-effort error flag for tool output items."""
+  status = str(_get(raw_item, 'status', '') or '').lower()
+  if status in {'failed', 'error'}:
+    return True
+  if isinstance(output, dict):
+    if bool(output.get('is_error')) or bool(output.get('error')):
+      return True
+    output_status = str(output.get('status') or '').lower()
+    return output_status in {'failed', 'error'}
+  return False
 
 
 def normalize_openai_event(event: Any) -> list[dict]:
@@ -52,23 +94,39 @@ def normalize_openai_event(event: Any) -> list[dict]:
     item_type = _get(item, 'type', '')
     raw_item = _get(item, 'raw_item', item)
 
-    if item_type in {'tool_call_item', 'function_call_item'} or 'tool_call' in item_type:
-      return [{
-        'type': 'tool_use',
-        'tool_id': _get(raw_item, 'id') or _get(item, 'id', ''),
-        'tool_name': _get(raw_item, 'name') or _get(item, 'name', 'tool'),
-        'tool_input': _get(raw_item, 'arguments') or _get(item, 'arguments') or {},
-      }]
-
     if (
       item_type in {'tool_call_output_item', 'function_call_output_item'}
       or 'tool_call_output' in item_type
     ):
+      output = _get(item, 'output') or _get(raw_item, 'output')
       return [{
         'type': 'tool_result',
-        'tool_use_id': _get(raw_item, 'call_id') or _get(item, 'call_id', ''),
-        'content': _text_from_content(_get(raw_item, 'output') or _get(item, 'output')),
-        'is_error': False,
+        'tool_use_id': (
+          _get(item, 'call_id')
+          or _get(raw_item, 'call_id')
+          or _get(raw_item, 'id')
+          or ''
+        ),
+        'content': _text_from_content(output),
+        'is_error': _is_error_output(raw_item, output),
+      }]
+
+    if item_type in {'tool_call_item', 'function_call_item'} or 'tool_call' in item_type:
+      arguments = _get(raw_item, 'arguments') or _get(item, 'arguments') or {}
+      return [{
+        'type': 'tool_use',
+        'tool_id': (
+          _get(item, 'call_id')
+          or _get(raw_item, 'call_id')
+          or _get(raw_item, 'id')
+          or _get(item, 'id', '')
+        ),
+        'tool_name': (
+          _get(item, 'tool_name')
+          or _get(raw_item, 'name')
+          or _get(item, 'name', 'tool')
+        ),
+        'tool_input': _parse_tool_arguments(arguments),
       }]
 
     if item_type in {'message_output_item', 'message_item'} or 'message' in item_type:

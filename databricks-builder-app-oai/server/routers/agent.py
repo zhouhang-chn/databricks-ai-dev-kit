@@ -41,6 +41,27 @@ def sse_event(data: dict) -> str:
     return f'data: {json.dumps(data)}\n\n'
 
 
+def _next_moves_for_message(message: str) -> list[dict[str, str]]:
+    """Generate default next moves when the agent does not emit its own."""
+    return [
+        {
+            'label': 'Explain evidence',
+            'prompt': f'Explain the evidence and assumptions behind: {message}',
+            'actionType': 'explain',
+        },
+        {
+            'label': 'Validate result',
+            'prompt': f'Validate the data sources, freshness, and caveats for: {message}',
+            'actionType': 'validate',
+        },
+        {
+            'label': 'Drill down',
+            'prompt': f'Drill down into the most important segment or exception for: {message}',
+            'actionType': 'drill',
+        },
+    ]
+
+
 class InvokeAgentRequest(BaseModel):
     """Request to invoke the OpenAI agent runtime."""
 
@@ -203,9 +224,42 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
         conversation_id=conversation_id,
         user_email=user_email,
     )
+    story_id = f'story-{stream.execution_id}'
+    stream.event_metadata = {
+        'project_id': body.project_id,
+        'conversation_id': conversation_id,
+        'execution_id': stream.execution_id,
+        'story_id': story_id,
+    }
+
+    def stream_event(event_data: dict) -> dict:
+        """Attach stable run metadata to every persisted/SSE event."""
+        enriched = dict(event_data)
+        enriched.setdefault('project_id', body.project_id)
+        enriched.setdefault('conversation_id', conversation_id)
+        enriched.setdefault('execution_id', stream.execution_id)
+        enriched.setdefault('story_id', story_id)
+        return enriched
+
+    def emit(event_data: dict) -> None:
+        """Add a metadata-enriched event to the active stream."""
+        trace_id = event_data.get('trace_id')
+        if trace_id:
+            stream.event_metadata.setdefault('trace_id', trace_id)
+        stream.add_event(stream_event(event_data))
 
     # Emit conversation_id as first event
-    stream.add_event({'type': 'conversation.created', 'conversation_id': conversation_id})
+    emit({'type': 'conversation.created', 'conversation_id': conversation_id})
+    emit({
+        'type': 'story.created',
+        'question_preview': body.message[:500],
+        'context': {
+            'project_id': body.project_id,
+            'conversation_id': conversation_id,
+            'run_role': run_role,
+            'resources': project_context.get('effective_resources'),
+        },
+    })
 
     # Create the agent coroutine that will run in background
     async def run_agent():
@@ -214,6 +268,7 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
         new_session_id: Optional[str] = None
         error_message: Optional[str] = None
         received_deltas = False  # Track if we received streaming deltas
+        tool_started_at: dict[str, float] = {}
 
         try:
             # Stream all events from the OpenAI runtime.
@@ -235,6 +290,8 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                 enabled_skills=enabled_skills,
                 mlflow_experiment_name=effective_mlflow_experiment_name,
                 project_context=project_context,
+                execution_id=stream.execution_id,
+                story_id=story_id,
             ):
                 # Check if cancelled (also checked in agent thread, but double-check here)
                 if stream.is_cancelled:
@@ -248,7 +305,7 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                     text = event.get('text', '')
                     final_text += text
                     received_deltas = True
-                    stream.add_event({'type': 'text_delta', 'text': text})
+                    emit({'type': 'text_delta', 'text': text})
 
                 elif event_type == 'text':
                     # Complete text block - accumulate all text blocks
@@ -260,39 +317,49 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                         if not received_deltas:
                             # No deltas received, so send complete text blocks to client
                             final_text += text
-                            stream.add_event({'type': 'text', 'text': text})
+                            emit({'type': 'text', 'text': text})
                         # Note: If received_deltas is True, we skip sending 'text' events
                         # because the client already received the same content via 'text_delta'
                         # BUT we still need to track final_text for persistence
                         # The text_delta handler already accumulates to final_text
 
                 elif event_type == 'thinking':
-                    stream.add_event({
+                    emit({
                         'type': 'thinking',
                         'thinking': event.get('thinking', ''),
                     })
 
                 elif event_type == 'tool_use':
+                    tool_id = str(event.get('tool_id', ''))
                     tool_name = event.get('tool_name', '')
                     tool_input = event.get('tool_input', {})
+                    if tool_id:
+                        tool_started_at[tool_id] = time.time()
 
-                    stream.add_event({
+                    emit({
                         'type': 'tool_use',
-                        'tool_id': event.get('tool_id', ''),
+                        'tool_id': tool_id,
                         'tool_name': tool_name,
                         'tool_input': tool_input,
                     })
 
                     # Emit dedicated todos event when TodoWrite is called
-                    if tool_name == 'TodoWrite' and 'todos' in tool_input:
-                        stream.add_event({
+                    if (
+                        tool_name == 'TodoWrite'
+                        and isinstance(tool_input, dict)
+                        and 'todos' in tool_input
+                    ):
+                        emit({
                             'type': 'todos',
                             'todos': tool_input['todos'],
                         })
 
                 elif event_type == 'tool_result':
+                    tool_use_id = str(event.get('tool_use_id', ''))
                     content = event.get('content', '')
                     is_error = event.get('is_error', False)
+                    started = tool_started_at.pop(tool_use_id, None)
+                    duration_ms = int((time.time() - started) * 1000) if started else None
 
                     # Detect cascade failure pattern - "Stream closed" errors indicate
                     # the internal tool connection is broken.
@@ -307,44 +374,55 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                             f'{content}'
                         )
 
-                    stream.add_event({
+                    emit({
                         'type': 'tool_result',
-                        'tool_use_id': event.get('tool_use_id', ''),
+                        'tool_use_id': tool_use_id,
                         'content': content,
                         'is_error': is_error,
+                        'duration_ms': duration_ms,
                     })
 
                 elif event_type == 'result':
                     new_session_id = event.get('session_id')
-                    stream.add_event({
+                    emit({
                         'type': 'result',
                         'session_id': new_session_id,
                         'duration_ms': event.get('duration_ms'),
                         'total_cost_usd': event.get('total_cost_usd'),
                         'is_error': event.get('is_error', False),
                         'num_turns': event.get('num_turns'),
+                        'trace_id': event.get('trace_id'),
+                    })
+                    emit({
+                        'type': 'next_moves.updated',
+                        'moves': _next_moves_for_message(body.message),
                     })
 
                 elif event_type == 'error':
                     error_message = event.get('error', 'Unknown error')
                     logger.error(f'Agent error received: {error_message}')
-                    stream.add_event({'type': 'error', 'error': error_message})
+                    emit({
+                        'type': 'error',
+                        'error': error_message,
+                        'trace_id': event.get('trace_id'),
+                    })
 
                 elif event_type == 'system':
                     # Extract session_id from init event if not already set
                     data = event.get('data')
                     if event.get('subtype') == 'init' and data and not new_session_id:
                         new_session_id = data.get('session_id')
-                    stream.add_event({
+                    emit({
                         'type': 'system',
                         'subtype': event.get('subtype', ''),
                         'data': data,
+                        'trace_id': event.get('trace_id'),
                     })
 
                 elif event_type == 'cancelled':
                     # Agent was cancelled by user request
                     logger.info(f'Stream {stream.execution_id} received cancellation confirmation')
-                    stream.add_event({'type': 'cancelled'})
+                    emit({'type': 'cancelled'})
                     break
 
                 elif event_type == 'keepalive':
@@ -354,7 +432,7 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                         f'Stream {stream.execution_id} keepalive - '
                         f'{elapsed:.0f}s since last event'
                     )
-                    stream.add_event({
+                    emit({
                         'type': 'keepalive',
                         'elapsed_since_last_event': elapsed,
                     })
@@ -375,7 +453,7 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                     'Check backend logs for details.'
                 )
 
-            stream.add_event({'type': 'error', 'error': error_message})
+            emit({'type': 'error', 'error': error_message})
 
         # Save messages to storage after stream completes (if not cancelled)
         if not stream.is_cancelled:
@@ -390,7 +468,7 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                 # Save assistant response (or error)
                 if final_text or error_message:
                     content = final_text if final_text else f'Error: {error_message}'
-                    is_error = bool(error_message and not final_text)
+                    is_error = bool(error_message)
                     logger.info(
                         f'Saving assistant message: {len(content)} chars, '
                         f'is_error={is_error}'
@@ -441,8 +519,8 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                 logger.error(f'Failed to save messages: {e}')
 
         # Mark stream as complete
-        if error_message and not final_text:
-            stream.mark_error(error_message)
+        if error_message:
+            stream.mark_error(error_message, emit_error_event=False)
         else:
             stream.mark_complete()
 
@@ -487,6 +565,7 @@ async def stream_progress(execution_id: str, body: StreamProgressRequest):
             """Tell the client the in-memory stream disappeared."""
             yield sse_event({
                 'type': 'error',
+                'execution_id': execution_id,
                 'error': (
                     'Execution stream is no longer available. The backend server '
                     'may have restarted, so the in-memory agent process was '
@@ -495,6 +574,7 @@ async def stream_progress(execution_id: str, body: StreamProgressRequest):
             })
             yield sse_event({
                 'type': 'stream.completed',
+                'execution_id': execution_id,
                 'is_error': True,
                 'is_cancelled': False,
             })
@@ -514,6 +594,13 @@ async def stream_progress(execution_id: str, body: StreamProgressRequest):
         """Generate SSE stream of events with 50-second window."""
         last_timestamp = body.last_event_timestamp or 0.0
         start_time = datetime.now()
+
+        def stream_event(event_data: dict) -> dict:
+            """Attach stream metadata to synthetic SSE control events."""
+            enriched = dict(stream.event_metadata)
+            enriched.update(event_data)
+            enriched.setdefault('execution_id', execution_id)
+            return enriched
 
         # Keep streaming until timeout or completion
         while True:
@@ -548,11 +635,11 @@ async def stream_progress(execution_id: str, body: StreamProgressRequest):
                         else:
                             logger.debug(f'SSE final event for {execution_id}: {event}')
                         yield sse_event(event)
-                yield sse_event({
+                yield sse_event(stream_event({
                     'type': 'stream.completed',
                     'is_error': stream.error is not None,
                     'is_cancelled': stream.is_cancelled,
-                })
+                }))
                 yield 'data: [DONE]\n\n'
                 break
 
@@ -564,12 +651,12 @@ async def stream_progress(execution_id: str, body: StreamProgressRequest):
                     f'client should reconnect from cursor={last_timestamp}'
                 )
                 # Send reconnect signal with last timestamp
-                yield sse_event({
+                yield sse_event(stream_event({
                     'type': 'stream.reconnect',
                     'execution_id': execution_id,
                     'last_timestamp': last_timestamp,
                     'message': 'Reconnect to continue streaming',
-                })
+                }))
                 break
 
             # Wait a bit before checking for new events

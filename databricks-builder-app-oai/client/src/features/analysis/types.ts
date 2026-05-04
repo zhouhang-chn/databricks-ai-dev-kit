@@ -81,6 +81,7 @@ export interface StreamStoryEvent {
   thinking?: unknown;
   error?: unknown;
   todos?: unknown;
+  moves?: unknown;
 }
 
 export type TodoLike = Pick<TodoItem, 'content' | 'status'>;
