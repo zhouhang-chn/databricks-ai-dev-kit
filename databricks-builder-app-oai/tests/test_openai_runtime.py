@@ -46,6 +46,14 @@ class Item:
   output: object | None = None
 
 
+@dataclass
+class ContentPart:
+  """Simple Responses content part object."""
+
+  text: str = ''
+  type: str = 'output_text'
+
+
 def test_raw_text_delta_event_normalizes_to_text_delta():
   """Raw SDK text deltas stay frontend-compatible."""
   events = normalize_openai_event(
@@ -76,6 +84,21 @@ def test_tool_call_event_normalizes_to_tool_use():
     'tool_name': 'execute_sql',
     'tool_input': {'sql_query': 'SELECT 1'},
   }]
+
+
+def test_empty_message_content_part_is_not_rendered_as_sdk_repr():
+  """Empty SDK content parts should not leak ResponseOutputText reprs into chat text."""
+  events = normalize_openai_event(
+    Event(
+      type='run_item_stream_event',
+      item=Item(
+        type='message_output_item',
+        raw_item={'content': [ContentPart(text='')]},
+      ),
+    )
+  )
+
+  assert events == []
 
 
 def test_tool_call_event_prefers_call_id_and_parses_json_arguments():

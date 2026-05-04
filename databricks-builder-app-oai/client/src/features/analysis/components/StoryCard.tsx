@@ -1,4 +1,4 @@
-import { BarChart3, CheckCircle2, Loader2, Pin, Search, Wrench } from 'lucide-react';
+import { CheckCircle2, Loader2, Pin, Search, Wrench } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AnalysisStory, NextMove } from '@/features/analysis/types';
@@ -54,7 +54,6 @@ export function StoryCard({
   onSelect: (storyId: string) => void;
   onNextMove: (move: NextMove) => void;
 }) {
-  const visibleEvidence = story.evidence.slice(-3);
   const visibleTrace = story.trace.slice(-4);
 
   return (
@@ -99,33 +98,6 @@ export function StoryCard({
           </div>
         )}
       </section>
-
-      {visibleEvidence.length > 0 && (
-        <section className="mt-4">
-          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-[var(--color-text-muted)]">
-            <BarChart3 className="h-3.5 w-3.5" />
-            Evidence
-          </div>
-          <div className="grid gap-2">
-            {visibleEvidence.map((block) => (
-              <div
-                key={block.id}
-                className={cn(
-                  'rounded-lg border border-[var(--color-border)]/60 bg-[var(--color-bg-secondary)]/50 p-3',
-                  block.isError && 'border-[var(--color-error)]/30 bg-[var(--color-error)]/5'
-                )}
-              >
-                <div className="mb-1 text-xs font-medium text-[var(--color-text-heading)]">
-                  {block.title}
-                </div>
-                <pre className="max-h-32 overflow-auto whitespace-pre-wrap text-xs leading-5 text-[var(--color-text-muted)]">
-                  {block.content}
-                </pre>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       {visibleTrace.length > 0 && (
         <section className="mt-4">

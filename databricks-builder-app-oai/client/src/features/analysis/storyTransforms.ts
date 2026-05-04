@@ -27,6 +27,101 @@ function asText(value: unknown): string {
   }
 }
 
+function tryParseJson(text: string): unknown | null {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function countLabel(key: string): string {
+  const normalized = key.toLowerCase();
+  if (normalized.includes('row')) return 'rows';
+  if (normalized.includes('catalog')) return 'catalogs';
+  if (normalized.includes('table')) return 'tables';
+  if (normalized.includes('schema')) return 'schemas';
+  if (normalized.includes('result')) return 'results';
+  return 'records';
+}
+
+function structuredSummary(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    return value.length === 1 ? '1 record returned.' : `${value.length} records returned.`;
+  }
+
+  const record = objectRecord(value);
+  if (!record) return null;
+
+  for (const key of ['items', 'rows', 'data', 'results', 'records', 'catalogs', 'schemas', 'tables']) {
+    const child = record[key];
+    if (Array.isArray(child)) {
+      const label = countLabel(key);
+      return child.length === 1 ? `1 ${label.slice(0, -1)} returned.` : `${child.length} ${label} returned.`;
+    }
+  }
+
+  const message = record.message || record.summary || record.text;
+  if (typeof message === 'string' && message.trim()) return message.trim();
+
+  const keys = Object.keys(record);
+  if (keys.length > 0) {
+    return keys.length === 1
+      ? 'Tool completed and returned 1 field.'
+      : `Tool completed and returned ${keys.length} fields.`;
+  }
+
+  return 'Tool completed.';
+}
+
+function cleanToolError(text: string): string {
+  const xmlMatch = text.match(/<tool_use_error>(.*?)<\/tool_use_error>/s);
+  const cleaned = (xmlMatch ? xmlMatch[1] : text).trim();
+  if (!cleaned) return 'Tool failed.';
+  return cleaned.length > 320 ? `${cleaned.slice(0, 317)}...` : cleaned;
+}
+
+function summarizeToolResult(content: unknown, isError: boolean): string {
+  const text = asText(content).trim();
+  if (isError) return cleanToolError(text);
+
+  const parsed = typeof content === 'string' ? tryParseJson(content) : content;
+  const summary = structuredSummary(parsed);
+  if (summary) return summary;
+
+  if (!text) return 'Tool completed without a visible result.';
+  if (text[0] === '{' || text[0] === '[') return 'Tool completed and returned structured data.';
+  return text.length > 320 ? `${text.slice(0, 317)}...` : text;
+}
+
+function unescapePythonReprText(text: string): string {
+  return text
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\\'/g, "'")
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, '\\');
+}
+
+function cleanAssistantText(text?: string): string | undefined {
+  if (!text) return text;
+  if (!text.includes('ResponseOutputText(')) return text;
+
+  const withoutEmptySdkBlocks = text.replace(
+    /"?ResponseOutputText\(annotations=\[\], text=(['"])\1, type=['"]output_text['"], logprobs=\[\]\)"?/g,
+    ''
+  );
+  const match = withoutEmptySdkBlocks.match(/text=(['"])([\s\S]*?)\1\s*,\s*type=/);
+  const cleaned = match ? unescapePythonReprText(match[2]) : withoutEmptySdkBlocks;
+  return cleaned.trim() || text;
+}
+
 function defaultNextMoves(question: string): NextMove[] {
   return [
     {
@@ -69,17 +164,18 @@ export function createAnalysisStory(args: {
   messageIds?: string[];
 }): AnalysisStory {
   const timestamp = nowIso();
+  const conclusion = cleanAssistantText(args.conclusion);
   return {
     id: args.id || makeId('story'),
     conversationId: args.conversationId,
     question: args.question,
     status: args.status || 'planning',
-    conclusion: args.conclusion,
-    evidence: args.conclusion ? [{
+    conclusion,
+    evidence: conclusion ? [{
       id: makeId('evidence-answer'),
       type: 'text',
       title: 'Answer',
-      content: args.conclusion,
+      content: conclusion,
       createdAt: timestamp,
     }] : [],
     trace: [],
@@ -249,16 +345,17 @@ export function storyEventsFromStreamEvent(
     }];
   }
   if (type === 'tool_result') {
-    const content = asText(event.content);
+    const isError = Boolean(event.is_error);
+    const content = summarizeToolResult(event.content, isError);
     return [{
       type: 'evidence.appended',
       storyId,
       block: {
         id: makeId('evidence-tool'),
-        type: event.is_error ? 'error' : 'tool_result',
-        title: event.is_error ? 'Tool error' : 'Tool result',
+        type: isError ? 'error' : 'tool_result',
+        title: isError ? 'Tool error' : 'Tool result',
         content,
-        isError: Boolean(event.is_error),
+        isError,
         createdAt: nowIso(),
       },
     }];

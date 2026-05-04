@@ -1888,9 +1888,9 @@ export default function ProjectPage() {
         />
 
         {/* Analysis Canvas */}
-        <div className="flex-1 overflow-hidden">
-          <div className="grid h-full grid-cols-1 xl:grid-cols-[minmax(0,1fr)_20rem]">
-            <div className="overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_20rem]">
+            <div className="min-h-0 overflow-y-auto">
               <StoryCanvas
                 stories={analysisStories}
                 activeStoryId={activeStoryId}

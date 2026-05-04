@@ -10,8 +10,8 @@ export function RightInspectPanel({
   onNextMove: (move: NextMove) => void;
 }) {
   return (
-    <aside className="hidden w-80 shrink-0 border-l border-[var(--color-border)] bg-[var(--color-bg-secondary)]/20 xl:block">
-      <div className="sticky top-0 max-h-full overflow-y-auto p-4">
+    <aside className="hidden h-full min-h-0 w-80 shrink-0 overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-bg-secondary)]/20 xl:block">
+      <div className="h-full overflow-y-auto p-4 pb-8">
         <div className="mb-4 flex items-center gap-2">
           <SlidersHorizontal className="h-4 w-4 text-[var(--color-accent-primary)]" />
           <h3 className="text-sm font-semibold text-[var(--color-text-heading)]">
@@ -69,9 +69,9 @@ export function RightInspectPanel({
                     <div className={cn('text-xs font-medium', block.isError ? 'text-[var(--color-error)]' : 'text-[var(--color-text-heading)]')}>
                       {block.title}
                     </div>
-                    <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-[11px] leading-5 text-[var(--color-text-muted)]">
+                    <p className="mt-2 break-words text-xs leading-5 text-[var(--color-text-muted)]">
                       {block.content}
-                    </pre>
+                    </p>
                   </div>
                 ))}
               </div>

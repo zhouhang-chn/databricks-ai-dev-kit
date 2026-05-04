@@ -23,6 +23,8 @@ def _text_from_content(content: Any) -> str:
         parts.append(text if isinstance(text, str) else _json_preview(text))
       elif isinstance(item, str):
         parts.append(item)
+      elif _get(item, 'text') is not None or _get(item, 'content') is not None:
+        continue
       else:
         parts.append(_json_preview(item))
     return '\n'.join(parts)
