@@ -6,7 +6,6 @@ import {
   BookOpen,
   Check,
   ChevronDown,
-  ClipboardCopy,
   Code2,
   Eye,
   ExternalLink,
@@ -22,12 +21,19 @@ import {
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { SkillsExplorer } from '@/components/SkillsExplorer';
 import { FunLoader } from '@/components/FunLoader';
+import { RightInspectPanel } from '@/features/analysis/components/RightInspectPanel';
+import { StoryCanvas } from '@/features/analysis/components/StoryCanvas';
+import {
+  createAnalysisStory,
+  reduceAnalysisEvent,
+  storiesFromMessages,
+  storyEventsFromStreamEvent,
+} from '@/features/analysis/storyTransforms';
+import type { AnalysisEvent, AnalysisStory, NextMove } from '@/features/analysis/types';
 import {
   createConversation,
   deleteConversation,
@@ -65,6 +71,19 @@ interface ActivityItem {
   timestamp: number;
 }
 
+interface ActiveStream {
+  fullText: string;
+  activityItems: ActivityItem[];
+  todos: TodoItem[];
+  tools: string[];
+  stories: AnalysisStory[];
+  executionId: string | null;
+  abortController: AbortController | null;
+  isReconnecting: boolean;
+  storyId?: string;
+  pendingMessages: Message[];
+}
+
 // Databricks logo mark SVG
 function DatabricksLogo({ className }: { className?: string }) {
   return (
@@ -73,60 +92,6 @@ function DatabricksLogo({ className }: { className?: string }) {
       <path d="M18 24.5L3 16V18L18 27L33 18V16L18 24.5Z" fill="currentColor" />
       <path d="M18 30.5L3 22V24L18 33L33 24V22L18 30.5Z" fill="currentColor" opacity="0.7" />
     </svg>
-  );
-}
-
-// Expandable tools list for a message
-function ToolsUsedBadge({ tools }: { tools: string[] }) {
-  const [expanded, setExpanded] = useState(false);
-
-  if (tools.length === 0) return null;
-
-  // Deduplicate and clean tool names
-  const uniqueTools = [...new Set(tools.map(t => t.replace('mcp__databricks__', '').replace(/_/g, ' ')))];
-
-  return (
-    <div className="mt-2">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="inline-flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-      >
-        <Wrench className="h-3 w-3" />
-        <span>{uniqueTools.length} tool{uniqueTools.length !== 1 ? 's' : ''} used</span>
-        <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
-      </button>
-      {expanded && (
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {uniqueTools.map((tool, i) => (
-            <span
-              key={i}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--color-bg-secondary)] border border-[var(--color-border)]/40 text-[11px] text-[var(--color-text-muted)] capitalize"
-            >
-              <Wrench className="h-2.5 w-2.5" />
-              {tool}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Copy button for code blocks
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      onClick={() => {
-        navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      }}
-      className="absolute top-2 right-2 p-1.5 rounded-md bg-[var(--color-bg-secondary)]/80 border border-[var(--color-border)]/50 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] opacity-0 group-hover/code:opacity-100 transition-all"
-      title={copied ? 'Copied!' : 'Copy code'}
-    >
-      {copied ? <Check className="h-3.5 w-3.5 text-[var(--color-success)]" /> : <ClipboardCopy className="h-3.5 w-3.5" />}
-    </button>
   );
 }
 
@@ -814,6 +779,8 @@ export default function ProjectPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [analysisStories, setAnalysisStories] = useState<AnalysisStory[]>([]);
+  const [activeStoryId, setActiveStoryId] = useState<string | undefined>();
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [streamingConvIds, setStreamingConvIds] = useState<string[]>([]);
@@ -843,20 +810,37 @@ export default function ProjectPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const reconnectAttemptedRef = useRef<string | null>(null);
   const currentConvIdRef = useRef<string | undefined>(undefined);
+  const messageToolsRef = useRef<Record<string, string[]>>({});
   // Per-conversation streaming data (supports concurrent streams)
-  const allStreamsRef = useRef<Record<string, {
-    fullText: string;
-    activityItems: ActivityItem[];
-    todos: TodoItem[];
-    tools: string[];
-    executionId: string | null;
-    abortController: AbortController | null;
-    isReconnecting: boolean;
-    pendingMessages: Message[]; // messages not yet saved to DB (user msg + partial assistant)
-  }>>({});
+  const allStreamsRef = useRef<Record<string, ActiveStream>>({});
 
   // Keep currentConvIdRef in sync with state
   useEffect(() => { currentConvIdRef.current = currentConversation?.id; }, [currentConversation?.id]);
+  useEffect(() => { messageToolsRef.current = messageTools; }, [messageTools]);
+
+  const syncStoriesFromMessages = useCallback((nextMessages: Message[]) => {
+    const stories = storiesFromMessages({ messages: nextMessages, messageTools: messageToolsRef.current });
+    setAnalysisStories(stories);
+    setActiveStoryId(stories[stories.length - 1]?.id);
+  }, []);
+
+  const applyStoryEvents = useCallback((stream: ActiveStream | undefined, events: AnalysisEvent[]) => {
+    if (!stream || events.length === 0) return;
+
+    stream.stories = events.reduce(
+      (nextStories, event) => reduceAnalysisEvent(nextStories, event),
+      stream.stories
+    );
+    setAnalysisStories((prev) => events.reduce(
+      (nextStories, event) => reduceAnalysisEvent(nextStories, event),
+      prev
+    ));
+  }, []);
+
+  const applyStoryStreamEvent = useCallback((stream: ActiveStream | undefined, event: Record<string, unknown>) => {
+    if (!stream?.storyId) return;
+    applyStoryEvents(stream, storyEventsFromStreamEvent(stream.storyId, event));
+  }, [applyStoryEvents]);
 
   // Load project and conversations
   useEffect(() => {
@@ -883,6 +867,7 @@ export default function ProjectPage() {
           const conv = await fetchConversation(projectId, conversationsData[0].id);
           setCurrentConversation(conv);
           setMessages(conv.messages || []);
+          syncStoriesFromMessages(conv.messages || []);
           setSelectedClusterId(resolveClusterId(conv, projectData, clustersData));
           setSelectedWarehouseId(resolveWarehouseId(conv, projectData, warehousesData));
           setDefaultCatalog(resolveDefaultCatalog(conv, projectData));
@@ -890,6 +875,8 @@ export default function ProjectPage() {
           setWorkspaceFolder(resolveWorkspaceFolder(conv, projectData, user, projectId));
           setMlflowExperimentName(resolveMlflowExperimentName(projectData));
         } else {
+          setAnalysisStories([]);
+          setActiveStoryId(undefined);
           setSelectedClusterId(resolveClusterId(null, projectData, clustersData));
           setSelectedWarehouseId(resolveWarehouseId(null, projectData, warehousesData));
           setDefaultCatalog(resolveDefaultCatalog(null, projectData));
@@ -907,7 +894,7 @@ export default function ProjectPage() {
     };
 
     loadData();
-  }, [projectId, navigate, user]);
+  }, [projectId, navigate, user, syncStoriesFromMessages]);
 
   // Check for active execution when conversation loads and reconnect if needed
   useEffect(() => {
@@ -925,14 +912,35 @@ export default function ProjectPage() {
           console.log('[RECONNECT] Found active execution:', active.id);
           const reconConvId = currentConversation.id;
           const controller = new AbortController();
+          const latestUserMessage = [...(currentConversation.messages || [])].reverse()
+            .find((message) => message.role === 'user');
+          const reconnectStory = createAnalysisStory({
+            id: latestUserMessage ? `story-${latestUserMessage.id}` : undefined,
+            conversationId: reconConvId,
+            question: latestUserMessage?.content || currentConversation.title || 'Active analysis',
+            status: 'running',
+            messageIds: latestUserMessage ? [latestUserMessage.id] : [],
+          });
+          setAnalysisStories((prev) => (
+            prev.some((story) => story.id === reconnectStory.id)
+              ? prev.map((story) => (
+                story.id === reconnectStory.id
+                  ? { ...story, status: 'running', updatedAt: new Date().toISOString() }
+                  : story
+              ))
+              : [...prev, reconnectStory]
+          ));
+          setActiveStoryId(reconnectStory.id);
           allStreamsRef.current[reconConvId] = {
             fullText: '',
             activityItems: [],
             todos: [],
             tools: [],
+            stories: [reconnectStory],
             executionId: active.id,
             abortController: controller,
             isReconnecting: true,
+            storyId: reconnectStory.id,
             pendingMessages: [],
           };
           setStreamingConvIds(prev => [...prev, reconConvId]);
@@ -949,6 +957,7 @@ export default function ProjectPage() {
               const type = event.type as string;
               const stream = allStreamsRef.current[reconConvId];
               const isForeground = currentConvIdRef.current === reconConvId;
+              applyStoryStreamEvent(stream, event);
 
               if (type === 'text_delta') {
                 const text = event.text as string;
@@ -1001,9 +1010,21 @@ export default function ProjectPage() {
             },
             onError: (error) => {
               console.error('Reconnect error:', error);
+              const stream = allStreamsRef.current[reconConvId];
+              if (stream?.storyId) {
+                applyStoryEvents(stream, [{
+                  type: 'story.failed',
+                  storyId: stream.storyId,
+                  error: error.message || 'Failed to reconnect to execution',
+                }]);
+              }
               toast.error('Failed to reconnect to execution');
             },
             onDone: async () => {
+              const stream = allStreamsRef.current[reconConvId];
+              if (stream?.storyId) {
+                applyStoryEvents(stream, [{ type: 'story.completed', storyId: stream.storyId }]);
+              }
               delete allStreamsRef.current[reconConvId];
               setStreamingConvIds(prev => prev.filter(id => id !== reconConvId));
 
@@ -1028,7 +1049,7 @@ export default function ProjectPage() {
     };
 
     checkAndReconnect();
-  }, [projectId, currentConversation?.id, isLoading]);
+  }, [projectId, currentConversation, isLoading, applyStoryEvents, applyStoryStreamEvent]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -1083,6 +1104,11 @@ export default function ProjectPage() {
         const apiIds = new Set(apiMessages.map(m => m.content + m.role));
         const missingPending = pending.filter(m => !apiIds.has(m.content + m.role));
         setMessages([...missingPending, ...apiMessages]);
+        const streamStories = stream.stories.length > 0
+          ? stream.stories
+          : storiesFromMessages({ messages: [...missingPending, ...apiMessages], messageTools: messageToolsRef.current });
+        setAnalysisStories(streamStories);
+        setActiveStoryId(stream.storyId || streamStories[streamStories.length - 1]?.id);
         setStreamingText(stream.fullText);
         setActivityItems([...stream.activityItems]);
         setTodos([...stream.todos]);
@@ -1090,6 +1116,7 @@ export default function ProjectPage() {
         setIsReconnecting(stream.isReconnecting);
       } else {
         setMessages(conv.messages || []);
+        syncStoriesFromMessages(conv.messages || []);
         setStreamingText('');
         setActivityItems([]);
         setTodos([]);
@@ -1118,6 +1145,8 @@ export default function ProjectPage() {
       setConversations((prev) => [conv, ...prev]);
       setCurrentConversation(conv);
       setMessages([]);
+      setAnalysisStories([]);
+      setActiveStoryId(undefined);
       // Clear streaming UI (new conv isn't streaming yet)
       setStreamingText('');
       setActivityItems([]);
@@ -1159,6 +1188,7 @@ export default function ProjectPage() {
           const conv = await fetchConversation(projectId, remaining[0].id);
           setCurrentConversation(conv);
           setMessages(conv.messages || []);
+          syncStoriesFromMessages(conv.messages || []);
           setSelectedClusterId(resolveClusterId(conv, project, clusters));
           setSelectedWarehouseId(resolveWarehouseId(conv, project, warehouses));
           setDefaultCatalog(resolveDefaultCatalog(conv, project));
@@ -1168,6 +1198,8 @@ export default function ProjectPage() {
         } else {
           setCurrentConversation(null);
           setMessages([]);
+          setAnalysisStories([]);
+          setActiveStoryId(undefined);
         }
         setStreamingText('');
         setActivityItems([]);
@@ -1204,6 +1236,15 @@ export default function ProjectPage() {
       is_error: false,
     };
     setMessages((prev) => [...prev, tempUserMessage]);
+    const runningStory = createAnalysisStory({
+      id: `story-${tempUserMessage.id}`,
+      conversationId: convId || undefined,
+      question: userMessage,
+      status: 'running',
+      messageIds: [tempUserMessage.id],
+    });
+    setAnalysisStories((prev) => [...prev, runningStory]);
+    setActiveStoryId(runningStory.id);
 
     // Create abort controller and initialize stream tracking
     const abortController = new AbortController();
@@ -1214,9 +1255,11 @@ export default function ProjectPage() {
       activityItems: [],
       todos: [],
       tools: [],
+      stories: [runningStory],
       executionId: null,
       abortController,
       isReconnecting: false,
+      storyId: runningStory.id,
       pendingMessages: [tempUserMessage],
     };
     setStreamingConvIds(prev => [...prev, effectiveConvId]);
@@ -1251,11 +1294,13 @@ export default function ProjectPage() {
             const newConvId = event.conversation_id as string;
             // Move stream entry from old key to new key
             const oldStream = allStreamsRef.current[streamKey];
+            applyStoryStreamEvent(oldStream, event);
             delete allStreamsRef.current[streamKey];
             const oldKey = streamKey;
             streamKey = newConvId;
             allStreamsRef.current[newConvId] = oldStream || {
               fullText: '', activityItems: [], todos: [], tools: [],
+              stories: [],
               executionId: null, abortController, isReconnecting: false,
               pendingMessages: [],
             };
@@ -1273,11 +1318,13 @@ export default function ProjectPage() {
             currentConvIdRef.current = newConvId;
             fetchConversations(projectId).then(setConversations);
           } else if (type === 'text_delta') {
+            applyStoryStreamEvent(stream, event);
             const text = event.text as string;
             fullText += text;
             if (stream) stream.fullText = fullText;
             if (isForeground) setStreamingText(fullText);
           } else if (type === 'text') {
+            applyStoryStreamEvent(stream, event);
             const text = event.text as string;
             if (text) {
               if (fullText && !fullText.endsWith('\n') && !text.startsWith('\n')) {
@@ -1288,6 +1335,7 @@ export default function ProjectPage() {
               if (isForeground) setStreamingText(fullText);
             }
           } else if (type === 'thinking' || type === 'thinking_delta') {
+            applyStoryStreamEvent(stream, event);
             const thinking = (event.thinking as string) || '';
             if (thinking) {
               const updateThinking = (prev: ActivityItem[]) => {
@@ -1313,6 +1361,7 @@ export default function ProjectPage() {
               if (isForeground) setActivityItems(updateThinking);
             }
           } else if (type === 'tool_use') {
+            applyStoryStreamEvent(stream, event);
             const toolName = event.tool_name as string;
             const newItem: ActivityItem = {
               id: event.tool_id as string,
@@ -1328,6 +1377,7 @@ export default function ProjectPage() {
             }
             if (isForeground) setActivityItems(prev => [...prev, newItem]);
           } else if (type === 'tool_result') {
+            applyStoryStreamEvent(stream, event);
             let content = event.content as string;
 
             if (event.is_error && typeof content === 'string') {
@@ -1350,6 +1400,7 @@ export default function ProjectPage() {
             if (stream) stream.activityItems = [...stream.activityItems, newItem];
             if (isForeground) setActivityItems(prev => [...prev, newItem]);
           } else if (type === 'error') {
+            applyStoryStreamEvent(stream, event);
             let errorMsg = event.error as string;
             if (errorMsg === 'Stream closed' || errorMsg.includes('Stream closed')) {
               errorMsg = 'Execution interrupted: The operation took too long or the connection was lost. Operations exceeding 50 seconds may be interrupted. Check backend logs for details.';
@@ -1358,6 +1409,7 @@ export default function ProjectPage() {
           } else if (type === 'cancelled') {
             toast.info('Generation stopped');
           } else if (type === 'todos') {
+            applyStoryStreamEvent(stream, event);
             const todoItems = event.todos as TodoItem[];
             if (todoItems) {
               if (stream) stream.todos = todoItems;
@@ -1368,12 +1420,27 @@ export default function ProjectPage() {
         onError: (error) => {
           console.error('Stream error:', error);
           const errorMessage = error.message || 'Failed to get response';
+          const stream = allStreamsRef.current[streamKey];
+          if (stream?.storyId) {
+            applyStoryEvents(stream, [{ type: 'story.failed', storyId: stream.storyId, error: errorMessage }]);
+          }
+          delete allStreamsRef.current[streamKey];
+          setStreamingConvIds(prev => prev.filter(id => id !== streamKey));
+          if (currentConvIdRef.current === streamKey) {
+            setStreamingText('');
+            setActiveExecutionId(null);
+            setActivityItems([]);
+            setTodos([]);
+          }
           toast.error(errorMessage, { duration: 8000 });
         },
         onDone: async () => {
           const finalStreamKey = streamKey;
           const stream = allStreamsRef.current[finalStreamKey];
           const tools = stream?.tools || [];
+          if (stream?.storyId) {
+            applyStoryEvents(stream, [{ type: 'story.completed', storyId: stream.storyId }]);
+          }
 
           if (fullText) {
             const msgId = `msg-${Date.now()}`;
@@ -1421,6 +1488,10 @@ export default function ProjectPage() {
       const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
       toast.error(errorMessage, { duration: 8000 });
       // Clean up stream on error
+      const stream = allStreamsRef.current[streamKey];
+      if (stream?.storyId) {
+        applyStoryEvents(stream, [{ type: 'story.failed', storyId: stream.storyId, error: errorMessage }]);
+      }
       delete allStreamsRef.current[streamKey];
       setStreamingConvIds(prev => prev.filter(id => id !== streamKey));
       if (currentConvIdRef.current === streamKey) {
@@ -1441,6 +1512,8 @@ export default function ProjectPage() {
     workspaceFolder,
     mlflowExperimentName,
     runRole,
+    applyStoryEvents,
+    applyStoryStreamEvent,
   ]);
 
   // Stop generation - abort client stream AND tell backend to cancel
@@ -1481,6 +1554,9 @@ export default function ProjectPage() {
         setMessageTools((prev) => ({ ...prev, [msgId]: stream.tools }));
       }
     }
+    if (stream.storyId) {
+      applyStoryEvents(stream, [{ type: 'story.completed', storyId: stream.storyId }]);
+    }
 
     // Clean up stream
     delete allStreamsRef.current[targetId];
@@ -1489,7 +1565,7 @@ export default function ProjectPage() {
     setActiveExecutionId(null);
     setActivityItems([]);
     setTodos([]);
-  }, [currentConversation?.id]);
+  }, [currentConversation?.id, applyStoryEvents]);
 
   // Handle keyboard submit
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -1628,67 +1704,36 @@ export default function ProjectPage() {
     el.style.height = Math.min(el.scrollHeight, 200) + 'px';
   };
 
-  // Markdown components shared between messages and streaming
-  const markdownComponents = useMemo(() => ({
-    a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-[var(--color-accent-primary)] underline decoration-[var(--color-accent-primary)]/30 hover:decoration-[var(--color-accent-primary)] hover:text-[var(--color-accent-secondary)] transition-colors"
-      >
-        {children}
-      </a>
-    ),
-    pre: ({ children }: { children?: React.ReactNode }) => {
-      // Extract text content from children for copy button
-      const getTextContent = (node: React.ReactNode): string => {
-        if (typeof node === 'string') return node;
-        if (!node) return '';
-        if (Array.isArray(node)) return node.map(getTextContent).join('');
-        if (typeof node === 'object' && 'props' in (node as React.ReactElement)) {
-          return getTextContent((node as React.ReactElement).props.children);
-        }
-        return '';
-      };
-      const text = getTextContent(children);
-      return (
-        <div className="relative group/code my-3">
-          <pre className="!bg-[var(--color-bg-tertiary)] !rounded-lg !border !border-[var(--color-border)]/50 !p-4 overflow-x-auto">
-            {children}
-          </pre>
-          <CopyButton text={text} />
-        </div>
-      );
-    },
-    code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
-      // Inline code (no language class)
-      if (!className) {
-        return (
-          <code className="px-1.5 py-0.5 rounded-md bg-[var(--color-bg-tertiary)] border border-[var(--color-border)]/30 text-[0.875em] font-mono">
-            {children}
-          </code>
-        );
-      }
-      // Block code inside pre
-      return <code className={cn(className, 'font-mono text-[12px]')}>{children}</code>;
-    },
-    table: ({ children }: { children?: React.ReactNode }) => (
-      <div className="my-3 overflow-x-auto rounded-lg border border-[var(--color-border)]/50">
-        <table className="w-full text-sm">{children}</table>
-      </div>
-    ),
-    th: ({ children }: { children?: React.ReactNode }) => (
-      <th className="px-3 py-2 text-left text-xs font-semibold text-[var(--color-text-heading)] bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)]/50">
-        {children}
-      </th>
-    ),
-    td: ({ children }: { children?: React.ReactNode }) => (
-      <td className="px-3 py-2 text-sm border-b border-[var(--color-border)]/30">
-        {children}
-      </td>
-    ),
-  }), []);
+  const activeStory = useMemo(
+    () => analysisStories.find((story) => story.id === activeStoryId),
+    [analysisStories, activeStoryId]
+  );
+
+  const starterPrompts = useMemo(() => (
+    runRole === 'user_preview'
+      ? [
+        { title: 'Explain results', desc: 'Summarize the published project outputs and assumptions', prompt: 'Explain the latest published results and the assumptions behind them' },
+        { title: 'Validate sources', desc: 'Check data sources, freshness, and caveats', prompt: 'Validate the data sources, freshness, and caveats for this project' },
+        { title: 'Explore metrics', desc: 'Review available governed metrics and dimensions', prompt: 'Show the available metrics and dimensions for this project' },
+        { title: 'Drill down', desc: 'Investigate an important segment or exception', prompt: 'Drill down into the most important segment or exception in this project' },
+      ]
+      : [
+        { title: 'Generate synthetic data', desc: 'Realistic test datasets with customers, orders, and tickets', prompt: 'Generate synthetic customer data with orders and support tickets' },
+        { title: 'Build a data pipeline', desc: 'ETL workflows with medallion architecture', prompt: 'Create a data pipeline to transform raw data into bronze, silver, and gold layers' },
+        { title: 'Create a dashboard', desc: 'Interactive AI/BI visualizations', prompt: 'Create a dashboard to visualize customer metrics and trends' },
+        { title: 'Explore my data', desc: 'Tables, volumes, and resources in your project', prompt: 'What tables and data do I have in my project?' },
+      ]
+  ), [runRole]);
+
+  const handleNextMove = useCallback((move: NextMove) => {
+    setInput(move.prompt);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
+
+  const handleStarterPrompt = useCallback((prompt: string) => {
+    setInput(prompt);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
 
   // Config summary for header chips
   const configChips = useMemo(() => {
@@ -1842,149 +1887,48 @@ export default function ProjectPage() {
           isSaving={isSavingProjectManagement}
         />
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto">
-          {messages.length === 0 && !isStreamingHere ? (
-            /* Empty State */
-            <div className="flex h-full items-center justify-center px-6">
-              <div className="text-center max-w-xl w-full">
-                {/* Decorative gradient orb */}
-                <div className="relative inline-flex items-center justify-center w-20 h-20 mb-6">
-                  <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-[var(--color-accent-primary)]/15 to-[var(--color-accent-secondary)]/10 blur-md" />
-                  <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--color-accent-primary)]/10 to-[var(--color-accent-secondary)]/5 border border-[var(--color-accent-primary)]/10 flex items-center justify-center">
-                    <Sparkles className="h-8 w-8 text-[var(--color-accent-primary)]" />
-                  </div>
-                </div>
-                <h3 className="text-2xl font-bold text-[var(--color-text-heading)]">
-                  {runRole === 'user_preview' ? 'What would a user ask?' : 'What can I help you build?'}
-                </h3>
-                <p className="mt-3 text-sm text-[var(--color-text-muted)] max-w-md mx-auto leading-relaxed">
-                  {runRole === 'user_preview'
+        {/* Analysis Canvas */}
+        <div className="flex-1 overflow-hidden">
+          <div className="grid h-full grid-cols-1 xl:grid-cols-[minmax(0,1fr)_20rem]">
+            <div className="overflow-y-auto">
+              <StoryCanvas
+                stories={analysisStories}
+                activeStoryId={activeStoryId}
+                onSelectStory={setActiveStoryId}
+                onNextMove={handleNextMove}
+                emptyTitle={runRole === 'user_preview' ? 'What would a user ask?' : 'What can I help you build?'}
+                emptyDescription={
+                  runRole === 'user_preview'
                     ? 'Preview the published project with read-only tools and release-pinned context.'
-                    : 'Build data pipelines, generate synthetic data, create dashboards, and more on Databricks.'}
-                </p>
+                    : 'Build data pipelines, generate synthetic data, create dashboards, and explore Databricks resources.'
+                }
+                starterPrompts={starterPrompts}
+                onStarterPrompt={handleStarterPrompt}
+              />
 
-                {/* Example prompts - 2x2 grid */}
-                <div className="mt-10 grid grid-cols-2 gap-3 text-left">
-                  {[
-                    { title: 'Generate synthetic data', desc: 'Realistic test datasets with customers, orders, and tickets', prompt: 'Generate synthetic customer data with orders and support tickets' },
-                    { title: 'Build a data pipeline', desc: 'ETL workflows with medallion architecture', prompt: 'Create a data pipeline to transform raw data into bronze, silver, and gold layers' },
-                    { title: 'Create a dashboard', desc: 'Interactive AI/BI visualizations', prompt: 'Create a dashboard to visualize customer metrics and trends' },
-                    { title: 'Explore my data', desc: 'Tables, volumes, and resources in your project', prompt: 'What tables and data do I have in my project?' },
-                  ].map((item) => (
-                    <button
-                      key={item.title}
-                      onClick={() => setInput(item.prompt)}
-                      className="group p-4 rounded-xl border border-[var(--color-border)]/50 bg-[var(--color-background)] hover:border-[var(--color-accent-primary)]/30 hover:shadow-lg hover:shadow-[var(--color-accent-primary)]/5 hover:-translate-y-0.5 text-left transition-all duration-200"
-                    >
-                      <span className="text-sm font-semibold text-[var(--color-text-heading)] group-hover:text-[var(--color-accent-primary)] transition-colors">{item.title}</span>
-                      <p className="text-xs text-[var(--color-text-muted)] mt-1.5 leading-relaxed">{item.desc}</p>
-                    </button>
-                  ))}
+              {isStreamingHere && activityItems.length > 0 && (
+                <div className="mx-auto w-full max-w-4xl px-6 pb-6">
+                  <ActivitySection items={activityItems} isStreaming={isStreamingHere} />
                 </div>
-              </div>
-            </div>
-          ) : (
-            /* Message Thread */
-            <div className="mx-auto max-w-3xl px-6 py-8 space-y-1">
-              {messages.map((message) => (
-                <div key={message.id}>
-                  {message.role === 'assistant' ? (
-                    /* Assistant message - left aligned with Databricks avatar */
-                    <div className="flex items-start gap-3 group/msg mb-4">
-                      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-[var(--color-accent-primary)] to-[var(--color-accent-secondary)] flex items-center justify-center shadow-sm shadow-[var(--color-accent-primary)]/20 mt-0.5">
-                        <DatabricksLogo className="h-4 w-4 text-white" />
-                      </div>
-                      <div className={cn('flex-1 min-w-0', message.is_error && 'text-[var(--color-error)]')}>
-                        <div className="mb-1 flex items-center gap-2">
-                          <span className="text-xs font-semibold text-[var(--color-text-heading)]">Assistant</span>
-                          {message.timestamp && (
-                            <span className="text-[10px] text-[var(--color-text-muted)]/60 opacity-0 group-hover/msg:opacity-100 transition-opacity">
-                              {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          )}
-                        </div>
-                        <div className="prose prose-xs max-w-none text-[var(--color-text-primary)] text-[14px] leading-[1.7]">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                            {message.content}
-                          </ReactMarkdown>
-                        </div>
-                        <ToolsUsedBadge tools={messageTools[message.id] || []} />
-                      </div>
+              )}
+
+              {isStreamingHere && analysisStories.length === 0 && (
+                <div className="mx-auto w-full max-w-4xl px-6 pb-6">
+                  {isReconnecting ? (
+                    <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Reconnecting to agent...</span>
                     </div>
                   ) : (
-                    /* User message - right aligned like iMessage */
-                    <div className="flex justify-end mb-4 group/msg">
-                      <div className="max-w-[80%]">
-                        <div className="mb-1 flex items-center justify-end gap-2">
-                          {message.timestamp && (
-                            <span className="text-[10px] text-[var(--color-text-muted)]/60 opacity-0 group-hover/msg:opacity-100 transition-opacity">
-                              {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          )}
-                        </div>
-                        <div className="rounded-2xl rounded-br-md bg-[var(--color-accent-primary)] text-white px-4 py-2.5 shadow-sm">
-                          <p className="whitespace-pre-wrap text-[14px] leading-[1.6]">{message.content}</p>
-                        </div>
-                      </div>
-                    </div>
+                    <FunLoader todos={todos} className="py-1" />
                   )}
-                </div>
-              ))}
-
-              {/* Streaming response */}
-              {isStreamingHere && streamingText && (
-                <div className="flex items-start gap-3 mb-4">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-[var(--color-accent-primary)] to-[var(--color-accent-secondary)] flex items-center justify-center shadow-sm shadow-[var(--color-accent-primary)]/20 mt-0.5">
-                    <DatabricksLogo className="h-4 w-4 text-white" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="mb-1">
-                      <span className="text-xs font-semibold text-[var(--color-text-heading)]">
-                        Assistant
-                      </span>
-                    </div>
-                    <div className="prose prose-xs max-w-none text-[var(--color-text-primary)] text-[14px] leading-[1.7]">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                        {streamingText}
-                      </ReactMarkdown>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Activity section */}
-              {isStreamingHere && activityItems.length > 0 && (
-                <ActivitySection items={activityItems} isStreaming={isStreamingHere} />
-              )}
-
-              {/* Loader */}
-              {isStreamingHere && !streamingText && (
-                <div className="flex items-start gap-3 mb-4">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-[var(--color-accent-primary)] to-[var(--color-accent-secondary)] flex items-center justify-center shadow-sm shadow-[var(--color-accent-primary)]/20 mt-0.5">
-                    <DatabricksLogo className="h-4 w-4 text-white" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="mb-1">
-                      <span className="text-xs font-semibold text-[var(--color-text-heading)]">
-                        Assistant
-                      </span>
-                    </div>
-                    {isReconnecting ? (
-                      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-2">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Reconnecting to agent...</span>
-                      </div>
-                    ) : (
-                      <FunLoader todos={todos} className="py-1" />
-                    )}
-                  </div>
                 </div>
               )}
 
               <div ref={messagesEndRef} />
             </div>
-          )}
+            <RightInspectPanel story={activeStory} onNextMove={handleNextMove} />
+          </div>
         </div>
 
         {/* Input Area */}
