@@ -6,6 +6,7 @@ Uses Databricks Command Execution API via SDK.
 """
 
 import datetime
+import time
 from typing import Optional, List, Dict, Any
 from databricks.sdk.service.compute import (
     CommandStatus,
@@ -356,26 +357,32 @@ class NoRunningClusterError(Exception):
         return message
 
 
-def start_cluster(cluster_id: str) -> Dict[str, Any]:
+def start_cluster(
+    cluster_id: str,
+    wait_for_running: bool = False,
+    max_wait_seconds: int = 600,
+) -> Dict[str, Any]:
     """
     Start a terminated Databricks cluster.
 
-    This initiates the cluster start process and returns immediately — it does
-    NOT wait for the cluster to reach RUNNING state (that typically takes 3-8
-    minutes).  Use ``get_cluster_status()`` to poll until the cluster is ready.
+    By default this initiates the cluster start and returns immediately — it
+    does NOT wait for the cluster to reach RUNNING state (3-8 min typical).
+
+    Set ``wait_for_running=True`` to block until the cluster is RUNNING, using
+    exponential backoff polling (10 s, 20 s, 40 s, …) capped at
+    ``max_wait_seconds`` (default 600 = 10 min total).
 
     Args:
         cluster_id: ID of the cluster to start.
+        wait_for_running: If True, poll until RUNNING (or timeout).
+        max_wait_seconds: Total wait budget when wait_for_running is True.
 
     Returns:
         Dictionary with cluster_id, cluster_name, state, and a message.
-
-    Raises:
-        Exception: If the cluster cannot be started (e.g., permissions, not found).
+        When waiting, also includes poll_count and waited_seconds.
     """
     w = get_workspace_client()
 
-    # Get cluster info first for a better response message
     cluster = w.clusters.get(cluster_id)
     cluster_name = cluster.cluster_name or cluster_id
     current_state = cluster.state.value if cluster.state else "UNKNOWN"
@@ -388,28 +395,97 @@ def start_cluster(cluster_id: str) -> Dict[str, Any]:
             "message": f"Cluster '{cluster_name}' is already running.",
         }
 
-    if current_state not in ("TERMINATED", "ERROR"):
+    if current_state in ("TERMINATED", "ERROR"):
+        w.clusters.start(cluster_id)
+        previous_state = current_state
+    else:
+        previous_state = current_state
+
+    if not wait_for_running:
         return {
             "cluster_id": cluster_id,
             "cluster_name": cluster_name,
-            "state": current_state,
+            "previous_state": previous_state,
+            "state": "PENDING",
             "message": (
-                f"Cluster '{cluster_name}' is in state {current_state}. It may already be starting or resizing."
+                f"Cluster '{cluster_name}' is now starting. "
+                f"This typically takes 3-8 minutes. "
+                f"Use get_cluster_status(cluster_id='{cluster_id}') to check progress, "
+                f"or call start_cluster with wait_for_running=True to block until RUNNING."
             ),
         }
 
-    # Kick off start (non-blocking)
-    w.clusters.start(cluster_id)
+    return wait_for_cluster_running(
+        cluster_id, max_wait_seconds=max_wait_seconds, previous_state=previous_state
+    )
 
+
+def wait_for_cluster_running(
+    cluster_id: str,
+    max_wait_seconds: int = 600,
+    initial_wait_seconds: int = 10,
+    previous_state: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Poll cluster status with exponential backoff until RUNNING or timeout.
+
+    Sleep schedule doubles each iteration: 10 s, 20 s, 40 s, 80 s, 160 s, …
+    Total wait is capped at ``max_wait_seconds`` (default 600 s = 10 min); the
+    final sleep is shortened to fit within the budget.
+
+    Returns the same shape as ``get_cluster_status`` plus ``poll_count``,
+    ``waited_seconds``, and ``timeout`` (True if budget elapsed without RUNNING).
+    """
+    deadline = time.monotonic() + max_wait_seconds
+    started = time.monotonic()
+    wait = initial_wait_seconds
+    poll_count = 0
+    last_status: Dict[str, Any] = {}
+
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(wait, remaining))
+
+        last_status = get_cluster_status(cluster_id)
+        poll_count += 1
+        state = last_status.get("state")
+        logger.info(
+            "wait_for_cluster_running: cluster=%s poll=%s state=%s waited=%.0fs",
+            cluster_id, poll_count, state, time.monotonic() - started,
+        )
+
+        if state == "RUNNING":
+            return {
+                **last_status,
+                "previous_state": previous_state,
+                "poll_count": poll_count,
+                "waited_seconds": round(time.monotonic() - started, 1),
+            }
+        if state in ("TERMINATED", "ERROR", "TERMINATING"):
+            return {
+                **last_status,
+                "previous_state": previous_state,
+                "poll_count": poll_count,
+                "waited_seconds": round(time.monotonic() - started, 1),
+                "message": (
+                    f"Cluster ended in state {state} during wait — "
+                    f"start failed or was terminated."
+                ),
+            }
+        wait *= 2
+
+    final = last_status or get_cluster_status(cluster_id)
     return {
-        "cluster_id": cluster_id,
-        "cluster_name": cluster_name,
-        "previous_state": current_state,
-        "state": "PENDING",
+        **final,
+        "previous_state": previous_state,
+        "poll_count": poll_count,
+        "waited_seconds": round(time.monotonic() - started, 1),
+        "timeout": True,
         "message": (
-            f"Cluster '{cluster_name}' is now starting. "
-            f"This typically takes 3-8 minutes. "
-            f"Use get_cluster_status(cluster_id='{cluster_id}') to check progress."
+            f"Cluster did not reach RUNNING within {max_wait_seconds}s "
+            f"(current state: {final.get('state')}). "
+            f"Call get_cluster_status to check again."
         ),
     }
 

@@ -195,6 +195,8 @@ def manage_cluster(
     spark_conf: str = None,
     autoscale_min_workers: int = None,
     autoscale_max_workers: int = None,
+    wait_for_running: bool = False,
+    max_wait_seconds: int = 600,
 ) -> Dict[str, Any]:
     """Create, modify, start, terminate, or delete a cluster.
 
@@ -202,6 +204,9 @@ def manage_cluster(
     - create: Requires name. Auto-picks DBR, node type, SINGLE_USER, 120min auto-stop.
     - modify: Requires cluster_id. Only specified params change. Running clusters restart.
     - start: Requires cluster_id. ASK USER FIRST (costs money, 3-8min startup).
+      Set wait_for_running=True to block until RUNNING (exponential backoff,
+      capped at max_wait_seconds, default 600 = 10 min). Prefer this over
+      polling get repeatedly.
     - terminate: Reversible stop. Requires cluster_id.
     - get: returns cluster details. Requires cluster_id.
     - delete: PERMANENT. CONFIRM WITH USER. Requires cluster_id.
@@ -274,7 +279,11 @@ def manage_cluster(
     elif action == "start":
         if not cluster_id:
             return {"success": False, "error": "cluster_id is required for start action."}
-        return _start_cluster(cluster_id)
+        return _start_cluster(
+            cluster_id,
+            wait_for_running=wait_for_running,
+            max_wait_seconds=max_wait_seconds,
+        )
 
     elif action == "terminate":
         if not cluster_id:
