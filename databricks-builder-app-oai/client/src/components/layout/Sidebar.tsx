@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Plus,
@@ -12,6 +12,7 @@ import {
   FolderCog,
   FileText,
   Settings2,
+  SquarePen,
 } from 'lucide-react';
 import type { Conversation, Project } from '@/lib/types';
 import { useUser } from '@/contexts/UserContext';
@@ -21,51 +22,58 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 interface SidebarProps {
-  // Keeping these for backward compatibility if needed, but we'll use context mostly
-  onConversationSelect?: (conversationId: string) => void;
-  onNewConversation?: () => void;
-  onDeleteConversation?: (conversationId: string) => void;
   onViewSkills?: () => void;
   onOpenProjectSettings?: () => void;
   isLoading?: boolean;
+  isCollapsed: boolean;
+  onToggleCollapse: (collapsed: boolean) => void;
 }
 
 export function Sidebar({
   onViewSkills,
   onOpenProjectSettings,
   isLoading: initialLoading = false,
+  isCollapsed,
+  onToggleCollapse,
 }: SidebarProps) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { projectId: currentProjectId } = useParams();
   const { user } = useUser();
-  const { projects, loading: projectsLoading } = useProjects();
+  const { projects, loading: projectsLoading, createProject } = useProjects();
   
   const [projectConversations, setProjectConversations] = useState<Record<string, Conversation[]>>({});
   const [loadingProjects, setLoadingProjects] = useState<Record<string, boolean>>({});
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  const [expandedSeeAll, setExpandedSeeAll] = useState<Record<string, boolean>>({});
   const [hoveredProject, setHoveredProject] = useState<string | null>(null);
-  const [hoveredConversation, setHoveredConversation] = useState<string | null>(null);
+  
+  // Use a ref to track loading state to avoid stale closure issues and unnecessary re-renders of the load function
+  const loadingRef = useRef<Record<string, boolean>>({});
 
   const displayName = user?.split('@')[0] || '';
 
   // Load conversations for a project
-  const loadConversations = useCallback(async (projectId: string) => {
-    if (loadingProjects[projectId]) return;
+  const loadConversations = useCallback(async (projectId: string, force = false) => {
+    if (!projectId) return;
+    if (!force && loadingRef.current[projectId]) return;
     
+    loadingRef.current[projectId] = true;
     setLoadingProjects(prev => ({ ...prev, [projectId]: true }));
+    
     try {
       const convs = await fetchConversations(projectId);
       setProjectConversations(prev => ({ ...prev, [projectId]: convs }));
     } catch (error) {
       console.error(`Failed to fetch conversations for project ${projectId}:`, error);
+      // toast.error(`Failed to load chats for ${projectId}`);
     } finally {
+      loadingRef.current[projectId] = false;
       setLoadingProjects(prev => ({ ...prev, [projectId]: false }));
     }
-  }, [loadingProjects]);
+  }, []);
 
-  // Expand current project by default
+  // Expand current project by default and load its conversations
   useEffect(() => {
     if (currentProjectId) {
       setExpandedProjects(prev => ({ ...prev, [currentProjectId]: true }));
@@ -73,13 +81,11 @@ export function Sidebar({
     }
   }, [currentProjectId, loadConversations]);
 
-  // Load conversations for all visible projects on mount (or just use lazy load)
+  // Load conversations for all visible projects that are expanded
   useEffect(() => {
     if (projects.length > 0) {
-      // By default, just load the current one. Others can be lazy loaded or we can load all.
-      // To match the screenshot, let's load all projects that are expanded.
       projects.forEach(p => {
-        if (expandedProjects[p.id] && !projectConversations[p.id]) {
+        if (expandedProjects[p.id] && !projectConversations[p.id] && !loadingRef.current[p.id]) {
           loadConversations(p.id);
         }
       });
@@ -96,16 +102,18 @@ export function Sidebar({
     });
   };
 
+  const toggleSeeAll = (projectId: string) => {
+    setExpandedSeeAll(prev => ({ ...prev, [projectId]: !prev[projectId] }));
+  };
+
   const handleNewChat = async (e: React.MouseEvent, projectId: string) => {
     e.stopPropagation();
     try {
       const conv = await createConversation(projectId, 'New Chat');
-      // Update local list
       setProjectConversations(prev => ({
         ...prev,
         [projectId]: [conv, ...(prev[projectId] || [])]
       }));
-      // Navigate to it
       navigate(`/projects/${projectId}?conversationId=${conv.id}`);
     } catch (error) {
       toast.error('Failed to create new chat');
@@ -117,23 +125,23 @@ export function Sidebar({
     if (projectId === currentProjectId && onOpenProjectSettings) {
       onOpenProjectSettings();
     } else {
-      // If it's a different project, navigate there first or just show toast
       navigate(`/projects/${projectId}`);
-      // We'd need a way to auto-open settings after navigation, e.g. via URL param
-      // For now, let's assume it only works for current project or navigates.
     }
   };
 
   return (
     <aside
-      className={`
-        flex flex-col bg-[var(--color-bg-secondary)] border-r border-[var(--color-border)] h-full relative transition-all duration-300 flex-shrink-0
-        ${isCollapsed ? 'w-16' : 'w-[var(--sidebar-width)]'}
-      `}
+      className={cn(
+        "flex flex-col bg-[var(--color-bg-secondary)] border-r border-[var(--color-border)] h-full relative transition-all duration-300 flex-shrink-0",
+        isCollapsed ? 'w-16' : 'w-[var(--sidebar-width)]'
+      )}
     >
       {/* Header — Logo */}
       <div
-        className={`flex items-center gap-2.5 border-b border-[var(--color-border)]/30 transition-all duration-300 ${isCollapsed ? 'p-2 justify-center' : 'px-4 py-3'}`}
+        className={cn(
+          "flex items-center gap-2.5 border-b border-[var(--color-border)]/30 transition-all duration-300",
+          isCollapsed ? 'p-2 justify-center' : 'px-4 py-3'
+        )}
       >
         <Link to="/" className="flex items-center gap-2.5 min-w-0">
           <div className="w-7 h-7 flex-shrink-0 flex items-center justify-center text-[var(--color-accent-primary)]">
@@ -157,7 +165,29 @@ export function Sidebar({
 
       {/* Main Hierarchy Section */}
       {!isCollapsed && (
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 pt-4 space-y-4">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 pt-4 space-y-4 no-scrollbar">
+          <div className="flex items-center justify-between px-2 mb-1">
+            <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Projects</span>
+            <button
+              onClick={async () => {
+                const name = prompt('Enter project name:');
+                if (name) {
+                  try {
+                    const p = await createProject(name);
+                    toast.success('Project created');
+                    navigate(`/projects/${p.id}`);
+                  } catch (err) {
+                    toast.error('Failed to create project');
+                  }
+                }
+              }}
+              className="p-1 rounded-md hover:bg-[var(--color-border)]/50 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-all"
+              title="New Project"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
           {projectsLoading ? (
             <div className="flex flex-col items-center justify-center py-10 opacity-50">
               <Loader2 className="h-5 w-5 animate-spin mb-2" />
@@ -208,7 +238,7 @@ export function Sidebar({
                         className="p-1 rounded-md hover:bg-[var(--color-border)]/50 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-all"
                         title="New Chat"
                       >
-                        <Plus className="h-3.5 w-3.5" />
+                        <SquarePen className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   )}
@@ -219,11 +249,13 @@ export function Sidebar({
                   <div className="ml-5 space-y-0.5 border-l border-[var(--color-border)]/20 pl-2">
                     {loadingProjects[project.id] ? (
                       <div className="py-2 pl-2">
-                        <Loader2 className="h-3 w-3 animate-spin text-[var(--color-text-muted)]" />
+                        <Loader2 className="h-3 w-3 animate-spin text-[var(--color-text-muted)] opacity-60" />
                       </div>
                     ) : (
                       <>
-                        {(projectConversations[project.id] || []).slice(0, 5).map((conv) => {
+                        {(projectConversations[project.id] || [])
+                          .slice(0, expandedSeeAll[project.id] ? undefined : 5)
+                          .map((conv) => {
                           const isSelected = new URLSearchParams(location.search).get('conversationId') === conv.id && currentProjectId === project.id;
                           return (
                             <div
@@ -245,9 +277,9 @@ export function Sidebar({
                         {(projectConversations[project.id]?.length || 0) > 5 && (
                           <button 
                             className="w-full text-left px-2 py-1.5 text-[10px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-                            onClick={() => navigate(`/projects/${project.id}`)}
+                            onClick={() => toggleSeeAll(project.id)}
                           >
-                            See all ({projectConversations[project.id].length})
+                            {expandedSeeAll[project.id] ? 'See less' : `See all (${projectConversations[project.id].length})`}
                           </button>
                         )}
 
@@ -266,52 +298,40 @@ export function Sidebar({
         </div>
       )}
 
-      {/* Collapsed view */}
-      {isCollapsed && (
-        <div className="flex-1 overflow-y-auto py-4 flex flex-col items-center gap-4">
-          {projects.map(p => (
-            <button 
-              key={p.id}
-              onClick={() => {
-                setIsCollapsed(false);
-                setExpandedProjects(prev => ({ ...prev, [p.id]: true }));
-              }}
-              className={cn(
-                "w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold border transition-all",
-                currentProjectId === p.id 
-                  ? "bg-[var(--color-accent-primary)] text-white border-[var(--color-accent-primary)] shadow-sm"
-                  : "bg-[var(--color-background)] text-[var(--color-text-muted)] border-[var(--color-border)] hover:border-[var(--color-text-muted)]"
-              )}
-              title={p.name}
-            >
-              {p.name.substring(0, 2).toUpperCase()}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Collapsed view — very minimal as requested */}
+      {isCollapsed && <div className="flex-1" />}
 
       {/* Bottom Nav */}
-      <div className="border-t border-[var(--color-border)]/30 px-3 py-2 space-y-0.5">
-        {!isCollapsed && onViewSkills && (
+      <div className={cn(
+        "border-t border-[var(--color-border)]/30 space-y-0.5",
+        isCollapsed ? "px-0 py-2" : "px-3 py-2"
+      )}>
+        {onViewSkills && (
           <button
             onClick={onViewSkills}
-            className="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background)] transition-colors"
+            className={cn(
+              "flex items-center gap-2.5 w-full rounded-lg text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background)] transition-colors",
+              isCollapsed ? "justify-center h-10 px-0" : "px-2.5 py-2"
+            )}
+            title="System Prompt"
           >
-            <BookOpen className="h-3.5 w-3.5 flex-shrink-0" />
-            System Prompt
+            <BookOpen className="h-4 w-4 flex-shrink-0" />
+            {!isCollapsed && "System Prompt"}
           </button>
         )}
 
         <Link
           to="/doc"
           className={cn(
-            "flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-xs transition-colors",
+            "flex items-center gap-2.5 w-full rounded-lg text-xs transition-colors",
             location.pathname === '/doc'
               ? 'text-[var(--color-accent-primary)] bg-[var(--color-accent-primary)]/[0.06]'
-              : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background)]'
+              : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background)]',
+            isCollapsed ? "justify-center h-10 px-0" : "px-2.5 py-2"
           )}
+          title="Docs"
         >
-          <FileText className="h-3.5 w-3.5 flex-shrink-0" />
+          <FileText className="h-4 w-4 flex-shrink-0" />
           {!isCollapsed && "Docs"}
         </Link>
 
@@ -319,8 +339,8 @@ export function Sidebar({
         {displayName && (
           <div
             className={cn(
-              "flex items-center gap-2.5 px-2 py-2 rounded-lg",
-              isCollapsed ? "justify-center" : "px-2.5"
+              "flex items-center gap-2.5 rounded-lg",
+              isCollapsed ? "justify-center h-12 px-0" : "px-2.5 py-2"
             )}
             title={user || undefined}
           >
@@ -339,7 +359,7 @@ export function Sidebar({
       {/* Collapse/Expand Button */}
       <div className="absolute -right-3 top-16 z-10">
         <button
-          onClick={() => setIsCollapsed(!isCollapsed)}
+          onClick={() => onToggleCollapse(!isCollapsed)}
           className="p-1.5 rounded-full bg-[var(--color-background)] border border-[var(--color-border)] shadow-sm hover:shadow-md transition-all duration-200 group"
           title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
