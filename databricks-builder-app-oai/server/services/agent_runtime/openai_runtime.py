@@ -248,6 +248,7 @@ class OpenAIAgentRuntime:
         agent,
         input=request.message,
         session=session,
+        max_turns=30,
         run_config=RunConfig(
           workflow_name='Databricks Builder App',
           trace_id=trace_id,
