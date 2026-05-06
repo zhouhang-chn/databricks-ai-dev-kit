@@ -4,43 +4,72 @@
 
 This plan turns the design in [`design.md`](design.md) into an incremental build path. It follows the construction pattern inferred in [`docs/refer/openai_data_agent_reverse_analysis_zh.md`](../refer/openai_data_agent_reverse_analysis_zh.md): start with a short governed analysis loop, invest early in context quality and table selection, add eval gates before broad rollout, then add memory and workflow reuse.
 
-The app is not a Databricks App and should not depend on Databricks-native analyst product surfaces. It runs on external infrastructure such as a VM, Kubernetes, or AKS while using Databricks as the governed data plane.
+The app is not a Databricks App and should not depend on Databricks-native analyst product surfaces. It runs on external infrastructure such as a VM, Kubernetes, or AKS while using Databricks as the governed data plane. (The Databricks App deployment option is retained as a secondary target since `databricks-builder-app-oai` proves it works.)
+
+The phase ordering below is informed by [`gap-analysis-vs-oai.md`](gap-analysis-vs-oai.md), which compares the in-tree `databricks-builder-app-oai` reference implementation against the analyst-app design targets. Use that document to identify which pieces can be carried over from the OAI app and which require net-new construction.
+
+## Agent Runtime: Resolved
+
+The agent runtime is **resolved**: the analyst app uses the **OpenAI Agents SDK with DeepSeek v4 Pro/Flash** models via an AI Gateway OpenAI-compatible endpoint. This is the same stack proven in `databricks-builder-app-oai/`:
+
+- `openai-agents[sqlalchemy]` — OpenAI Agents SDK with `Runner.run_streamed()`
+- `deepseek-v4-pro` — agent reasoning and tool calling
+- `deepseek-v4-flash` — title generation and lightweight tasks
+- `OpenAIChatCompletionsModel` — wraps any OpenAI-compatible API
+- `AgentRuntime` protocol — clean app-owned interface
+- Retry, cancellation, session persistence, MLflow tracing — all proven
+
+No Claude Agent SDK adapter is needed. See [`system-design.md`](system-design.md) for the full proven stack and carry-over component list.
 
 ## Build Strategy
 
-1. **Runtime foundation first.** Prove Claude Agent SDK integration, Databricks tool backing, and skill reuse before UI, packaging, or persistence work.
-2. **Shortest useful product loop next.** Deliver one web surface, one backend, one cluster execution path, and one evidence-backed Analysis Story flow.
-3. **Discovery quality before feature breadth.** Treat table and metric selection as the primary correctness problem.
-4. **Ranked context, not raw context.** Aggregate and score metadata, usage, annotations, metric semantics, and docs before retrieval.
-5. **Runtime probes as validation.** Use live Databricks checks to resolve uncertainty, not as the primary knowledge store.
-6. **Evals before scale.** Every new tool, prompt, workflow, and model change should be regression-tested against golden business questions.
-7. **Memory only with approval.** Corrections become reusable knowledge through an explicit proposal and review path.
+1. **Leverage proven runtime.** Carry over the OpenAI Agents SDK adapter, event normalization, Lakebase persistence, skills manager, and MLflow wiring from `databricks-builder-app-oai` rather than rebuilding.
+2. **Analyst tools and prompt first.** Define the analyst-safe tool surface and discovery-first system prompt before UI or packaging work.
+3. **Shortest useful product loop next.** Deliver one web surface, one backend, one cluster execution path, and one evidence-backed Analysis Story flow.
+4. **Discovery quality before feature breadth.** Treat table and metric selection as the primary correctness problem.
+5. **Ranked context, not raw context.** Aggregate and score metadata, usage, annotations, metric semantics, and docs before retrieval.
+6. **Runtime probes as validation.** Use live Databricks checks to resolve uncertainty, not as the primary knowledge store.
+7. **Evals before scale.** Every new tool, prompt, workflow, and model change should be regression-tested against golden business questions.
+8. **Memory only with approval.** Corrections become reusable knowledge through an explicit proposal and review path.
 
-## Phase 0: Agent Runtime Feasibility
+## Phase 0: Analyst Tool and Prompt Validation
 
-Goal: prove the agent-runtime foundation before UI, Docker packaging, semantic indexing, or full application persistence. Phase 0 decisions and environment checks are resolved in [`system-design.md`](system-design.md), and the implementation checklist is detailed in [`phase-0-action-plan.md`](phase-0-action-plan.md).
+Goal: validate the analyst-specific pieces — tool contracts, system prompt, skill selection — against the proven OpenAI Agents SDK runtime. Phase 0 is dramatically reduced from the original plan because the runtime is proven.
+
+What phase 0 carries over from `databricks-builder-app-oai` (no work needed):
+
+- OpenAI Agents SDK runtime adapter (`openai_runtime.py`)
+- DeepSeek v4 Pro/Flash model configuration (`openai_models.py`)
+- Normalized event stream (`openai_events.py`)
+- `AgentRuntime` protocol and `AgentRunRequest` dataclass (`base.py`)
+- Skills manager (`skills_manager.py`)
+- MLflow tracing (`mlflow_setup.py`)
+
+What phase 0 must prove:
+
+- Analyst-safe tool contracts for identity, compute readiness, cluster execution, UC metadata, and metric views — wrapping `databricks-tools-core` in the same OpenAI function-tool shape the builder app uses.
+- Analyst system prompt with discovery-first loop (Understand → Discover → Plan → Retrieve → Clarify → Generate → Validate → Execute → Analyze → Synthesize → Learn).
+- Analyst skill allowlist: `databricks-python-sdk`, `databricks-unity-catalog`, `databricks-dbsql`, `instrumenting-with-mlflow-tracing`.
+- Databricks smoke checks: PAT identity, cluster execution, UC metadata, metric view access.
+- First business domain and seed metric set.
+- Authentication: PAT until phase 3.
+- Execution policy: general-purpose cluster until phase 3, with timeouts, row limits, and cost confirmation threshold.
+- Decision on canonical metrics: UC metric views.
 
 Deliverables:
 
-- Agent runtime approach: Claude Agent SDK through an application-owned adapter, without a Claude Code subprocess in the request path.
-- Databricks tool integration decision: direct `databricks-tools-core`, `databricks-mcp-server`, or a hybrid adapter.
-- Skill reuse approach for loading, selecting, trimming, and injecting existing Databricks skills into Claude Agent SDK context.
-- Initial analyst-safe tool contracts independent of the backing implementation.
-- Authentication approach: PAT until phase 3.
-- Initial execution policy: general-purpose cluster until phase 3, with timeouts, row limits, and cost confirmation threshold.
-- Decision on canonical metrics: UC metric views.
-- First business domain and seed metric set.
-- Backend-only feasibility tests for config, PAT auth, cluster execution, UC metadata, metric views, Claude Agent SDK integration, no Claude subprocess usage, direct tool adapter, MCP adapter, and skill selection.
+- Backend-only test harness that validates analyst tool contracts against a configured Databricks workspace.
+- Analyst system prompt module (new, reusing project-context rendering from builder app).
+- Analyst tool registry (new, reusing `create_databricks_tools()` adapter pattern from builder app).
+- Analyst skill allowlist configuration.
+- Phase 0 readiness command: `uv run pytest tests/phase0 -v`.
 
 Exit criteria:
 
-- A developer can run a backend-only phase 0 test suite that reports agent-runtime readiness with actionable failure messages.
-- Claude Agent SDK mocked smoke test passes, and optional live smoke test is documented and gated.
-- Tests prove the serving path does not invoke Claude Code as a subprocess.
-- Direct `databricks-tools-core` adapter and MCP adapter are compared through parity tests.
-- Phase 1 tool backing choice is recorded with evidence.
-- Skill registry and selector can load allowlisted local skills and render them into agent instructions.
-- Databricks smoke checks verify PAT identity, configured cluster availability, read-only cluster execution, UC metadata access, and metric view access or an explicit "not configured" diagnostic.
+- A developer can run the phase 0 test suite and get actionable pass/fail results for tool contracts, Databricks connectivity, and skill loading.
+- The analyst system prompt can drive a simple tool-calling flow through the proven `OpenAIAgentRuntime`.
+- The analyst tool set is small, orthogonal, and read-only by default.
+- Skills load and render into agent instructions.
 
 ## Phase 1: Shortest Governed Analysis Loop
 
@@ -48,19 +77,21 @@ Goal: answer a simple business question using the current user's Databricks perm
 
 Scope:
 
-- React/Vite workbench with global ask, left rail, Story Canvas, StoryCard, right inspect panel, and evidence drawer.
-- FastAPI backend with session/story/action/run APIs.
+- React/Vite workbench with global ask, left rail, Story Canvas, StoryCard, right inspect panel, and evidence drawer. (Extend builder app's existing frontend components.)
+- FastAPI backend with session/story/action/run APIs. (Extend builder app's API layer.)
 - Databricks SQL execution on a configured general-purpose cluster.
 - Read-only SQL guardrails, row limits, timeouts, cancellation, and statement links.
-- Streaming run events over SSE or WebSocket.
+- Streaming run events over SSE (reuse builder app's resumable SSE).
 - Minimal analyst loop: understand, plan, generate SQL, execute, summarize, cite evidence.
-- Persistence for sessions, messages, stories, story events, evidence blocks, runs, query runs, and artifacts.
+- **Server-anchored persistence** for sessions, messages, stories, story events, evidence blocks, runs, query runs, and artifacts — from day one, not client-derived.
+- Always-on MLflow tracing (not optional).
 
 Exit criteria:
 
 - User can ask one approved domain question and receive summary, SQL, result preview, row count, table list, and caveats.
 - Query execution respects the active PAT owner's UC permissions and fails closed when access is denied.
 - Every run has an MLflow trace with plan, tool calls, SQL, latency, and output metadata.
+- Stories survive page reload (server-anchored, not client-projected).
 
 ## Phase 2: Context Foundation
 
@@ -102,6 +133,7 @@ Scope:
   - metric reconciliation failures
 - Runtime probes for schema, freshness, samples, row counts, and query dry runs.
 - Self-correction loop for failed probes or suspicious intermediate results.
+- `validate_sql` and `profile_result` tools (new).
 
 Exit criteria:
 
@@ -121,6 +153,7 @@ Scope:
 - MLflow eval tracking by domain, workflow, model, prompt version, and tool version.
 - Canary workflow for prompt/tool/model changes.
 - Feedback taxonomy in the UI: wrong metric, wrong table, wrong filter, stale data, bad chart, unclear answer.
+- Deterministic eval mode in the `OpenAIAgentRuntime` adapter.
 
 Exit criteria:
 
@@ -157,7 +190,7 @@ Goal: turn reviewed corrections into reusable context without silently changing 
 
 Scope:
 
-- Personal memory proposal and approval flow.
+- Personal memory proposal and approval flow ("Data agent wants to save 2 learnings to memory" — OAI pattern).
 - Memory schema with scope, owner, TTL, confidence, source run, and review state.
 - Memory retrieval with citation when used.
 - Edit and delete path.
@@ -206,6 +239,7 @@ Scope:
 - Disaster recovery for app database and artifacts.
 - Security review for auth, secrets, logging, prompt injection, and data retention.
 - Admin surfaces for domains, metrics, workflows, eval cases, and memory review.
+- Multi-surface deployment (Slack / IDE / MCP) — plausible since the builder app already runs as both a web app and an MCP gateway.
 
 Exit criteria:
 
@@ -237,6 +271,7 @@ MVP acceptance:
 - Pass-through Databricks permissions.
 - Evidence-backed Analysis Stories with SQL, result preview, row counts, caveats, trace, next moves, and validation checks.
 - MLflow traces and eval report for every release candidate.
+- Stories survive page reload (server-anchored).
 
 ## Major Risks
 
@@ -249,17 +284,15 @@ MVP acceptance:
 | User distrust | Evidence drawer, caveats, query links, validation results |
 | Cost spikes | Row/time limits, cluster policy, confirmation thresholds, caching |
 | Memory corruption | Approval workflow, scopes, TTL, source evidence, delete/edit path |
+| DeepSeek v4 model regression | Eval gates, golden question regression tests, model version pinning via AI Gateway |
 
 ## Near-Term Backlog
 
-1. Create `.env.example` for backend-only agent/runtime feasibility checks.
-2. Implement Claude Agent SDK adapter behind an app-owned `AgentRuntime` interface.
-3. Add no-Claude-Code-subprocess guard tests for the serving path.
-4. Implement direct `databricks-tools-core` adapter proof of concept.
-5. Implement MCP adapter proof of concept or in-process parity harness against `databricks-mcp-server`.
-6. Define initial analyst-safe app tool contracts for identity, compute readiness, cluster execution, UC metadata, and metric views.
-7. Add parity tests comparing direct and MCP-backed implementations.
-8. Add Databricks smoke tests for PAT identity, cluster execution, UC metadata, and metric views.
-9. Build skill registry, allowlist, selector, and prompt renderer for existing Databricks skills.
-10. Write the phase 0 decision record: Claude SDK pattern, tool backing choice, initial tool set, and skill reuse strategy.
-11. Move UI, Docker packaging, pgvector setup, and full persistence to later-phase implementation tasks.
+1. Create analyst tool registry wrapping `databricks-tools-core` in OpenAI function-tool shape.
+2. Write analyst system prompt with discovery-first loop.
+3. Configure analyst skill allowlist: `databricks-python-sdk`, `databricks-unity-catalog`, `databricks-dbsql`, `instrumenting-with-mlflow-tracing`.
+4. Add Databricks smoke tests for PAT identity, cluster execution, UC metadata, and metric views.
+5. Define first business domain and seed metric set.
+6. Write phase 0 readiness test suite.
+7. Plan schema migration for `analysis_stories`, `evidence_blocks`, `story_events` tables (phase 1 prep).
+8. Move UI, Docker packaging, pgvector setup, and full persistence to phase 1+ implementation tasks.

@@ -4,415 +4,273 @@
 
 This document resolves the phase 0 agent-runtime decisions for `databricks-analyst-app`. It is the implementation-facing companion to [`design.md`](design.md) and [`plan.md`](plan.md).
 
-Phase 0 should optimize for backend feasibility: Claude Agent SDK integration, Databricks tool integration strategy, and reusable skill guidance. UI, Docker packaging, VM/AKS deployment manifests, pgvector setup, and full persistence are later-phase concerns.
+The agent-runtime choice is now **resolved**: the analyst app uses the **OpenAI Agents SDK with DeepSeek v4 Pro/Flash** models, based on working production evidence in `databricks-builder-app-oai/`. See [`gap-analysis-vs-oai.md`](gap-analysis-vs-oai.md) for the full comparison of carry-over vs net-new components.
+
+Phase 0 should optimize for validating the analyst-specific pieces — tool contracts, system prompt, skill selection, and Databricks smoke checks — not for reproving runtime feasibility that the builder app already demonstrates.
 
 ## Decision Summary
 
-| Decision | Phase 0 choice | Phase 3 revisit |
-|----------|----------------|-----------------|
-| Runtime scope | Backend-only agent sandbox and feasibility harness | Add UI, packaging, and deployment hardening after phase 0 |
-| Agent runtime | Claude Agent SDK through an application-owned adapter | Revisit model/runtime abstraction once evals identify gaps |
-| Databricks tool integration | Compare direct `databricks-tools-core` adapter vs `databricks-mcp-server` adapter; choose for phase 1 using parity tests | Revisit hybrid or MCP-first model if external-agent compatibility becomes primary |
-| Skill reuse | Load and render existing local Databricks skill markdown through an app-owned skill registry | Add richer retrieval, ranking, and versioning after phase 1 |
-| Claude Code subprocess | Do not run a Claude Code instance as a subprocess in the request path | Reconsider only for isolated development tools, not production serving |
-| Authentication | Personal access token (PAT) provided by the user/developer | Replace with user OAuth/OBO or enterprise SSO-backed token flow |
-| Databricks execution compute | General-purpose Databricks cluster | Move business-query execution to SQL warehouse if product requirements justify it |
-| Canonical metrics | Unity Catalog metric views | Add supplemental documentation fields only if metric views do not cover required semantics |
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Agent runtime | OpenAI Agents SDK via `databricks-builder-app-oai` adapter | Proven in production with DeepSeek v4 Pro/Flash via AI Gateway |
+| Agent model (reasoning) | DeepSeek v4 Pro via AI Gateway | Default in builder app; strong tool-calling and reasoning |
+| Agent model (lightweight) | DeepSeek v4 Flash via AI Gateway | Title generation, quick follow-ups |
+| Model integration | `OpenAIChatCompletionsModel` + `AsyncOpenAI` | Any OpenAI-compatible API works without adapter changes |
+| Databricks tool integration | `databricks-tools-core` direct + MCP for selected tools | Builder app proves both paths; analyst app uses same backing |
+| Skill reuse | App-owned skill registry from builder app's `skills_manager.py` | Load and render existing local Databricks skill markdown |
+| Claude Code subprocess | Not used (confirmed by builder app design) | Builder app validates the "no subprocess" approach |
+| Authentication | PAT for phase 0; OAuth/OBO by phase 3 | Same as builder app's current multi-user auth model |
+| Execution compute | General-purpose Databricks cluster | Revisit SQL warehouse by phase 3 |
+| Canonical metrics | Unity Catalog metric views | Supplemental docs only if metric views don't cover required semantics |
+| Persistence | Lakebase PostgreSQL + Alembic migrations | Proven in builder app; extend schema for analyst objects |
+| Session management | OpenAI Agents SDK sessions (SQLite local → SQLAlchemy Lakebase) | Builder app's `openai_sessions.py` pattern |
 
-## Phase 0 Runtime Scope
+## Proven Runtime Stack
 
-Phase 0 should run as a backend-only local sandbox. It does not need a frontend server, Docker image, local PostgreSQL, pgvector, or deployment manifest.
+The following components from `databricks-builder-app-oai` are production-proven and should be carried over, not rebuilt:
 
-The phase 0 process can be a Python test harness or small CLI that initializes:
+### OpenAI Agents SDK Runtime
 
-- config and secret redaction
-- Claude Agent SDK adapter
-- app-owned tool registry
-- direct `databricks-tools-core` adapter
-- MCP adapter or parity harness
-- skill registry and selector
-- optional live Databricks smoke checks
+```text
+databricks-builder-app-oai/server/services/agent_runtime/
+  ├── base.py               # AgentRuntime protocol + AgentRunRequest dataclass
+  ├── openai_runtime.py      # Runner.run_streamed() with retry, cancel, events
+  ├── openai_models.py       # DeepSeek v4 Pro/Flash via AI Gateway
+  ├── openai_events.py       # SDK event → normalized app event mapper
+  └── openai_sessions.py     # SQLite session persistence (upgrade to Lakebase)
+```
+
+Key patterns:
+- `Runner.run_streamed()` with `max_turns=30`, `RunConfig` for tracing, `ModelRetrySettings` with jittered backoff
+- `ModelRetrySettings` with `retry_policies.any()` covering network errors, 429, 502-504, retry-after, and provider-suggested retries
+- Cancellation via `result.cancel()` with graceful drain
+- Every event enriched with `project_id`, `conversation_id`, `execution_id`, `story_id`, `trace_id`
+- `OpenAIChatCompletionsModel(model='deepseek-v4-pro', openai_client=AsyncOpenAI(base_url=..., api_key=...))` for any OpenAI-compatible endpoint
+
+### Model Configuration
+
+```bash
+# AI Gateway (current production shape)
+OPENAI_BASE_URL=https://your-ai-gateway.example.com/openai/v1
+OPENAI_API_KEY=<gateway-api-key>
+OPENAI_AGENT_MODEL=deepseek-v4-pro      # reasoning + tool calling
+OPENAI_TITLE_MODEL=deepseek-v4-flash    # lightweight tasks
+BUILDER_AGENT_RUNTIME=openai_agents
+OPENAI_AGENTS_DISABLE_TRACING=1         # disable OpenAI-hosted tracing for AI Gateway
+```
+
+The `build_agent_model()` function in `openai_models.py` handles the distinction:
+- If `OPENAI_BASE_URL` is set → `OpenAIChatCompletionsModel` with custom `AsyncOpenAI` client (AI Gateway path)
+- If unset → plain model string (direct OpenAI path)
+
+### Infrastructure
+
+```text
+databricks-builder-app-oai/
+  ├── server/db/database.py          # Async SQLAlchemy + Lakebase
+  ├── server/db/models.py            # Project / Conversation / Message / Execution
+  ├── alembic/                       # Working migration infrastructure
+  ├── server/services/active_stream.py    # Resumable SSE with events_json replay
+  ├── server/services/skills_manager.py   # Skill load / filter / render
+  ├── server/services/next_moves.py       # Follow-up generation
+  └── server/services/mlflow_setup.py     # MLflow tracing integration
+```
+
+## Phase 0 Runtime Scope (Revised)
+
+Phase 0 is **dramatically reduced** from the original plan because the agent runtime is proven. It is now focused on analyst-specific validation:
+
+### What phase 0 still needs to prove:
+
+1. **Analyst tool contracts** — Define the analyst-safe tool set (`search_context`, `describe_asset`, `query_metric_view`, `execute_sql`, `validate_sql`, `profile_result`) against `databricks-tools-core`.
+2. **Analyst system prompt** — Write the discovery-first analyst prompt (Understand → Discover → Plan → Retrieve → Clarify → Generate → Validate → Execute → Analyze → Synthesize → Learn).
+3. **Analyst skill allowlist** — Configure the skill registry for analyst workflows.
+4. **Databricks smoke checks** — PAT identity, cluster execution, UC metadata, metric view access (same as original M0.2).
+
+### What phase 0 no longer needs to prove:
+
+- ~~Claude Agent SDK adapter feasibility~~ (eliminated — using OpenAI Agents SDK)
+- ~~Claude Agent SDK mocked smoke test~~ (eliminated)
+- ~~No Claude Code subprocess guard~~ (confirmed by builder app design)
+- ~~MCP vs direct adapter comparison~~ (builder app proves both; use the same pattern)
+- ~~Claude vs OpenAI SDK decision record~~ (resolved: OpenAI Agents SDK + DeepSeek v4)
 
 ## Runtime Topology
 
 ```text
 Phase 0 test harness / backend sandbox
-  |- Claude Agent SDK adapter
-  |- app-owned agent runtime interface
-  |- app-owned tool registry
-  |- direct databricks-tools-core adapter
-  |- MCP adapter / parity harness
-  |- skill registry and renderer
-  |- metric view query service
-  |
+  ├── OpenAI Agents SDK runtime (from builder app)
+  │   ├── OpenAIAgentRuntime.stream_response()
+  │   ├── DeepSeek v4 Pro via AI Gateway
+  │   └── Normalized event stream
+  ├── App-owned analyst tool registry
+  │   ├── execute_sql (read-only, bounded)
+  │   ├── describe_uc_asset
+  │   ├── describe_metric_view / query_metric_view
+  │   └── get_current_identity / describe_compute
+  ├── Skill registry (from builder app's skills_manager.py)
+  │   └── Analyst skill allowlist
+  └── Analyst system prompt
+
   | SQL / metadata / jobs / traces
   v
 Databricks workspace
-  |- Unity Catalog
-  |- UC metric views
-  |- general-purpose cluster
-  |- MLflow
+  ├── Unity Catalog
+  ├── UC metric views
+  ├── General-purpose cluster
+  └── MLflow
 ```
-
-Long-running background workers, UI event streams, Story Canvas persistence, and deployment packaging are not phase 0 requirements.
-
-## Claude Agent SDK Integration
-
-The first phase 0 concern is whether the analyst runtime can use the Claude Agent SDK through a narrow adapter owned by the application.
-
-The adapter should expose:
-
-- `run_analysis(input, context, tools, run_config)`
-- streaming events for story creation, trace, tool call, tool result, evidence, validation, conclusion, and next moves
-- tool registration for analyst-safe tools
-- cancellation
-- trace metadata hooks
-- deterministic eval configuration
-
-The application should not shell out to `claude`, spawn Claude Code as a child process, or depend on a long-running Claude Code subprocess for serving user requests.
-
-Rationale:
-
-- Subprocess orchestration makes cancellation, streaming, auth isolation, deployment, and observability harder.
-- A library/SDK boundary is easier to test and mock.
-- The application should own tool contracts, context selection, storage, and tracing rather than delegating those responsibilities to a CLI process.
-
-If the SDK lacks a required capability without a subprocess, the phase 0 behavior should be to keep that capability out of scope and document the gap. Subprocess use can be considered later for offline developer tooling, but not for production request handling.
-
-## Databricks Tool Integration Strategy
-
-The second phase 0 concern is how Databricks capabilities should be exposed to the Claude Agent SDK adapter. Phase 0 must compare direct `databricks-tools-core` calls with `databricks-mcp-server` backed calls.
-
-### Direct `databricks-tools-core` Adapter
-
-Direct integration imports and calls `databricks-tools-core` functions in process.
-
-Expected strengths:
-
-- lower runtime overhead
-- simpler unit testing and mocking
-- direct control over auth, timeouts, cancellation, and output normalization
-- easier enforcement of analyst-specific read-only guardrails
-- no dependency on running a separate MCP server for the in-app runtime
-
-Expected risks:
-
-- the app may duplicate consolidation already present in MCP wrappers
-- direct output shapes may differ from tool shapes used by existing agents
-- external agents cannot automatically reuse the app's direct tool adapter
-
-### `databricks-mcp-server` Adapter
-
-MCP integration routes app-level tools through the existing MCP tool layer or a compatible in-process/test-client harness.
-
-Expected strengths:
-
-- reuses existing tool registration and consolidated wrappers
-- keeps parity with external MCP clients
-- can preserve existing MCP tool descriptions and conventions
-- may reduce duplicate wrapper work if the MCP layer already shapes outputs well
-
-Expected risks:
-
-- extra protocol or process boundary if used as a running server
-- harder cancellation and timeout behavior
-- less direct control over app-specific tool schemas
-- possible mismatch between Claude Agent SDK tool registration and MCP tool contracts
-
-Phase 0 should not assume the answer. It should implement both behind the same app-owned tool interface, run parity tests, then record the phase 1 recommendation. The default hypothesis is direct `databricks-tools-core` for the in-app runtime, with MCP compatibility retained when parity or external-agent use matters.
-
-## Skill Reuse Strategy
-
-The third phase 0 concern is how to reuse existing Databricks skills as guidance for the analyst agent without depending on Claude Code's automatic skill loader. Phase 0 should implement an app-owned skill registry.
-
-Skill registry responsibilities:
-
-- load local `databricks-skills/<skill>/SKILL.md` files
-- optionally load installed `.agents/skills` or `.claude/skills` paths
-- parse skill name, description, trigger guidance, and source path
-- allowlist the skills relevant to analyst workflows
-- select skills from task type, active tool, and retrieved context
-- trim skill content to a token budget
-- render selected guidance into Claude Agent SDK instructions with source attribution
-
-Initial allowlist:
-
-- `databricks-python-sdk`
-- `databricks-unity-catalog`
-- `databricks-metric-views`
-- `databricks-mlflow-evaluation`
-- `instrumenting-with-mlflow-tracing`
-- `databricks-config`
-
-Skills that target excluded product surfaces should not be loaded by default for the analyst app. If a later workflow needs one, it should be added explicitly with an eval case.
 
 ## Configuration
 
-Configuration should be environment-driven and safe to print in redacted diagnostics.
+Configuration follows the builder app's proven pattern:
 
 | Variable | Purpose |
 |----------|---------|
+| `OPENAI_BASE_URL` | AI Gateway endpoint (OpenAI-compatible) |
+| `OPENAI_API_KEY` | AI Gateway API key |
+| `OPENAI_AGENT_MODEL` | Default: `deepseek-v4-pro` |
+| `OPENAI_TITLE_MODEL` | Default: `deepseek-v4-flash` |
+| `BUILDER_AGENT_RUNTIME` | `openai_agents` |
 | `DATABRICKS_HOST` | Workspace URL |
 | `DATABRICKS_TOKEN` | PAT for phase 0 authentication |
-| `DATABRICKS_CLUSTER_ID` | General-purpose cluster used for execution |
-| `ANTHROPIC_API_KEY` | Claude Agent SDK provider credential |
-| `CLAUDE_AGENT_MODEL` | Default model for the Claude Agent SDK adapter |
-| `ANALYST_TOOL_BACKING` | `tools_core`, `mcp`, or `hybrid` for adapter experiments |
-| `ANALYST_SKILLS_ROOTS` | Optional colon-separated local skill roots |
-| `ANALYST_SKILL_ALLOWLIST` | Optional comma-separated skill names for phase 0 |
-| `MLFLOW_TRACKING_URI` | Optional MLflow tracking target for trace feasibility |
+| `DATABRICKS_CLUSTER_ID` | General-purpose cluster for execution |
+| `ENABLED_SKILLS` | Comma-separated skill names for analyst workflows |
+| `MLFLOW_TRACKING_URI` | `databricks` for Databricks-hosted MLflow |
+| `MLFLOW_EXPERIMENT_NAME` | Experiment path for traces |
+| `LAKEBASE_PG_URL` | PostgreSQL connection for persistence |
 
-Secrets must not be committed to the repo. Local development should use `.env` files ignored by git.
+Secrets must not be committed to the repo. Local development should use `.env.local` (gitignored).
 
-## Development Environment Setup
+## Analyst Tool Contract
 
-Phase 0 must produce a repeatable backend-only feasibility environment. The goal is to make agent-runtime decisions executable and debuggable on a developer machine.
+The analyst tool set is intentionally smaller and read-first compared to the builder app's CRUD surface.
 
-Required local capabilities:
+| App tool | Purpose | Backing |
+|----------|---------|---------|
+| `get_current_identity` | Resolve active Databricks identity/workspace | `databricks-tools-core` identity |
+| `describe_compute` | Inspect configured cluster and execution readiness | `databricks-tools-core` compute |
+| `execute_sql` | Run bounded read-only SQL on general-purpose cluster | `databricks-tools-core` compute execution |
+| `describe_uc_asset` | Inspect UC table/view/schema metadata | `databricks-tools-core` UC |
+| `describe_metric_view` | Inspect UC metric view definition | `databricks-tools-core` metric views |
+| `query_metric_view` | Query governed metric views | `databricks-tools-core` metric views |
 
-- configured Databricks workspace, PAT, and general-purpose cluster
-- Claude Agent SDK credentials
-- local import path for `databricks-tools-core`
-- local import path for `databricks-mcp-server`
-- local access to Databricks skill markdown
+Later phases add:
+- `search_context` — semantic + exact context retrieval (phase 2)
+- `validate_sql` — SQL parse/lint/dry-run/cardinality checks (phase 3)
+- `profile_result` — result shape, nulls, outliers, distributions (phase 3)
+- `create_chart_spec` — chart configuration from result data (phase 1)
+- `manage_memory` — propose/approve/cite (phase 6)
+- `run_workflow` — parameterized workflow execution (phase 5)
+- `publish_report` — save report artifacts (phase 5)
 
-Required setup artifacts:
+## Skill Reuse Strategy
 
-- `.env.example` with all required variables and no secrets
-- phase 0 test command for local debugging
-- Claude Agent SDK adapter smoke test
-- direct tools-core adapter smoke test
-- MCP adapter/parity smoke test
-- skill registry and selection smoke test
-- Databricks PAT and cluster smoke test
+The builder app's `skills_manager.py` (22KB) provides a working skill registry that:
 
-The preflight command should be safe to run repeatedly. It should not mutate production data or create broad Databricks resources.
+- Loads local `databricks-skills/<skill>/SKILL.md` files
+- Parses skill name, description, trigger guidance
+- Filters tools by enabled skills (`filter_openai_tools_by_skills`)
+- Renders selected guidance into system prompt
+- Supports per-project allowlist, env-var allowlist, and all-skills fallback
 
-## Phase 0 Feasibility Evals
+Analyst-specific skill allowlist:
 
-Phase 0 should include deterministic feasibility evals. These are not UI tests or model-quality evals; they test the runtime choices.
+- `databricks-python-sdk`
+- `databricks-unity-catalog`
+- `databricks-dbsql`
+- `databricks-metric-views` (when available)
+- `instrumenting-with-mlflow-tracing`
 
-Suggested test layout once the app is scaffolded:
-
-```text
-databricks-analyst-app/
-  server/
-    tests/
-      phase0/
-        test_config.py
-        test_claude_agent_sdk.py
-        test_no_claude_code_subprocess.py
-        test_tools_core_adapter.py
-        test_mcp_adapter.py
-        test_tool_adapter_parity.py
-        test_skill_registry.py
-        test_skill_selection.py
-        test_databricks_smoke.py
-        test_metric_views.py
-```
-
-Required checks:
-
-| Check | Purpose | Pass condition |
-|-------|---------|----------------|
-| Config validation | Prove required environment variables are present and parseable | Missing or malformed config fails with actionable errors |
-| Secret redaction | Prevent secrets from leaking into logs and traces | PAT and provider keys are masked in emitted diagnostics |
-| Claude Agent SDK | Prove SDK integration is viable | SDK imports, mocked run succeeds, optional live run is gated |
-| No Claude Code subprocess | Enforce serving-path constraint | Tests assert no `claude` or `claude-code` subprocess is invoked |
-| Direct tools-core adapter | Prove in-process tool calls are viable | Selected tools can be called with normalized input/output |
-| MCP adapter | Prove MCP-backed tool calls are viable | Selected MCP wrappers can be invoked through the app tool interface |
-| Adapter parity | Compare direct and MCP behavior | Key tool outputs are equivalent or differences are documented |
-| Skill registry | Prove local skill reuse | Allowlisted skills load with metadata and source paths |
-| Skill selection | Prove relevant skill injection | Task cases select expected skills within token budget |
-| Databricks PAT identity | Prove token auth works | Current-user or workspace identity lookup succeeds |
-| Cluster availability | Prove configured compute exists | `DATABRICKS_CLUSTER_ID` resolves and is running or startable |
-| Cluster SQL execution | Prove phase 0 execution path works | Bounded read-only `SELECT 1` succeeds on the configured cluster |
-| Unity Catalog access | Prove metadata discovery works | Can list allowed catalogs/schemas or inspect a configured sample object |
-| Metric views | Prove canonical metric decision is feasible | Can list or describe at least one configured UC metric view, or fail with a clear "no metric views configured" diagnostic |
-
-The preflight command should group checks into tiers:
-
-1. **Agent:** Claude Agent SDK, no subprocess enforcement, fake tool call.
-2. **Tools:** direct tools-core adapter, MCP adapter, parity checks.
-3. **Skills:** registry loading, allowlist filtering, selection, rendering.
-4. **Databricks:** PAT identity, cluster availability, cluster SQL, UC metadata, metric views.
-
-Example command shape:
-
-```bash
-uv run pytest databricks-analyst-app/server/tests/phase0 -v
-```
-
-The exact command can change with the scaffold, but phase 0 is not complete until equivalent checks exist and are documented.
+Skills that target excluded product surfaces (agent bricks, synthetic data gen, PDF generation) should not be loaded by default.
 
 ## Authentication and Identity
 
-Phase 0 uses PAT authentication.
+Phase 0 uses PAT authentication (same as builder app).
 
-The PAT is the Databricks identity for:
+The builder app's multi-user auth chain (`X-Forwarded-Email` → `X-Forwarded-User` → Bearer token → PAT fallback) supports both Databricks Apps multi-user and local development. This carries over directly.
 
-- metadata lookup
-- metric view discovery and query
-- cluster-backed SQL execution
-- MLflow trace logging
-
-Implications:
-
-- The app does not yet provide per-user pass-through identity.
-- Phase 0 should be treated as a trusted developer or controlled pilot mode.
-- Audit trails in Databricks will reflect the PAT owner.
-- Phase 0 diagnostics must show the active workspace and token-backed identity without exposing the token.
-
-The backend should support one of two PAT input modes:
-
-1. **Developer mode:** `DATABRICKS_TOKEN` is configured as an environment variable.
-2. **Pilot mode:** a user provides a PAT through a secure session flow, and the app stores only an encrypted token reference or short-lived server-side session secret.
-
-Phase 0 should prefer developer mode unless a pilot explicitly requires multiple users. Phase 3 should replace PATs with OAuth/OBO or an equivalent enterprise auth model.
+Phase 3 should replace PATs with OAuth/OBO.
 
 ## Databricks Execution
 
-Phase 0 through phase 2 should execute analytical SQL on a general-purpose Databricks cluster, not a SQL warehouse.
-
-Rationale:
-
-- Clusters are easier to align with notebook-style data science workflows.
-- Cluster execution leaves room for Python/Spark probes during discovery and validation.
-- The app can avoid committing too early to warehouse-specific execution semantics while the agent loop is still evolving.
+Phase 0 through phase 2: general-purpose Databricks cluster, not SQL warehouse.
 
 Execution adapter requirements:
-
-- Use `DATABRICKS_CLUSTER_ID` as the default compute target.
-- Execute read-only SQL and metadata probes through Databricks APIs.
-- Enforce row limits, timeouts, cancellation, and result preview limits in the application layer.
-- Block mutating SQL by default.
-- Capture statement text, status, row count, result preview, latency, and error details.
-- Return links to the relevant Databricks artifact when the platform provides one.
-
-Phase 3 should revisit SQL warehouse execution after the discovery loop, validation checks, and eval harness are stable.
+- Use `DATABRICKS_CLUSTER_ID` as the default compute target
+- Execute read-only SQL through Databricks APIs
+- Enforce row limits, timeouts, cancellation, and result preview limits
+- Block mutating SQL by default (builder app's `_is_read_only_sql` check is a starting point)
+- Capture statement text, status, row count, result preview, latency, and error details
 
 ## Deferred Semantic Retrieval
 
-Databricks Vector Search is not available in the target Databricks environment, so semantic retrieval is app-owned infrastructure. This is not a phase 0 concern; it starts when the context foundation work begins.
-
-The planned context foundation should use PostgreSQL with pgvector for:
-
-- context document embeddings
-- semantic search over table, metric, annotation, code-enrichment, workflow, memory, and approved document chunks
-- exact lookup and vector ranking in the same application database
-- local development through a Postgres + pgvector container once semantic indexing starts
-- VM/AKS deployment through managed or self-managed PostgreSQL with pgvector enabled
-
-If Lakebase is considered for the application database, it must first satisfy the pgvector requirements. Otherwise, use external PostgreSQL for the app database and vector index.
-
-The context service should hide the concrete vector implementation behind an adapter:
-
-```text
-ContextService
-  |- exact lookup repository
-  |- pgvector repository
-  |- ranking service
-  |- ACL metadata filter
-```
-
-The app should not call Databricks Vector Search or require a Databricks vector endpoint. If a deployment later provides a managed vector service, it can be added behind the same context service interface after evals prove equivalent or better retrieval quality.
+Same position as before: pgvector for app-owned semantic retrieval, not Databricks Vector Search. Not a phase 0 concern.
 
 ## Metric Views
 
-Unity Catalog metric views are the canonical metric system for the app.
-
-The system should:
-
-- Prefer metric views over raw table queries when a requested metric is available.
-- Retrieve metric view definitions during offline context ingestion.
-- Expose a `query_metric_view` tool as a first-class agent capability.
-- Use metric views for reconciliation checks when generated SQL uses lower-level tables.
-- Store metric view IDs, dimensions, measures, filters, and freshness metadata in context storage.
-
-A separate metric registry should not be introduced in phase 0. If later required, supplemental metadata should augment metric views rather than replace them.
+Unity Catalog metric views are the canonical metric system. The builder app already has `manage_metric_views` tool — the analyst app needs the read-only subset: `describe_metric_view` and `query_metric_view`.
 
 ## Later Application Components
 
-The following components are the expected full application shape after phase 0. They are not all phase 0 deliverables.
-
-| Component | Responsibility |
-|-----------|----------------|
-| React workbench | Host shell, global ask, Story Canvas, StoryCards, right inspect panel, contextual actions |
-| FastAPI API | Auth/session boundary, REST APIs, streaming, request validation |
-| Agent runtime adapter | Claude Agent SDK integration, tool loop, cancellation, trace hooks |
-| Databricks client adapter | Workspace, cluster, UC, metric views, MLflow APIs |
-| SQL execution service | Read-only execution, limits, previews, status polling, errors |
-| Context service | Exact lookup, pgvector retrieval, ranking, ACL metadata |
-| Metric service | Metric view discovery, query construction, reconciliation support |
-| Persistence layer | Sessions, messages, stories, story events, evidence blocks, runs, query runs, artifacts, feedback, eval cases |
-| Background worker | Offline context ingestion, evals, report generation |
+| Component | Responsibility | Source |
+|-----------|---------------|--------|
+| React workbench | Story Canvas, StoryCards, inspect panel | Extend builder app frontend |
+| FastAPI API | Auth, REST APIs, streaming | Extend builder app server |
+| Agent runtime adapter | OpenAI Agents SDK integration | **Carry over from builder app** |
+| Databricks client adapter | Workspace, cluster, UC, metric views, MLflow | `databricks-tools-core` |
+| SQL execution service | Read-only execution, limits, previews | Extend builder app's `execute_sql` |
+| Context service | pgvector retrieval, ranking, ACL metadata | **Net-new** |
+| Metric service | Metric view discovery, query, reconciliation | Extend builder app's metric view tools |
+| Persistence layer | Analysis stories, evidence, feedback, evals | Extend builder app's Lakebase + Alembic |
+| Background worker | Offline context ingestion, evals, reports | **Net-new** |
 
 ## Core Request Flow
 
-1. User submits a business question from the global ask box or a contextual AI entry point.
-2. Frontend creates an optimistic StoryCard in `planning` state and sends question plus explicit context to FastAPI.
-3. FastAPI creates `analysis_story` and `analysis_run`, then starts a streaming response.
-4. Context service retrieves candidate metric views, tables, prior runs, docs, and memories.
-5. Agent adapter starts a Claude Agent SDK run with bounded context and analyst-safe tools.
-6. Agent performs discovery before SQL generation and streams trace updates.
-7. Metric service is used first when the question maps to a metric view.
-8. SQL execution service runs bounded read-only SQL on the configured general-purpose cluster.
-9. Validation checks inspect row counts, nulls, joins, freshness, and metric reconciliation.
-10. Agent streams evidence blocks, conclusion updates, and next moves.
-11. Backend stores run metadata, story events, trace IDs, SQL metadata, result previews, artifacts, and feedback hooks.
+1. User submits a business question from the global ask box.
+2. Frontend creates an optimistic StoryCard in `planning` state, sends question + context to FastAPI.
+3. FastAPI creates `analysis_story` and `analysis_run`, starts SSE stream.
+4. Context service retrieves candidate metric views, tables, prior runs, docs, memories.
+5. `OpenAIAgentRuntime.stream_response()` starts a DeepSeek v4 Pro run with analyst tools.
+6. Agent performs discovery before SQL generation, streams trace updates via normalized events.
+7. Metric service used first when question maps to a metric view.
+8. SQL execution runs bounded read-only SQL on configured cluster.
+9. Validation checks inspect row counts, nulls, joins, freshness, metric reconciliation.
+10. Agent streams evidence blocks, conclusion, next moves.
+11. Backend stores run metadata, story events, trace IDs, SQL metadata, result previews.
 
 ## Deferred Data Model Decisions
 
-Phase 0 should not create the full application database schema. The following tables are planned for later phases once story persistence, context indexing, workflows, and memory are implemented.
+Phase 0 does not create the full application database schema. The builder app's existing `Project + Conversation + Message + Execution` tables remain. New tables added in later phases:
 
-Required tables:
-
-- `analysis_sessions`
-- `analysis_messages`
-- `analysis_stories`
-- `story_events`
-- `evidence_blocks`
-- `analysis_runs`
-- `query_runs`
-- `analysis_artifacts`
-- `context_documents`
-- `feedback`
-- `eval_cases`
-
-Tables that can be present but minimally used:
-
-- `workflow_templates`
-- `workflow_runs`
-- `memories`
-- `canvases`
-
-Do not store full source datasets in the application database. Store previews, summaries, metadata, artifact pointers, and trace/query identifiers.
+Phase 1: `analysis_stories`, `story_events`, `evidence_blocks`, `analysis_runs`, `query_runs`
+Phase 4: `eval_cases`, `feedback`
+Phase 5: `workflow_templates`, `workflow_runs`
+Phase 6: `memories`
+Phase 7: `context_documents`
 
 ## Phase 0 Non-Goals
 
-- UI implementation, frontend dev server, Story Canvas, or StoryCard work.
-- Docker image packaging, VM deployment, AKS manifests, or release automation.
-- PostgreSQL or pgvector setup.
-- Semantic retrieval, embeddings, or context indexing.
-- Full application persistence schema.
-- Multi-user enterprise auth beyond PAT-based pilot use.
-- SQL warehouse execution as the default path.
-- Separate metric registry.
-- Team/global memory approval workflow.
-- Full code enrichment over all production pipelines.
-- Databricks Vector Search dependency.
-- Claude Code subprocess serving.
-- Multi-agent runtime.
-- Broad production rollout.
+- UI implementation, frontend dev server, Story Canvas, or StoryCard work
+- Docker image packaging, VM deployment, AKS manifests
+- PostgreSQL or pgvector setup
+- Semantic retrieval, embeddings, or context indexing
+- Full application persistence schema
+- Multi-user enterprise auth beyond PAT-based pilot
+- SQL warehouse execution as the default path
+- Separate metric registry
+- Team/global memory approval workflow
+- ~~Claude Agent SDK feasibility proof~~ (resolved: OpenAI Agents SDK)
+- ~~Claude vs OpenAI SDK comparison~~ (resolved)
+- ~~No Claude Code subprocess guard~~ (confirmed by builder app)
 
 ## Phase 3 Revisit Checklist
 
 Before leaving phase 3, revisit:
 
-- Replace PAT with OAuth/OBO or enterprise SSO-backed identity.
-- Decide whether SQL warehouse execution should replace or complement cluster execution.
-- Confirm whether metric views fully cover canonical business metrics.
-- Confirm whether pgvector retrieval quality and operations are sufficient for production scale.
-- Decide whether the Claude Agent SDK adapter needs model/runtime abstraction.
-- Decide whether any Claude Code subprocess use is acceptable for offline development tooling.
-- Validate VM and AKS deployment patterns against security and operations requirements.
+- Replace PAT with OAuth/OBO or enterprise SSO-backed identity
+- Decide whether SQL warehouse execution should replace or complement cluster execution
+- Confirm whether metric views fully cover canonical business metrics
+- Confirm whether pgvector retrieval quality is sufficient for production scale
+- Decide whether to support additional model providers beyond DeepSeek v4 via AI Gateway
+- Validate deployment patterns against security and operations requirements

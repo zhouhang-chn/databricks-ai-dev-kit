@@ -29,13 +29,14 @@ Last updated: 2026-05-05.
 | Phase | Status | Notes |
 |-------|--------|-------|
 | Phase 0: Document Current State And Target | Complete | This docs set records the current static implementation and target intelligent design. |
-| Phase 1: Backend Heuristic Generator | Not started | Add a deterministic generator that uses answer, question, trace, role, and project type. |
-| Phase 2: Context Pack And Event Metadata | Not started | Build compact Next Move context and attach generation metadata to events. |
-| Phase 3: Model-Based Generator | Not started | Add AI Gateway/OpenAI-compatible JSON generation with timeout and fallback. |
-| Phase 4: Frontend Contract Cleanup | Not started | Extend types for additive fields and make frontend fallback compatibility-only. |
-| Phase 5: Role And Policy Enforcement | Not started | Ensure read-only roles never receive write/deploy/delete prompts. |
-| Phase 6: Tests And Evaluation Fixtures | Not started | Add unit tests and seed eval cases for common workflows. |
-| Phase 7: Observability And Feedback | Not started | Add logs, metrics, and optional user feedback hooks. |
+| Phase 1: Backend Heuristic Generator | Complete | `server/services/next_moves.py` now provides typed context, fallback heuristics, and route integration. |
+| Phase 2: Context Pack And Event Metadata | Complete | Agent runs now pass answer, error, trace summaries, evidence summaries, resources, role, semantics, workflows, memory, and generation metadata. |
+| Phase 3: Model-Based Generator | Complete | AI Gateway/OpenAI-compatible generation is implemented with timeout, strict JSON parsing, validation, and heuristic fallback. |
+| Phase 4: Frontend Contract Cleanup | Complete | Frontend `NextMove` accepts additive metadata, and TodoWrite no longer overwrites recommendations. |
+| Phase 5: Role And Policy Enforcement | Complete | Read-only roles filter write/deploy/delete-style model and heuristic moves; risky developer moves can require confirmation metadata. |
+| Phase 6: Tests And Evaluation Fixtures | Partial | Unit tests cover fallback, parsing, policy filtering, and disabled-model fallback; qualitative eval fixtures remain future work. |
+| Phase 7: Observability And Feedback | Partial | Backend logs source/model/latency/fallback reason and emits event metadata; click/dismiss feedback and MLflow spans remain future work. |
+| Phase 8: Workflow And Memory Integration | Partial | Project semantics, workflows, and memory are included in the context pack; workflow-specific ranking remains future work. |
 
 ## Phase 0: Document Current State And Target
 
@@ -334,4 +335,3 @@ NEXT_MOVES_MODEL_ENABLED=true
 - Frontend renders additive metadata safely.
 - Tests cover fallback, parsing, role policy, and representative workflows.
 - Logs expose source, latency, and fallback reason.
-
