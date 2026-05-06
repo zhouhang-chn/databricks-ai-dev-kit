@@ -90,13 +90,17 @@ Sections:
 
 The builder app's `Sidebar.tsx` (conversations list + project list) is the starting skeleton. Replace project/conversation navigation with session/story/workflow navigation.
 
-### Main Canvas (The "Answer")
+### Main Canvas (The "Story Feed")
 
-The `StoryCanvas` component renders the active "Story" or "Answer". It breaks away from a conversational chat UI and instead focuses on data density:
-- **Query Tokens**: At the very top, the natural language query is parsed into semantic tokens (Metrics, Dimensions, Time ranges) for immediate feedback on how the agent understood the request.
-- **Main Visualization**: A large, interactive chart (e.g., Recharts) takes center stage if the data warrants it.
-- **Data Table**: Below the chart, a clean, paginated data grid showing the raw results.
-- **Empty State**: A clean page prompting the user to start searching their data.
+The `StoryCanvas` component renders the active session's progress. While it borrows data density from BI tools like ThoughtSpot, it fundamentally remains a **conversational, iterative workbench**. The product journey flows vertically:
+
+1. **The Investigation**: The user asks an initial question in the Global Ask Box.
+2. **Iterative Analysis (Chat & Reasoning)**: The canvas displays a multi-turn feed where the agent shows its work. Each turn includes:
+   - The user's prompt (or refinement).
+   - The agent's semantic understanding (Query Tokens: Metrics, Dimensions, Time ranges).
+   - The logical reasoning chain and intermediate evidence collected (queries run, tables checked, minor charts).
+3. **The Synthesis (Story Card)**: Once the analysis reaches a conclusion, the iterative steps are summarized into a highly polished, dense **Story Card**. This card contains the final markdown answer, the primary visualization, and the data table.
+4. **Empty State**: A clean page prompting the user to start searching their data with starter templates.
 
 ### Right Inspect Panel: Context & Trace
 
