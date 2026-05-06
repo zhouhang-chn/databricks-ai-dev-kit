@@ -74,7 +74,6 @@ interface ActivityItem {
 
 interface ActiveStream {
   fullText: string;
-  activityItems: ActivityItem[];
   todos: TodoItem[];
   tools: string[];
   stories: AnalysisStory[];
@@ -213,157 +212,7 @@ function ResourceDropdown<T extends { state: string }>({
   );
 }
 
-// Configuration panel component
-function ConfigPanel({
-  isOpen,
-  onClose,
-  defaultCatalog,
-  setDefaultCatalog,
-  defaultSchema,
-  setDefaultSchema,
-  clusters,
-  selectedClusterId,
-  setSelectedClusterId,
-  warehouses,
-  selectedWarehouseId,
-  setSelectedWarehouseId,
-  workspaceFolder,
-  setWorkspaceFolder,
-  mlflowExperimentName,
-  setMlflowExperimentName,
-  workspaceUrl,
-  onSaveProjectDefaults,
-  isSavingProjectDefaults,
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  defaultCatalog: string;
-  setDefaultCatalog: (v: string) => void;
-  defaultSchema: string;
-  setDefaultSchema: (v: string) => void;
-  clusters: Cluster[];
-  selectedClusterId?: string;
-  setSelectedClusterId: (v: string | undefined) => void;
-  warehouses: Warehouse[];
-  selectedWarehouseId?: string;
-  setSelectedWarehouseId: (v: string | undefined) => void;
-  workspaceFolder: string;
-  setWorkspaceFolder: (v: string) => void;
-  mlflowExperimentName: string;
-  setMlflowExperimentName: (v: string) => void;
-  workspaceUrl: string | null;
-  onSaveProjectDefaults: () => void;
-  isSavingProjectDefaults: boolean;
-}) {
-  if (!isOpen) return null;
 
-  return (
-    <div className="absolute right-0 top-full mt-2 w-96 rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-2xl z-50 overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--color-border)]/50 bg-[var(--color-bg-secondary)]/30">
-        <h3 className="text-sm font-semibold text-[var(--color-text-heading)]">Configuration</h3>
-        <button onClick={onClose} className="p-1 rounded-md hover:bg-[var(--color-bg-secondary)] transition-colors">
-          <X className="h-4 w-4 text-[var(--color-text-muted)]" />
-        </button>
-      </div>
-      <div className="p-5 space-y-5">
-        {/* Catalog & Schema - stacked for more room */}
-        <div>
-          <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Catalog / Schema</label>
-          <div className="mt-1.5 flex items-center gap-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] overflow-hidden focus-within:ring-2 focus-within:ring-[var(--color-accent-primary)]/30 focus-within:border-[var(--color-accent-primary)]/50">
-            <input
-              type="text"
-              value={defaultCatalog}
-              onChange={(e) => setDefaultCatalog(e.target.value)}
-              placeholder="catalog"
-              className="flex-1 h-10 px-3 bg-transparent text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]/50 focus:outline-none min-w-0"
-            />
-            <span className="text-[var(--color-text-muted)] font-bold text-lg leading-none select-none">.</span>
-            <input
-              type="text"
-              value={defaultSchema}
-              onChange={(e) => setDefaultSchema(e.target.value)}
-              placeholder="schema"
-              className="flex-1 h-10 px-3 bg-transparent text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]/50 focus:outline-none min-w-0"
-            />
-            {workspaceUrl && defaultCatalog && defaultSchema && (
-              <a
-                href={`${workspaceUrl}/explore/data/${defaultCatalog}/${defaultSchema}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center h-10 w-10 flex-shrink-0 border-l border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-primary)] hover:bg-[var(--color-bg-secondary)]/50 transition-colors"
-                title="Open in Catalog Explorer"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            )}
-          </div>
-        </div>
-
-        {/* Cluster - custom dropdown */}
-        {clusters.length > 0 && (
-          <ResourceDropdown
-            label="Cluster"
-            items={clusters}
-            selectedId={selectedClusterId}
-            onSelect={setSelectedClusterId}
-            nameKey="cluster_name"
-            idKey="cluster_id"
-          />
-        )}
-
-        {/* Warehouse - custom dropdown */}
-        {warehouses.length > 0 && (
-          <ResourceDropdown
-            label="SQL Warehouse"
-            items={warehouses}
-            selectedId={selectedWarehouseId}
-            onSelect={setSelectedWarehouseId}
-            nameKey="warehouse_name"
-            idKey="warehouse_id"
-          />
-        )}
-
-        {/* Workspace Folder */}
-        <div>
-          <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Workspace Folder</label>
-          <input
-            type="text"
-            value={workspaceFolder}
-            onChange={(e) => setWorkspaceFolder(e.target.value)}
-            placeholder="/Workspace/Users/..."
-            className="mt-1.5 w-full h-10 px-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)]/30 focus:border-[var(--color-accent-primary)]/50"
-          />
-        </div>
-
-        {/* MLflow Experiment */}
-        <div>
-          <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">MLflow Experiment</label>
-          <input
-            type="text"
-            value={mlflowExperimentName}
-            onChange={(e) => setMlflowExperimentName(e.target.value)}
-            placeholder="Experiment ID or name"
-            className="mt-1.5 w-full h-10 px-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)]/30 focus:border-[var(--color-accent-primary)]/50"
-          />
-        </div>
-
-        <button
-          type="button"
-          onClick={onSaveProjectDefaults}
-          disabled={isSavingProjectDefaults}
-          className="w-full h-10 inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--color-accent-primary)] text-white text-sm font-medium hover:bg-[var(--color-accent-secondary)] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-        >
-          {isSavingProjectDefaults ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="h-4 w-4" />
-          )}
-          Save as Project Defaults
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // Sanitize string for schema name: only a-z, 0-9, _ allowed
 function sanitizeForSchema(str: string): string {
@@ -430,18 +279,10 @@ function parseGlossary(value: string): Record<string, string> {
 
 function computeReadiness(project: Project | null): Record<string, boolean> {
   const settings = project?.settings;
-  const resources = settings?.resources || {};
   const semantics = settings?.semantics || {};
   return {
     purpose: Boolean(project?.description?.trim()),
-    catalogSchema: Boolean(resources.default_catalog && resources.default_schema),
-    warehouse: Boolean(resources.warehouse_id),
-    workspaceFolder: Boolean(resources.workspace_folder),
-    semanticScope: Boolean(
-      (semantics.metric_views?.length || 0) > 0
-      || (semantics.preferred_tables?.length || 0) > 0
-    ),
-    release: Boolean(project?.current_release_id && project.current_release_id !== 'draft'),
+    semanticScope: Boolean((semantics.preferred_tables?.length || 0) > 0),
   };
 }
 
@@ -528,6 +369,8 @@ function ProjectManagementPanel({
   isOpen,
   onClose,
   project,
+  clusters,
+  warehouses,
   onSave,
   onPublish,
   onStartUserPreview,
@@ -536,61 +379,42 @@ function ProjectManagementPanel({
   isOpen: boolean;
   onClose: () => void;
   project: Project | null;
+  clusters: Cluster[];
+  warehouses: Warehouse[];
   onSave: (payload: ProjectManagementPayload) => void;
   onPublish: (releaseId: string, notes: string) => void;
   onStartUserPreview: () => void;
   isSaving: boolean;
 }) {
   const [description, setDescription] = useState('');
-  const [projectType, setProjectType] = useState('databricks_app_build');
-  const [status, setStatus] = useState('draft');
-  const [audience, setAudience] = useState('developer');
-  const [successCriteria, setSuccessCriteria] = useState('');
-  const [metricViews, setMetricViews] = useState('');
   const [preferredTables, setPreferredTables] = useState('');
-  const [deprecatedTables, setDeprecatedTables] = useState('');
-  const [sampleQueries, setSampleQueries] = useState('');
   const [glossary, setGlossary] = useState('');
   const [caveats, setCaveats] = useState('');
-  const [pinnedResources, setPinnedResources] = useState('');
-  const [users, setUsers] = useState('');
-  const [viewers, setViewers] = useState('');
-  const [workflows, setWorkflows] = useState('');
-  const [artifacts, setArtifacts] = useState('');
-  const [approvedMemory, setApprovedMemory] = useState('');
-  const [feedback, setFeedback] = useState('');
-  const [evalCases, setEvalCases] = useState('');
-  const [retentionPolicy, setRetentionPolicy] = useState('project_default');
-  const [exportPolicy, setExportPolicy] = useState('exclude_secrets');
-  const [releaseId, setReleaseId] = useState(makeReleaseId());
   const [releaseNotes, setReleaseNotes] = useState('');
+
+  const [defaultCatalog, setDefaultCatalog] = useState('');
+  const [defaultSchema, setDefaultSchema] = useState('');
+  const [selectedClusterId, setSelectedClusterId] = useState<string | undefined>();
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string | undefined>();
+  const [workspaceFolder, setWorkspaceFolder] = useState('');
+  const [mlflowExperimentName, setMlflowExperimentName] = useState('');
 
   useEffect(() => {
     if (!project || !isOpen) return;
     const settings = project.settings || { version: 1 };
     setDescription(project.description || '');
-    setProjectType(project.project_type || 'databricks_app_build');
-    setStatus(project.status || 'draft');
-    setAudience(settings.identity?.audience || 'developer');
-    setSuccessCriteria(joinLines(settings.identity?.success_criteria));
-    setMetricViews(joinLines(settings.semantics?.metric_views));
     setPreferredTables(joinLines(settings.semantics?.preferred_tables));
-    setDeprecatedTables(joinLines(settings.semantics?.deprecated_tables));
-    setSampleQueries(joinLines(settings.semantics?.sample_queries));
     setGlossary(stringifyGlossary(settings.semantics?.glossary));
     setCaveats(joinLines(settings.semantics?.known_caveats));
-    setPinnedResources(joinLines(settings.resource_registry?.pinned));
-    setUsers(joinLines(settings.roles?.users));
-    setViewers(joinLines(settings.roles?.viewers));
-    setWorkflows(joinLines(settings.workflows?.enabled));
-    setArtifacts(joinLines(settings.artifacts));
-    setApprovedMemory(joinLines(settings.memory?.approved));
-    setFeedback(joinLines(settings.feedback));
-    setEvalCases(joinLines(settings.eval_cases));
-    setRetentionPolicy(settings.governance?.retention_policy || 'project_default');
-    setExportPolicy(settings.governance?.export_policy || 'exclude_secrets');
-    setReleaseId(makeReleaseId());
     setReleaseNotes('');
+    
+    const resources = settings.resources || {};
+    setDefaultCatalog(resources.default_catalog || '');
+    setDefaultSchema(resources.default_schema || '');
+    setSelectedClusterId(resources.cluster_id || undefined);
+    setSelectedWarehouseId(resources.warehouse_id || undefined);
+    setWorkspaceFolder(resources.workspace_folder || '');
+    setMlflowExperimentName(resources.mlflow_experiment_name || '');
   }, [project, isOpen]);
 
   if (!isOpen) return null;
@@ -598,44 +422,26 @@ function ProjectManagementPanel({
   const readiness = computeReadiness(project);
   const releaseCount = project?.settings?.releases?.length || 0;
 
+  const handlePublishClick = () => {
+    const isReady = Object.values(readiness).every(Boolean);
+    if (!isReady) {
+      const proceed = window.confirm("Project configuration is missing Purpose or Semantic Scope. Are you sure you want to publish?");
+      if (!proceed) return;
+    }
+    onPublish(makeReleaseId(), releaseNotes);
+    setReleaseNotes('');
+  };
+
   const handleSave = () => {
     onSave({
       description: description || null,
-      project_type: projectType,
-      status,
       settings: {
-        identity: {
-          audience,
-          success_criteria: splitLines(successCriteria),
-        },
-        resource_registry: {
-          pinned: splitLines(pinnedResources),
-          metadata_cache_status: splitLines(pinnedResources).length > 0 ? 'configured' : 'not_configured',
-        },
         semantics: {
-          metric_views: splitLines(metricViews),
           preferred_tables: splitLines(preferredTables),
-          deprecated_tables: splitLines(deprecatedTables),
-          sample_queries: splitLines(sampleQueries),
           glossary: parseGlossary(glossary),
           known_caveats: splitLines(caveats),
         },
-        roles: {
-          users: splitLines(users),
-          viewers: splitLines(viewers),
-        },
-        workflows: {
-          enabled: splitLines(workflows),
-        },
-        artifacts: splitLines(artifacts),
-        memory: {
-          approved: splitLines(approvedMemory),
-        },
-        feedback: splitLines(feedback),
-        eval_cases: splitLines(evalCases),
         governance: {
-          retention_policy: retentionPolicy || 'project_default',
-          export_policy: exportPolicy || 'exclude_secrets',
           readiness,
         },
       },
@@ -658,55 +464,114 @@ function ProjectManagementPanel({
         </div>
 
         <div className="space-y-6 p-6">
-          <section className="space-y-3">
+          <section className="space-y-4">
             <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-heading)]">
               <FolderCog className="h-4 w-4 text-[var(--color-accent-primary)]" />
               Setup
             </div>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Project purpose..." className="min-h-20 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
-            <div className="grid grid-cols-2 gap-3">
-              <select value={projectType} onChange={(e) => setProjectType(e.target.value)} className="h-10 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm">
-                <option value="databricks_app_build">Databricks app build</option>
-                <option value="analyst_workspace">Analyst workspace</option>
-                <option value="dashboard_companion">Dashboard companion</option>
-                <option value="data_product_build">Data product build</option>
-                <option value="investigation_ops">Investigation / ops</option>
-              </select>
-              <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-10 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm">
-                <option value="draft">Draft</option>
-                <option value="active">Active</option>
-                <option value="paused">Paused</option>
-                <option value="archived">Archived</option>
-              </select>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--color-text-heading)]">Project Purpose</label>
+              <p className="text-[11px] text-[var(--color-text-muted)]">Describe the high-level business goal or analysis objective. This sets the primary context for the agent.</p>
+              <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Analyze BDR visit plans, execution routing, and POC metrics..." className="min-h-20 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
             </div>
-            <input value={audience} onChange={(e) => setAudience(e.target.value)} placeholder="Audience or persona" className="h-10 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm" />
-            <textarea value={successCriteria} onChange={(e) => setSuccessCriteria(e.target.value)} placeholder="Success criteria, one per line" className="min-h-20 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
           </section>
 
-          <section className="space-y-3">
+          <section className="space-y-4">
             <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-heading)]">
               <BookOpen className="h-4 w-4 text-[var(--color-accent-primary)]" />
-              Resource And Semantic Registry
+              Semantic Scope
             </div>
-            <textarea value={pinnedResources} onChange={(e) => setPinnedResources(e.target.value)} placeholder="Pinned Databricks resources, one per line" className="min-h-20 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
-            <div className="grid grid-cols-2 gap-3">
-              <textarea value={metricViews} onChange={(e) => setMetricViews(e.target.value)} placeholder="Metric views, one per line" className="min-h-24 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
-              <textarea value={preferredTables} onChange={(e) => setPreferredTables(e.target.value)} placeholder="Preferred tables, one per line" className="min-h-24 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
-              <textarea value={deprecatedTables} onChange={(e) => setDeprecatedTables(e.target.value)} placeholder="Deprecated/blocked tables" className="min-h-24 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
-              <textarea value={sampleQueries} onChange={(e) => setSampleQueries(e.target.value)} placeholder="Known-good SQL/query patterns" className="min-h-24 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--color-text-heading)]">Preferred Tables</label>
+              <p className="text-[11px] text-[var(--color-text-muted)]">List the core tables or views (one per line) the agent should use to answer questions, preventing expensive full-schema scans.</p>
+              <textarea value={preferredTables} onChange={(e) => setPreferredTables(e.target.value)} placeholder="e.g. ds_uc_china_dev.bdr_routing_workdb.v_bdr_visit_record_base" className="min-h-24 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
             </div>
-            <textarea value={glossary} onChange={(e) => setGlossary(e.target.value)} placeholder="Glossary lines: ARR: Annual recurring revenue" className="min-h-24 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
-            <textarea value={caveats} onChange={(e) => setCaveats(e.target.value)} placeholder="Known caveats, one per line" className="min-h-20 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--color-text-heading)]">Glossary & Definitions</label>
+              <p className="text-[11px] text-[var(--color-text-muted)]">Define domain-specific acronyms and business logic to align the agent with your organizational terminology.</p>
+              <textarea value={glossary} onChange={(e) => setGlossary(e.target.value)} placeholder="e.g. BDR: Business Development Representative" className="min-h-24 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--color-text-heading)]">Known Caveats</label>
+              <p className="text-[11px] text-[var(--color-text-muted)]">Document any data quality issues, filtering rules, or things the agent should actively avoid doing.</p>
+              <textarea value={caveats} onChange={(e) => setCaveats(e.target.value)} placeholder="e.g. Do not query the raw ODS tables directly; use the v_bdr view." className="min-h-20 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+            </div>
           </section>
 
-          <section className="space-y-3">
+          <div className="border-t border-[var(--color-border)]/50 pt-6 mt-6">
+            <h4 className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-4">Execution Environment</h4>
+            <section className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-[var(--color-text-heading)]">Catalog & Schema</label>
+                <div className="mt-1.5 flex items-center gap-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] overflow-hidden focus-within:ring-2 focus-within:ring-[var(--color-accent-primary)]/30 focus-within:border-[var(--color-accent-primary)]/50">
+                  <input
+                    type="text"
+                    value={defaultCatalog}
+                    onChange={(e) => setDefaultCatalog(e.target.value)}
+                    placeholder="catalog"
+                    className="flex-1 h-10 px-3 bg-transparent text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]/50 focus:outline-none min-w-0"
+                  />
+                  <span className="text-[var(--color-text-muted)] font-bold text-lg leading-none select-none">.</span>
+                  <input
+                    type="text"
+                    value={defaultSchema}
+                    onChange={(e) => setDefaultSchema(e.target.value)}
+                    placeholder="schema"
+                    className="flex-1 h-10 px-3 bg-transparent text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]/50 focus:outline-none min-w-0"
+                  />
+                </div>
+              </div>
+
+              {clusters.length > 0 && (
+                <ResourceDropdown
+                  label="Compute Cluster"
+                  items={clusters}
+                  selectedId={selectedClusterId}
+                  onSelect={setSelectedClusterId}
+                  nameKey="cluster_name"
+                  idKey="cluster_id"
+                />
+              )}
+
+              {warehouses.length > 0 && (
+                <ResourceDropdown
+                  label="SQL Warehouse"
+                  items={warehouses}
+                  selectedId={selectedWarehouseId}
+                  onSelect={setSelectedWarehouseId}
+                  nameKey="warehouse_name"
+                  idKey="warehouse_id"
+                />
+              )}
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-[var(--color-text-heading)]">Workspace Folder</label>
+                <input
+                  type="text"
+                  value={workspaceFolder}
+                  onChange={(e) => setWorkspaceFolder(e.target.value)}
+                  placeholder="/Workspace/Users/..."
+                  className="w-full h-10 px-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)]/30 focus:border-[var(--color-accent-primary)]/50"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-[var(--color-text-heading)]">MLflow Experiment</label>
+                <input
+                  type="text"
+                  value={mlflowExperimentName}
+                  onChange={(e) => setMlflowExperimentName(e.target.value)}
+                  placeholder="Experiment ID or name"
+                  className="w-full h-10 px-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)]/30 focus:border-[var(--color-accent-primary)]/50"
+                />
+              </div>
+            </section>
+          </div>
+
+          <section className="space-y-3 pt-6 border-t border-[var(--color-border)]/50">
             <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-heading)]">
               <UserRound className="h-4 w-4 text-[var(--color-accent-primary)]" />
-              Roles And User Preview
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <textarea value={users} onChange={(e) => setUsers(e.target.value)} placeholder="Users, one email/group per line" className="min-h-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
-              <textarea value={viewers} onChange={(e) => setViewers(e.target.value)} placeholder="Viewers, one email/group per line" className="min-h-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
+              User Preview
             </div>
             <button type="button" onClick={onStartUserPreview} className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 text-sm hover:bg-[var(--color-bg-secondary)]">
               <Eye className="h-4 w-4" />
@@ -717,44 +582,13 @@ function ProjectManagementPanel({
           <section className="space-y-3">
             <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-heading)]">
               <ShieldCheck className="h-4 w-4 text-[var(--color-accent-primary)]" />
-              Releases And Governance
+              Publish Release
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <input value={releaseId} onChange={(e) => setReleaseId(e.target.value)} className="h-10 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm" />
-              <button type="button" onClick={() => onPublish(releaseId, releaseNotes)} className="h-10 rounded-lg border border-[var(--color-border)] px-3 text-sm hover:bg-[var(--color-bg-secondary)]">
+            <div className="flex gap-2">
+              <input value={releaseNotes} onChange={(e) => setReleaseNotes(e.target.value)} placeholder="Release notes (optional)" className="flex-1 h-9 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm" />
+              <button type="button" onClick={handlePublishClick} className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 text-sm hover:bg-[var(--color-bg-secondary)] whitespace-nowrap">
                 Publish Snapshot
               </button>
-            </div>
-            <textarea value={releaseNotes} onChange={(e) => setReleaseNotes(e.target.value)} placeholder="Release notes" className="min-h-20 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
-            <div className="grid grid-cols-2 gap-3">
-              <input value={retentionPolicy} onChange={(e) => setRetentionPolicy(e.target.value)} placeholder="Retention policy" className="h-10 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm" />
-              <input value={exportPolicy} onChange={(e) => setExportPolicy(e.target.value)} placeholder="Export policy" className="h-10 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm" />
-            </div>
-          </section>
-
-          <section className="space-y-3">
-            <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-heading)]">
-              <Code2 className="h-4 w-4 text-[var(--color-accent-primary)]" />
-              Workflows, Artifacts, Memory
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <textarea value={workflows} onChange={(e) => setWorkflows(e.target.value)} placeholder="Enabled workflows" className="min-h-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
-              <textarea value={artifacts} onChange={(e) => setArtifacts(e.target.value)} placeholder="Artifacts" className="min-h-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
-              <textarea value={approvedMemory} onChange={(e) => setApprovedMemory(e.target.value)} placeholder="Approved memory" className="min-h-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
-              <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} placeholder="Feedback queue" className="min-h-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
-            </div>
-            <textarea value={evalCases} onChange={(e) => setEvalCases(e.target.value)} placeholder="Eval cases, one per line" className="min-h-20 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
-          </section>
-
-          <section className="space-y-3">
-            <div className="text-sm font-semibold text-[var(--color-text-heading)]">Readiness</div>
-            <div className="grid grid-cols-2 gap-2">
-              {Object.entries(readiness).map(([key, ready]) => (
-                <div key={key} className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-xs">
-                  <span className={cn('h-2 w-2 rounded-full', ready ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-muted)]/40')} />
-                  <span className="capitalize text-[var(--color-text-muted)]">{key.replace(/([A-Z])/g, ' $1')}</span>
-                </div>
-              ))}
             </div>
           </section>
 
@@ -786,7 +620,6 @@ export default function ProjectPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [streamingConvIds, setStreamingConvIds] = useState<string[]>([]);
   const [streamingText, setStreamingText] = useState('');
-  const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [selectedClusterId, setSelectedClusterId] = useState<string | undefined>();
@@ -995,30 +828,6 @@ export default function ProjectPage() {
                   if (stream) stream.fullText = fullText;
                   if (isForeground) setStreamingText(fullText);
                 }
-              } else if (type === 'tool_use') {
-                const newItem: ActivityItem = {
-                  id: event.tool_id as string,
-                  type: 'tool_use',
-                  content: '',
-                  toolName: event.tool_name as string,
-                  toolInput: event.tool_input as Record<string, unknown>,
-                  timestamp: Date.now(),
-                };
-                if (stream) {
-                  stream.activityItems = [...stream.activityItems, newItem];
-                  stream.tools = [...stream.tools, event.tool_name as string];
-                }
-                if (isForeground) setActivityItems(prev => [...prev, newItem]);
-              } else if (type === 'tool_result') {
-                const newItem: ActivityItem = {
-                  id: `result-${event.tool_use_id}`,
-                  type: 'tool_result',
-                  content: typeof event.content === 'string' ? event.content : JSON.stringify(event.content),
-                  isError: event.is_error as boolean,
-                  timestamp: Date.now(),
-                };
-                if (stream) stream.activityItems = [...stream.activityItems, newItem];
-                if (isForeground) setActivityItems(prev => [...prev, newItem]);
               } else if (type === 'todos') {
                 const todoItems = event.todos as TodoItem[];
                 if (todoItems) {
@@ -1056,7 +865,6 @@ export default function ProjectPage() {
                 setStreamingText('');
                 setIsReconnecting(false);
                 setActiveExecutionId(null);
-                setActivityItems([]);
                 setTodos([]);
               }
               fetchConversations(projectId).then(setConversations);
@@ -1131,7 +939,6 @@ export default function ProjectPage() {
         setAnalysisStories(streamStories);
         setActiveStoryId(stream.storyId || streamStories[streamStories.length - 1]?.id);
         setStreamingText(stream.fullText);
-        setActivityItems([...stream.activityItems]);
         setTodos([...stream.todos]);
         setActiveExecutionId(stream.executionId);
         setIsReconnecting(stream.isReconnecting);
@@ -1139,7 +946,6 @@ export default function ProjectPage() {
         setMessages(conv.messages || []);
         syncStoriesFromMessages(conv.messages || []);
         setStreamingText('');
-        setActivityItems([]);
         setTodos([]);
         setActiveExecutionId(null);
         setIsReconnecting(false);
@@ -1357,69 +1163,14 @@ export default function ProjectPage() {
             }
           } else if (type === 'thinking' || type === 'thinking_delta') {
             applyStoryStreamEvent(stream, event);
-            const thinking = (event.thinking as string) || '';
-            if (thinking) {
-              const updateThinking = (prev: ActivityItem[]) => {
-                if (type === 'thinking_delta' && prev.length > 0 && prev[prev.length - 1].type === 'thinking') {
-                  const updated = [...prev];
-                  updated[updated.length - 1] = {
-                    ...updated[updated.length - 1],
-                    content: updated[updated.length - 1].content + thinking,
-                  };
-                  return updated;
-                }
-                return [
-                  ...prev,
-                  {
-                    id: `thinking-${Date.now()}`,
-                    type: 'thinking' as const,
-                    content: thinking,
-                    timestamp: Date.now(),
-                  },
-                ];
-              };
-              if (stream) stream.activityItems = updateThinking(stream.activityItems);
-              if (isForeground) setActivityItems(updateThinking);
-            }
           } else if (type === 'tool_use') {
             applyStoryStreamEvent(stream, event);
             const toolName = event.tool_name as string;
-            const newItem: ActivityItem = {
-              id: event.tool_id as string,
-              type: 'tool_use',
-              content: '',
-              toolName,
-              toolInput: event.tool_input as Record<string, unknown>,
-              timestamp: Date.now(),
-            };
             if (stream) {
               stream.tools = [...stream.tools, toolName];
-              stream.activityItems = [...stream.activityItems, newItem];
             }
-            if (isForeground) setActivityItems(prev => [...prev, newItem]);
           } else if (type === 'tool_result') {
             applyStoryStreamEvent(stream, event);
-            let content = event.content as string;
-
-            if (event.is_error && typeof content === 'string') {
-              const errorMatch = content.match(/<tool_use_error>(.*?)<\/tool_use_error>/s);
-              if (errorMatch) {
-                content = errorMatch[1].trim();
-              }
-              if (content === 'Stream closed' || content.includes('Stream closed')) {
-                content = 'Tool execution interrupted: The operation took too long or the connection was lost. This may happen when operations exceed the 50-second timeout window. Check backend logs for details.';
-              }
-            }
-
-            const newItem: ActivityItem = {
-              id: `result-${event.tool_use_id}`,
-              type: 'tool_result',
-              content: typeof content === 'string' ? content : JSON.stringify(content),
-              isError: event.is_error as boolean,
-              timestamp: Date.now(),
-            };
-            if (stream) stream.activityItems = [...stream.activityItems, newItem];
-            if (isForeground) setActivityItems(prev => [...prev, newItem]);
           } else if (type === 'error') {
             applyStoryStreamEvent(stream, event);
             let errorMsg = event.error as string;
@@ -1452,7 +1203,6 @@ export default function ProjectPage() {
           if (currentConvIdRef.current === streamKey) {
             setStreamingText('');
             setActiveExecutionId(null);
-            setActivityItems([]);
             setTodos([]);
           }
           toast.error(errorMessage, { duration: 8000 });
@@ -1586,7 +1336,6 @@ export default function ProjectPage() {
     setStreamingConvIds(prev => prev.filter(id => id !== targetId));
     setStreamingText('');
     setActiveExecutionId(null);
-    setActivityItems([]);
     setTodos([]);
   }, [currentConversation?.id, applyStoryEvents]);
 
@@ -1603,43 +1352,7 @@ export default function ProjectPage() {
     setSkillsExplorerOpen(true);
   };
 
-  const [isSavingProjectDefaults, setIsSavingProjectDefaults] = useState(false);
   const [isSavingProjectManagement, setIsSavingProjectManagement] = useState(false);
-  const handleSaveProjectDefaults = useCallback(async () => {
-    if (!projectId || !project) return;
-
-    setIsSavingProjectDefaults(true);
-    try {
-      const updated = await updateProject(projectId, {
-        settings: {
-          resources: {
-            cluster_id: selectedClusterId ?? null,
-            default_catalog: defaultCatalog || null,
-            default_schema: defaultSchema || null,
-            warehouse_id: selectedWarehouseId ?? null,
-            workspace_folder: workspaceFolder || null,
-            mlflow_experiment_name: mlflowExperimentName || null,
-          },
-        },
-      });
-      setProject(updated);
-      toast.success('Project defaults saved');
-    } catch (error) {
-      console.error('Failed to save project defaults:', error);
-      toast.error('Failed to save project defaults');
-    } finally {
-      setIsSavingProjectDefaults(false);
-    }
-  }, [
-    projectId,
-    project,
-    selectedClusterId,
-    defaultCatalog,
-    defaultSchema,
-    selectedWarehouseId,
-    workspaceFolder,
-    mlflowExperimentName,
-  ]);
 
   const handleSaveProjectManagement = useCallback(async (payload: ProjectManagementPayload) => {
     if (!projectId || !project) return;
@@ -1649,6 +1362,19 @@ export default function ProjectPage() {
       const updated = await updateProject(projectId, payload);
       setProject(updated);
       toast.success('Project settings saved');
+      
+      // Sync local states
+      const res = updated.settings?.resources;
+      if (res) {
+        if (res.default_catalog !== undefined) setDefaultCatalog(res.default_catalog || '');
+        if (res.default_schema !== undefined) setDefaultSchema(res.default_schema || '');
+        if (res.cluster_id !== undefined) setSelectedClusterId(res.cluster_id || undefined);
+        if (res.warehouse_id !== undefined) setSelectedWarehouseId(res.warehouse_id || undefined);
+        if (res.workspace_folder !== undefined) setWorkspaceFolder(res.workspace_folder || '');
+        if (res.mlflow_experiment_name !== undefined) setMlflowExperimentName(res.mlflow_experiment_name || '');
+      }
+      
+      setProjectPanelOpen(false);
     } catch (error) {
       console.error('Failed to save project settings:', error);
       toast.error('Failed to save project settings');
@@ -1702,22 +1428,7 @@ export default function ProjectPage() {
     toast.success('User preview chat started');
   }, [handleNewConversation]);
 
-  // Config panel state
-  const [configPanelOpen, setConfigPanelOpen] = useState(false);
-  const configPanelRef = useRef<HTMLDivElement>(null);
 
-  // Close config panel on outside click
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (configPanelRef.current && !configPanelRef.current.contains(event.target as Node)) {
-        setConfigPanelOpen(false);
-      }
-    };
-    if (configPanelOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [configPanelOpen]);
 
   // Auto-resize textarea
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -1758,24 +1469,6 @@ export default function ProjectPage() {
     requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
 
-  // Config summary for header chips
-  const configChips = useMemo(() => {
-    const chips: { label: string; color: string }[] = [];
-    if (defaultCatalog && defaultSchema) {
-      chips.push({ label: `${defaultCatalog}.${defaultSchema}`, color: 'text-[var(--color-accent-primary)]' });
-    }
-    const cluster = clusters.find(c => c.cluster_id === selectedClusterId);
-    if (cluster) {
-      const isServerless = cluster.cluster_id === '__serverless__';
-      chips.push({ label: isServerless ? 'Serverless Compute' : (cluster.cluster_name || 'Cluster'), color: cluster.state === 'RUNNING' ? 'text-[var(--color-success)]' : 'text-[var(--color-text-muted)]' });
-    }
-    const warehouse = warehouses.find(w => w.warehouse_id === selectedWarehouseId);
-    if (warehouse) {
-      chips.push({ label: warehouse.warehouse_name || 'Warehouse', color: warehouse.state === 'RUNNING' ? 'text-[var(--color-success)]' : 'text-[var(--color-text-muted)]' });
-    }
-    return chips;
-  }, [defaultCatalog, defaultSchema, clusters, selectedClusterId, warehouses, selectedWarehouseId]);
-
   // Only show streaming UI if viewing a conversation that is actively streaming
   const isStreamingHere = streamingConvIds.includes(currentConversation?.id || '');
 
@@ -1797,12 +1490,14 @@ export default function ProjectPage() {
       onNewConversation={handleNewConversation}
       onDeleteConversation={handleDeleteConversation}
       onViewSkills={handleViewSkills}
+      onOpenProjectSettings={() => setProjectPanelOpen(true)}
+      projectName={project?.name}
       isLoading={false}
     />
   );
 
   return (
-    <MainLayout projectName={project?.name} sidebar={sidebar}>
+    <MainLayout projectName={project?.name} sidebar={sidebar} hideTopBar>
       <div className="flex flex-1 flex-col h-full">
         {/* Chat Header */}
         <div className="flex h-14 items-center justify-between border-b border-[var(--color-border)]/60 px-6 bg-[var(--color-bg-secondary)]/20">
@@ -1843,60 +1538,7 @@ export default function ProjectPage() {
                 User Preview
               </button>
             </div>
-            {/* Config summary chips */}
-            <div className="hidden md:flex items-center gap-1.5">
-              {configChips.map((chip, i) => (
-                <span
-                  key={i}
-                  className={cn('text-[11px] font-medium px-2.5 py-1 rounded-lg bg-[var(--color-bg-secondary)] border border-[var(--color-border)]/40 truncate max-w-[160px]', chip.color)}
-                >
-                  {chip.label}
-                </span>
-              ))}
-            </div>
-            <button
-              onClick={() => setProjectPanelOpen(true)}
-              className="flex items-center justify-center h-9 w-9 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] transition-all"
-              title="Project management"
-            >
-              <FolderCog className="h-4.5 w-4.5" />
-            </button>
-            {/* Settings button */}
-            <div className="relative" ref={configPanelRef}>
-              <button
-                onClick={() => setConfigPanelOpen(!configPanelOpen)}
-                className={cn(
-                  'flex items-center justify-center h-9 w-9 rounded-lg transition-all',
-                  configPanelOpen
-                    ? 'bg-[var(--color-accent-primary)]/10 text-[var(--color-accent-primary)] ring-2 ring-[var(--color-accent-primary)]/20'
-                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)]'
-                )}
-                title="Configuration"
-              >
-                <Settings2 className="h-4.5 w-4.5" />
-              </button>
-              <ConfigPanel
-                isOpen={configPanelOpen}
-                onClose={() => setConfigPanelOpen(false)}
-                defaultCatalog={defaultCatalog}
-                setDefaultCatalog={setDefaultCatalog}
-                defaultSchema={defaultSchema}
-                setDefaultSchema={setDefaultSchema}
-                clusters={clusters}
-                selectedClusterId={selectedClusterId}
-                setSelectedClusterId={setSelectedClusterId}
-                warehouses={warehouses}
-                selectedWarehouseId={selectedWarehouseId}
-                setSelectedWarehouseId={setSelectedWarehouseId}
-                workspaceFolder={workspaceFolder}
-                setWorkspaceFolder={setWorkspaceFolder}
-                mlflowExperimentName={mlflowExperimentName}
-                setMlflowExperimentName={setMlflowExperimentName}
-                workspaceUrl={workspaceUrl}
-                onSaveProjectDefaults={handleSaveProjectDefaults}
-                isSavingProjectDefaults={isSavingProjectDefaults}
-              />
-            </div>
+
           </div>
         </div>
 
@@ -1904,6 +1546,8 @@ export default function ProjectPage() {
           isOpen={projectPanelOpen}
           onClose={() => setProjectPanelOpen(false)}
           project={project}
+          clusters={clusters}
+          warehouses={warehouses}
           onSave={handleSaveProjectManagement}
           onPublish={handlePublishRelease}
           onStartUserPreview={handleStartUserPreview}
@@ -1929,11 +1573,7 @@ export default function ProjectPage() {
                 onStarterPrompt={handleStarterPrompt}
               />
 
-              {isStreamingHere && activityItems.length > 0 && (
-                <div className="mx-auto w-full max-w-4xl px-6 pb-6">
-                  <ActivitySection items={activityItems} isStreaming={isStreamingHere} />
-                </div>
-              )}
+
 
               {isStreamingHere && analysisStories.length === 0 && (
                 <div className="mx-auto w-full max-w-4xl px-6 pb-6">
