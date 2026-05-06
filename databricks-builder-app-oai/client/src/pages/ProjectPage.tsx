@@ -696,9 +696,15 @@ export default function ProjectPage() {
 
         const generatedSchema = toSchemaName(user, projectData.name);
 
-        // Load first conversation if available
-        if (conversationsData.length > 0) {
-          const conv = await fetchConversation(projectId, conversationsData[0].id);
+        // Load specific conversation from URL or first available
+        const searchParams = new URLSearchParams(window.location.search);
+        const urlConvId = searchParams.get('conversationId');
+        const targetConv = urlConvId 
+          ? conversationsData.find(c => c.id === urlConvId) || conversationsData[0]
+          : conversationsData[0];
+
+        if (targetConv) {
+          const conv = await fetchConversation(projectId, targetConv.id);
           setCurrentConversation(conv);
           setMessages(conv.messages || []);
           syncStoriesFromMessages(conv.messages || []);
@@ -729,6 +735,28 @@ export default function ProjectPage() {
 
     loadData();
   }, [projectId, navigate, user, syncStoriesFromMessages]);
+
+  // Handle conversation changes via URL
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const urlConvId = searchParams.get('conversationId');
+    if (urlConvId && urlConvId !== currentConversation?.id && projectId) {
+      const switchConv = async () => {
+        try {
+          const conv = await fetchConversation(projectId, urlConvId);
+          setCurrentConversation(conv);
+          setMessages(conv.messages || []);
+          syncStoriesFromMessages(conv.messages || []);
+          // Clear streaming UI
+          setStreamingText('');
+          setTodos([]);
+        } catch (error) {
+          console.error('Failed to switch conversation:', error);
+        }
+      };
+      switchConv();
+    }
+  }, [projectId, currentConversation?.id, syncStoriesFromMessages]);
 
   // Check for active execution when conversation loads and reconnect if needed
   useEffect(() => {
@@ -787,7 +815,6 @@ export default function ProjectPage() {
           setActiveStoryId(reconnectStory.id);
           allStreamsRef.current[reconConvId] = {
             fullText: '',
-            activityItems: [],
             todos: [],
             tools: [],
             stories: [reconnectStory],
@@ -883,7 +910,7 @@ export default function ProjectPage() {
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingText, activityItems]);
+  }, [messages, streamingText]);
 
   // Set default schema from user email once when first available
   const schemaDefaultApplied = useRef(false);
@@ -976,7 +1003,6 @@ export default function ProjectPage() {
       setActiveStoryId(undefined);
       // Clear streaming UI (new conv isn't streaming yet)
       setStreamingText('');
-      setActivityItems([]);
       setTodos([]);
       setActiveExecutionId(null);
       setIsReconnecting(false);
@@ -1029,7 +1055,6 @@ export default function ProjectPage() {
           setActiveStoryId(undefined);
         }
         setStreamingText('');
-        setActivityItems([]);
         setTodos([]);
         setActiveExecutionId(null);
       }
@@ -1050,7 +1075,6 @@ export default function ProjectPage() {
     const userMessage = input.trim();
     setInput('');
     setStreamingText('');
-    setActivityItems([]);
     setTodos([]);
 
     // Add user message to UI immediately
@@ -1079,7 +1103,6 @@ export default function ProjectPage() {
     let streamKey = effectiveConvId;
     allStreamsRef.current[streamKey] = {
       fullText: '',
-      activityItems: [],
       todos: [],
       tools: [],
       stories: [runningStory],
@@ -1241,7 +1264,6 @@ export default function ProjectPage() {
           if (currentConvIdRef.current === finalStreamKey) {
             setStreamingText('');
             setActiveExecutionId(null);
-            setActivityItems([]);
             setTodos([]);
           }
 
@@ -1270,7 +1292,6 @@ export default function ProjectPage() {
       if (currentConvIdRef.current === streamKey) {
         setStreamingText('');
         setActiveExecutionId(null);
-        setActivityItems([]);
         setTodos([]);
       }
     }
@@ -1484,14 +1505,8 @@ export default function ProjectPage() {
 
   const sidebar = (
     <Sidebar
-      conversations={conversations}
-      currentConversationId={currentConversation?.id}
-      onConversationSelect={handleSelectConversation}
-      onNewConversation={handleNewConversation}
-      onDeleteConversation={handleDeleteConversation}
       onViewSkills={handleViewSkills}
       onOpenProjectSettings={() => setProjectPanelOpen(true)}
-      projectName={project?.name}
       isLoading={false}
     />
   );
@@ -1502,9 +1517,6 @@ export default function ProjectPage() {
         {/* Chat Header */}
         <div className="flex h-14 items-center justify-between border-b border-[var(--color-border)]/60 px-6 bg-[var(--color-bg-secondary)]/20">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--color-accent-primary)]/10 to-[var(--color-accent-secondary)]/10 flex items-center justify-center">
-              <Sparkles className="h-4 w-4 text-[var(--color-accent-primary)]" />
-            </div>
             <h2 className="font-semibold text-[15px] text-[var(--color-text-heading)] truncate">
               {currentConversation?.title || 'New Chat'}
             </h2>
