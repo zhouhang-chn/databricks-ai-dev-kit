@@ -30,6 +30,7 @@ import { StoryCanvas } from '@/features/analysis/components/StoryCanvas';
 import {
   createAnalysisStory,
   reduceAnalysisEvent,
+  replayStoredEventsForStory,
   storiesFromMessages,
   storyEventsFromStreamEvent,
 } from '@/features/analysis/storyTransforms';
@@ -906,7 +907,27 @@ export default function ProjectPage() {
 
     const checkAndReconnect = async () => {
       try {
-        const { active } = await fetchExecutions(projectId, currentConversation.id);
+        const { active, recent } = await fetchExecutions(projectId, currentConversation.id);
+
+        // Rebuild trace / evidence / next-moves on reload from stored stream
+        // events. `recent` is descending by created_at; pair the newest
+        // execution with the newest story so traces survive a refresh.
+        if (recent && recent.length > 0) {
+          setAnalysisStories((prevStories) => {
+            if (prevStories.length === 0) return prevStories;
+            let next = prevStories;
+            for (let i = 0; i < recent.length; i += 1) {
+              const story = next[next.length - 1 - i];
+              if (!story) break;
+              const exec = recent[i];
+              if (!exec?.events?.length) continue;
+              const events = replayStoredEventsForStory(story.id, exec.events);
+              if (events.length === 0) continue;
+              next = events.reduce((acc, evt) => reduceAnalysisEvent(acc, evt), next);
+            }
+            return next;
+          });
+        }
 
         if (active && active.status === 'running') {
           console.log('[RECONNECT] Found active execution:', active.id);
@@ -1415,6 +1436,8 @@ export default function ProjectPage() {
               if (stream) stream.todos = todoItems;
               if (isForeground) setTodos(todoItems);
             }
+          } else if (type === 'next_moves.updated' || type === 'result') {
+            applyStoryStreamEvent(stream, event);
           }
         },
         onError: (error) => {
@@ -1927,7 +1950,7 @@ export default function ProjectPage() {
 
               <div ref={messagesEndRef} />
             </div>
-            <RightInspectPanel story={activeStory} onNextMove={handleNextMove} />
+            <RightInspectPanel story={activeStory} />
           </div>
         </div>
 

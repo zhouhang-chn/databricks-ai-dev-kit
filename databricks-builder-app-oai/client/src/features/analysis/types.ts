@@ -1,4 +1,4 @@
-import type { Message, TodoItem } from '@/lib/types';
+import type { Message } from '@/lib/types';
 
 export type StoryStatus = 'planning' | 'running' | 'done' | 'error';
 export type EvidenceType = 'text' | 'table' | 'chart' | 'tool_result' | 'error';
@@ -19,8 +19,11 @@ export interface EvidenceBlock {
   type: EvidenceType;
   title: string;
   content: string;
+  rawContent?: string;
   isError?: boolean;
   createdAt: string;
+  toolName?: string;
+  toolInput?: string;
 }
 
 export interface AnalysisStep {
@@ -37,6 +40,10 @@ export interface NextMove {
   label: string;
   prompt: string;
   actionType: NextMoveType;
+  intent?: string;
+  confidence?: number;
+  requiresConfirmation?: boolean;
+  source?: 'model' | 'heuristic';
 }
 
 export interface AnalysisStory {
@@ -83,5 +90,3 @@ export interface StreamStoryEvent {
   todos?: unknown;
   moves?: unknown;
 }
-
-export type TodoLike = Pick<TodoItem, 'content' | 'status'>;

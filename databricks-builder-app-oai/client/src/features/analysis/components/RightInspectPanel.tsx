@@ -1,13 +1,41 @@
-import { FileText, GitBranch, Lightbulb, SlidersHorizontal } from 'lucide-react';
-import type { AnalysisStory, NextMove } from '@/features/analysis/types';
+import { FileText, GitBranch, SlidersHorizontal } from 'lucide-react';
+import type { AnalysisStory } from '@/features/analysis/types';
 import { cn } from '@/lib/utils';
+import { EvidenceContent } from './EvidenceContent';
+
+function summarizeInputLabel(toolName?: string, toolInput?: string): string {
+  if (!toolInput) return 'Show input';
+  if (toolName === 'execute_sql' || toolName === 'execute_sql_multi') return 'Show SQL';
+  if (toolName === 'execute_code') return 'Show code';
+  return 'Show call input';
+}
+
+function prettyToolInput(toolName: string | undefined, raw: string): string {
+  if (toolName === 'execute_sql' || toolName === 'execute_sql_multi') {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const sql = parsed.sql_query ?? parsed.query ?? parsed.sql;
+      if (typeof sql === 'string') return sql;
+    } catch { /* fall through */ }
+  }
+  if (toolName === 'execute_code') {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const code = parsed.code ?? parsed.script;
+      if (typeof code === 'string') return code;
+    } catch { /* fall through */ }
+  }
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+}
 
 export function RightInspectPanel({
   story,
-  onNextMove,
 }: {
   story?: AnalysisStory;
-  onNextMove: (move: NextMove) => void;
 }) {
   return (
     <aside className="hidden h-full min-h-0 w-80 shrink-0 overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-bg-secondary)]/20 xl:block">
@@ -66,34 +94,24 @@ export function RightInspectPanel({
                   <p className="text-xs text-[var(--color-text-muted)]">No evidence blocks yet.</p>
                 ) : story.evidence.map((block) => (
                   <div key={block.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3">
-                    <div className={cn('text-xs font-medium', block.isError ? 'text-[var(--color-error)]' : 'text-[var(--color-text-heading)]')}>
+                    <div className={cn(
+                      'flex items-center gap-1.5 font-mono text-[11px] font-medium',
+                      block.isError ? 'text-[var(--color-error)]' : 'text-[var(--color-text-heading)]'
+                    )}>
                       {block.title}
                     </div>
-                    <p className="mt-2 break-words text-xs leading-5 text-[var(--color-text-muted)]">
-                      {block.content}
-                    </p>
+                    {block.toolInput && (
+                      <details className="mt-2 group">
+                        <summary className="cursor-pointer text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] hover:text-[var(--color-accent-primary)]">
+                          {summarizeInputLabel(block.toolName, block.toolInput)}
+                        </summary>
+                        <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-bg-tertiary)] p-2 text-[10px] leading-4 text-[var(--color-text-muted)]">
+                          {prettyToolInput(block.toolName, block.toolInput)}
+                        </pre>
+                      </details>
+                    )}
+                    <EvidenceContent block={block} />
                   </div>
-                ))}
-              </div>
-            </section>
-
-            <section>
-              <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-[var(--color-text-muted)]">
-                <Lightbulb className="h-3.5 w-3.5" />
-                Next Moves
-              </div>
-              <div className="space-y-2">
-                {story.nextMoves.length === 0 ? (
-                  <p className="text-xs text-[var(--color-text-muted)]">Next moves appear after the story completes.</p>
-                ) : story.nextMoves.map((move) => (
-                  <button
-                    key={move.id}
-                    type="button"
-                    onClick={() => onNextMove(move)}
-                    className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-left text-xs text-[var(--color-text-primary)] hover:border-[var(--color-accent-primary)]/40 hover:text-[var(--color-accent-primary)]"
-                  >
-                    {move.label}
-                  </button>
                 ))}
               </div>
             </section>

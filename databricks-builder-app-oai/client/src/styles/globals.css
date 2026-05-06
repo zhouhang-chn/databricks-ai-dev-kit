@@ -181,3 +181,76 @@
 .prose-xs a:hover {
   color: var(--color-accent-secondary);
 }
+
+.prose-xs table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75em 0;
+  font-size: 12px;
+  display: block;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.prose-xs thead {
+  background: var(--color-bg-tertiary);
+}
+
+.prose-xs th,
+.prose-xs td {
+  border: 1px solid var(--color-border);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.prose-xs th {
+  font-weight: 600;
+  color: var(--color-text-heading);
+}
+
+.prose-xs tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--color-bg-secondary) 60%, transparent);
+}
+
+/* Compact markdown for the right inspect panel. */
+.evidence-markdown table {
+  font-size: 11px;
+  margin: 0.5em 0;
+  display: block;
+  overflow-x: auto;
+  white-space: nowrap;
+  border-collapse: collapse;
+}
+.evidence-markdown thead {
+  background: var(--color-bg-tertiary);
+}
+.evidence-markdown th,
+.evidence-markdown td {
+  border: 1px solid var(--color-border);
+  padding: 3px 6px;
+}
+.evidence-markdown th {
+  font-weight: 600;
+  color: var(--color-text-heading);
+}
+.evidence-markdown p {
+  margin: 0 0 0.5em;
+  white-space: pre-wrap;
+}
+.evidence-markdown code {
+  background: var(--color-bg-tertiary);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+.evidence-markdown pre {
+  background: var(--color-bg-tertiary);
+  padding: 6px 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+.evidence-markdown ul,
+.evidence-markdown ol {
+  padding-left: 1.1em;
+  margin: 0.25em 0;
+}

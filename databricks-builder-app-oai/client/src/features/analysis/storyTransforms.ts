@@ -6,7 +6,6 @@ import type {
   NextMove,
   StoryFromMessagesOptions,
   StreamStoryEvent,
-  TodoLike,
 } from '@/features/analysis/types';
 
 function nowIso(): string {
@@ -129,18 +128,21 @@ function defaultNextMoves(question: string): NextMove[] {
       label: 'Explain evidence',
       prompt: `Explain the evidence and assumptions behind this result: ${question}`,
       actionType: 'explain',
+      source: 'heuristic',
     },
     {
       id: makeId('move-drill'),
       label: 'Drill down',
       prompt: `Drill down into the most important segment or dimension for: ${question}`,
       actionType: 'drill',
+      source: 'heuristic',
     },
     {
       id: makeId('move-validate'),
       label: 'Validate',
       prompt: `Validate the data sources, caveats, and confidence for: ${question}`,
       actionType: 'validate',
+      source: 'heuristic',
     },
   ];
 }
@@ -153,6 +155,15 @@ function nextMoveType(value: unknown): NextMove['actionType'] {
     || value === 'explain'
     || value === 'pivot'
   ) ? value : 'pivot';
+}
+
+function nextMoveSource(value: unknown): NextMove['source'] {
+  return value === 'model' || value === 'heuristic' ? value : undefined;
+}
+
+function nextMoveConfidence(value: unknown): number | undefined {
+  if (typeof value !== 'number' || Number.isNaN(value)) return undefined;
+  return Math.max(0, Math.min(value, 1));
 }
 
 export function createAnalysisStory(args: {
@@ -171,13 +182,7 @@ export function createAnalysisStory(args: {
     question: args.question,
     status: args.status || 'planning',
     conclusion,
-    evidence: conclusion ? [{
-      id: makeId('evidence-answer'),
-      type: 'text',
-      title: 'Answer',
-      content: conclusion,
-      createdAt: timestamp,
-    }] : [],
+    evidence: [],
     trace: [],
     nextMoves: args.status === 'done' ? defaultNextMoves(args.question) : [],
     context: {
@@ -346,32 +351,30 @@ export function storyEventsFromStreamEvent(
   }
   if (type === 'tool_result') {
     const isError = Boolean(event.is_error);
-    const content = summarizeToolResult(event.content, isError);
+    const summary = summarizeToolResult(event.content, isError);
+    const rawContent = asText(event.content);
+    const toolName = typeof event.tool_name === 'string' ? event.tool_name : undefined;
+    const toolInput = event.tool_input != null ? asText(event.tool_input) : undefined;
+    const friendlyName = toolName?.replace(/^mcp__databricks__/, '');
     return [{
       type: 'evidence.appended',
       storyId,
       block: {
         id: makeId('evidence-tool'),
         type: isError ? 'error' : 'tool_result',
-        title: isError ? 'Tool error' : 'Tool result',
-        content,
+        title: isError
+          ? `${friendlyName || 'Tool'} (error)`
+          : friendlyName || 'Tool result',
+        content: summary,
+        rawContent,
         isError,
         createdAt: nowIso(),
+        toolName,
+        toolInput,
       },
     }];
   }
-  if (type === 'todos' && Array.isArray(event.todos)) {
-    const moves = (event.todos as TodoLike[])
-      .filter((todo) => todo.content)
-      .slice(0, 3)
-      .map((todo, index) => ({
-        id: makeId(`move-todo-${index}`),
-        label: todo.content,
-        prompt: todo.content,
-        actionType: 'pivot' as const,
-      }));
-    return moves.length > 0 ? [{ type: 'next_moves.updated', storyId, moves }] : [];
-  }
+  if (type === 'todos' && Array.isArray(event.todos)) return [];
   if (type === 'next_moves.updated' && Array.isArray(event.moves)) {
     const moves = (event.moves as Array<Record<string, unknown>>)
       .filter((move) => move.label || move.prompt)
@@ -381,6 +384,10 @@ export function storyEventsFromStreamEvent(
         label: String(move.label || move.prompt || 'Next move'),
         prompt: String(move.prompt || move.label || ''),
         actionType: nextMoveType(move.actionType),
+        intent: typeof move.intent === 'string' ? move.intent : undefined,
+        confidence: nextMoveConfidence(move.confidence),
+        requiresConfirmation: Boolean(move.requiresConfirmation),
+        source: nextMoveSource(move.source),
       }));
     return moves.length > 0 ? [{ type: 'next_moves.updated', storyId, moves }] : [];
   }
@@ -391,4 +398,35 @@ export function storyEventsFromStreamEvent(
     return [{ type: 'story.failed', storyId, error: String(event.error || 'Unknown error') }];
   }
   return [];
+}
+
+/**
+ * Translate a list of stored stream events (from `executions.events_json`)
+ * into analysis events for a given story id, skipping text/thinking events
+ * (the assistant's text is already persisted as the message body, so replaying
+ * deltas would double-append the conclusion).
+ */
+export function replayStoredEventsForStory(
+  storyId: string,
+  storedEvents: unknown[]
+): AnalysisEvent[] {
+  const skipped = new Set([
+    'text_delta',
+    'text',
+    'thinking',
+    'thinking_delta',
+    'conversation.created',
+    'story.created',
+    'cancelled',
+    'keepalive',
+  ]);
+  const out: AnalysisEvent[] = [];
+  for (const raw of storedEvents) {
+    if (!raw || typeof raw !== 'object') continue;
+    const event = raw as StreamStoryEvent;
+    const type = String((event as { type?: unknown }).type || '');
+    if (skipped.has(type)) continue;
+    out.push(...storyEventsFromStreamEvent(storyId, event));
+  }
+  return out;
 }
