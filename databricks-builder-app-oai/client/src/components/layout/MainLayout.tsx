@@ -5,16 +5,20 @@ interface MainLayoutProps {
   children: ReactNode;
   projectName?: string;
   sidebar?: ReactNode;
+  /** When true, hide the global TopBar (used when the sidebar provides its own navigation). */
+  hideTopBar?: boolean;
 }
 
-export function MainLayout({ children, projectName, sidebar }: MainLayoutProps) {
+export function MainLayout({ children, projectName, sidebar, hideTopBar = false }: MainLayoutProps) {
   return (
     <div className="h-screen bg-[var(--color-background)] flex flex-col overflow-hidden">
-      {/* Top Bar - Fixed position */}
-      <TopBar projectName={projectName} />
-
-      {/* Spacer for fixed header */}
-      <div className="flex-shrink-0 h-[var(--header-height)]" />
+      {/* Top Bar - only shown when not hidden (e.g. on HomePage) */}
+      {!hideTopBar && (
+        <>
+          <TopBar projectName={projectName} />
+          <div className="flex-shrink-0 h-[var(--header-height)]" />
+        </>
+      )}
 
       {/* Main Layout */}
       <div className="flex-1 flex relative overflow-hidden">
