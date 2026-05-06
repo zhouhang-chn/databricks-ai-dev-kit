@@ -56,7 +56,8 @@ Use `pnpm`, not `npm`. Use `pnpm dlx` instead of `npx`.
 
 ## Shell Layout (ThoughtSpot / OpenAI Data Agent Inspired)
 
-![Analyst Shell Layout Wireframe](/Users/zhouhang/.gemini/antigravity/brain/3df13975-37bd-4f45-98a4-7b3d5f109574/analyst_thoughtspot_layout_1778043033740.png)
+![Analyst Story Feed Layout Wireframe](/Users/zhouhang/.gemini/antigravity/brain/3df13975-37bd-4f45-98a4-7b3d5f109574/wireframe_story_feed_layout_1778043587128.png)
+![Analyst Story Feed Layout High-Fidelity](/Users/zhouhang/.gemini/antigravity/brain/3df13975-37bd-4f45-98a4-7b3d5f109574/hifi_story_feed_layout_1778043613703.png)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
