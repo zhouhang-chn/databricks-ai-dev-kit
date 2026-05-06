@@ -54,13 +54,13 @@ Use `pnpm`, not `npm`. Use `pnpm dlx` instead of `npx`.
 | `api.ts` | Replace builder API surface (`/projects`, `/invoke_agent`) with analyst API surface (`/sessions`, `/stories`, `/runs`, `/context`). Keep `streamProgress()` and `request()` utility. |
 | `ActiveStream` interface | Remove `todos`, `tools` fields. Add `validationResults`, `queryRuns`. |
 
-## Shell Layout
+## Shell Layout (ThoughtSpot / OpenAI Data Agent Inspired)
 
-![Analyst Shell Layout Wireframe](/Users/zhouhang/.gemini/antigravity/brain/3df13975-37bd-4f45-98a4-7b3d5f109574/hifi_analyst_shell_layout_1778042724752.png)
+![Analyst Shell Layout Wireframe](/Users/zhouhang/.gemini/antigravity/brain/3df13975-37bd-4f45-98a4-7b3d5f109574/analyst_thoughtspot_layout_1778043033740.png)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ TopBar: workspace · global ask box · time range · account   │
+│ TopBar:   [ 🔍 Search your data... (Global Ask Box) ]        │
 ├──────┬──────────────────────────────────┬───────────────────┤
 │      │                                  │                   │
 │ Left │     Main Canvas                  │  Right Inspect    │
@@ -73,13 +73,11 @@ Use `pnpm`, not `npm`. Use `pnpm dlx` instead of `npx`.
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### TopBar
+### TopBar (Search-Centric)
 
-- Workspace indicator (identity + workspace URL)
-- **Global ask box** — primary entry point; always visible, always focused on load
-- Time range selector (optional context filter)
-- Save / Share / Export actions
-- Account menu, dark mode toggle
+- **Global Ask Box**: The absolute center of gravity (like ThoughtSpot). Always focused, large, and prominent. Supports natural language queries.
+- Workspace / Environment indicator (subtle, left-aligned)
+- Account menu, Data source management, and Pinboards/Dashboards links (right-aligned)
 
 ### Left Rail (240px, collapsible)
 
@@ -92,21 +90,26 @@ Sections:
 
 The builder app's `Sidebar.tsx` (conversations list + project list) is the starting skeleton. Replace project/conversation navigation with session/story/workflow navigation.
 
-### Main Canvas
+### Main Canvas (The "Answer")
 
-The `StoryCanvas` component renders either:
-- **Empty state**: starter prompts (reuse builder app pattern)
-- **Story list**: vertical stack of `StoryCard` components for the active session
+The `StoryCanvas` component renders the active "Story" or "Answer". It breaks away from a conversational chat UI and instead focuses on data density:
+- **Query Tokens**: At the very top, the natural language query is parsed into semantic tokens (Metrics, Dimensions, Time ranges) for immediate feedback on how the agent understood the request.
+- **Main Visualization**: A large, interactive chart (e.g., Recharts) takes center stage if the data warrants it.
+- **Data Table**: Below the chart, a clean, paginated data grid showing the raw results.
+- **Empty State**: A clean page prompting the user to start searching their data.
 
-### Right Inspect Panel (320px, collapsible, `xl:` breakpoint)
+### Right Inspect Panel: Context & Trace
+
+The right panel is crucial for building trust, heavily inspired by the OpenAI Data Agent's "Six Layers of Context".
+
+![Analyst Context Panel Wireframe](/Users/zhouhang/.gemini/antigravity/brain/3df13975-37bd-4f45-98a4-7b3d5f109574/analyst_context_panel_1778043055090.png)
 
 Tabs (extending builder app's single-section panel):
-1. **Trace** — analysis steps with status dots, labels, timing
-2. **Evidence** — evidence blocks with type icons and expandable content
-3. **SQL** — executed queries with syntax highlighting, statement links, row counts, latency
-4. **Validation** — check results (freshness, nulls, joins, reconciliation)
-5. **Context** — assets used, metrics, dimensions, filters, memory entries cited
-6. **Governance** — permissions, source lineage, data freshness, execution links
+1. **Context & Trace (Primary)** — Shows exactly what data sources were used, which of the 6 layers of context were applied (e.g., Table Metadata, Human Annotations, Codex Enrichment, Memory), and a timeline of the agent's execution steps.
+2. **SQL** — The generated, syntax-highlighted SQL query with validation status.
+3. **Evidence** — Raw evidence blocks (tool outputs, intermediate steps).
+4. **Validation** — Detailed check results (freshness, nulls, joins, reconciliation).
+5. **Governance** — Permissions, source lineage, data freshness, execution links.
 
 ## Story Card Design
 
