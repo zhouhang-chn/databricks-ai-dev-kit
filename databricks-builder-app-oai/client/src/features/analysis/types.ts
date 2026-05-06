@@ -4,6 +4,20 @@ export type StoryStatus = 'planning' | 'running' | 'done' | 'error';
 export type EvidenceType = 'text' | 'table' | 'chart' | 'tool_result' | 'error';
 export type AnalysisStepStatus = 'running' | 'done' | 'error';
 export type NextMoveType = 'drill' | 'compare' | 'validate' | 'explain' | 'pivot';
+export type PlanStepStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export interface PlanStep {
+  id: string;
+  description: string;
+  status: PlanStepStatus;
+  toolCalls: string[];
+}
+
+export interface AnalysisPlan {
+  objective: string;
+  steps: PlanStep[];
+  currentStepId?: string;
+}
 
 export interface AnalysisContext {
   conversationId?: string;
@@ -46,11 +60,23 @@ export interface NextMove {
   source?: 'model' | 'heuristic';
 }
 
+export interface ActivityItem {
+  id: string;
+  type: 'thinking' | 'tool_use' | 'tool_result';
+  content: string;
+  toolName?: string;
+  toolInput?: string;
+  isError?: boolean;
+  timestamp: number;
+}
+
 export interface AnalysisStory {
   id: string;
   conversationId?: string;
   question: string;
   status: StoryStatus;
+  plan?: AnalysisPlan;
+  activity: ActivityItem[];
   conclusion?: string;
   evidence: EvidenceBlock[];
   trace: AnalysisStep[];
@@ -63,6 +89,8 @@ export interface AnalysisStory {
 export type AnalysisEvent =
   | { type: 'story.created'; story: AnalysisStory }
   | { type: 'story.attach_conversation'; storyId: string; conversationId: string }
+  | { type: 'plan.created'; storyId: string; plan: AnalysisPlan }
+  | { type: 'activity.appended'; storyId: string; item: ActivityItem }
   | { type: 'conclusion.appended'; storyId: string; text: string }
   | { type: 'trace.appended'; storyId: string; step: AnalysisStep }
   | { type: 'evidence.appended'; storyId: string; block: EvidenceBlock }

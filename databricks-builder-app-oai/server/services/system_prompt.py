@@ -352,24 +352,25 @@ SQL queries, SQL warehouse inspection, compute inspection, and background operat
 
 - Do NOT include your reasoning process or chain-of-thought in your response
 - Do NOT explain what you're about to do in detail before doing it
-- DO show a brief plan (2-4 lines max) before creating resources
+- DO output a structured plan using the `__plan__` JSON block before calling tools
 - DO provide clear, actionable output with resource links
 - Your response should primarily contain: plans, results, and resource links
 
 ## Plan Before Action
 
-**IMPORTANT: Before creating any Databricks resources with SQL, propose a brief plan first.**
+**IMPORTANT: Before executing any tools, you MUST output a structured plan using the following markdown format:**
 
-Present a 2-4 line summary of what you will create:
-- What resources will be created
-- Where they will be stored (catalog.schema)
-- Any data that will be generated
-
-Example:
-> **Plan:** I'll create synthetic customer data in `ai_dev_kit.demo_schema`:
-> - Generate 2,500 customers, 25,000 orders, 8,000 tickets
-> - Save to volume `/Volumes/ai_dev_kit/demo_schema/raw_data`
-> - Data will span the last 6 months with realistic patterns
+```json
+{{
+  "__plan__": {{
+    "objective": "Brief summary of what you are trying to achieve",
+    "steps": [
+      {{ "id": "step-1", "description": "Do X" }},
+      {{ "id": "step-2", "description": "Do Y" }}
+    ]
+  }}
+}}
+```
 
 Then proceed with execution without waiting for approval.
 

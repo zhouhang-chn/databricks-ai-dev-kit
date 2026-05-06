@@ -1,123 +1,193 @@
 # Data Visualization in Analysis Stories
 
-## Purpose
+## Why Visualize
 
-This document designs how `databricks-builder-app-oai` should integrate
-data visualization into the existing analysis story pipeline. Today,
-evidence blocks in a story can display text, tables, JSON, and errors.
-The gap is **charts** — the `EvidenceType` already declares `'chart'` but
-no rendering path exists. This design fills that gap so the agent can
-produce visual evidence blocks that render inline within the analysis
-story canvas.
+An analysis story answers a business question. It moves through a
+sequence — question → plan → evidence gathering → conclusion → next
+moves. Every piece of the sequence exists to build the analyst's
+conviction: "I understand what the data says, I trust the evidence, and I
+know what to do next."
 
-## Current State
+A table of numbers can be evidence. But for many analytical questions the
+numbers only become evidence when their **shape** is visible — a trend,
+a ranking, a distribution, a composition, an outlier. A bar chart does
+not decorate a table; it is a different way of answering the same
+question. It makes the answer faster to read, harder to misread, and
+easier to act on.
 
-### Evidence Type System
+The first principle of visualization in this system is therefore:
 
-```typescript
-// features/analysis/types.ts
-export type EvidenceType = 'text' | 'table' | 'chart' | 'tool_result' | 'error';
-```
+> **A chart exists to make the analysis story's conclusion more
+> convincing, not to make the UI more colorful.**
 
-`'chart'` is declared but never produced by the transforms pipeline. The
-`EvidenceContent` component (`features/analysis/components/EvidenceContent.tsx`)
-does not handle evidence blocks with `type === 'chart'`. All tool results
-currently flow through a single code path:
+This means the right question is never "should we chart this data?" but
+rather "what is the story trying to say, and would a chart say it
+better?"
 
-1. `storyEventsFromStreamEvent()` maps `tool_result` SSE events into
-   `evidence.appended` analysis events.
-2. `EvidenceContent` tries to parse JSON and render as a table if the
-   data is row-oriented, or as pretty-printed JSON / Markdown otherwise.
-3. The right inspect panel shows the same evidence blocks with collapsible
-   tool input.
+## What the Analysis Story Looks Like Today
 
-### Data Flow
+An `AnalysisStory` in `databricks-builder-app-oai` is structured as:
 
 ```
-Model → tool_result SSE event → storyEventsFromStreamEvent()
-  → evidence.appended { type: 'tool_result' | 'error', rawContent }
-  → EvidenceContent renders table / JSON / Markdown
+question          ← the user's analytical intent
+status            ← planning → running → done | error
+trace             ← ordered steps the agent took (tool calls)
+evidence[]        ← ordered blocks: text, table, tool_result, error
+conclusion        ← streamed Markdown answer
+nextMoves[]       ← follow-up suggestions (drill, compare, validate...)
+context           ← metrics, dimensions, filters, conversation
 ```
 
-### What Works Well
+Evidence blocks carry the raw data behind the conclusion. The conclusion
+interprets the evidence. Next moves extend the story. The inspect panel
+shows trace details and evidence drilldowns.
 
-- The `asRowTable()` function in `EvidenceContent.tsx` already normalizes
-  heterogeneous tabular JSON into `{ rows, columns }`.
-- The `execute_sql` tool returns JSON arrays of row objects — the natural
-  input for both tables and charts.
-- The analysis story model (`AnalysisStory.evidence: EvidenceBlock[]`)
-  is an ordered sequence that can interleave text, tables, and charts.
-- The next-moves system can already detect metric contexts and suggest
-  drill/compare/validate actions.
+Today, all evidence blocks render as:
 
-### What Is Missing
+- **Table** — when the tool result is row-oriented JSON.
+- **JSON** — when the result is structured but not tabular.
+- **Markdown** — when the result is plain text.
+- **Error** — when the tool call failed.
 
-| Gap | Impact |
-|-----|--------|
-| No chart evidence detection | All numeric SQL results render as tables only |
-| No chart rendering component | Even if detected, no React component can draw a chart |
-| No chart spec in `EvidenceBlock` | The block has no field for chart type, axes, or config |
-| No model-side guidance | The system prompt does not tell the agent how or when to request visualization |
-| No interactivity | Tables and charts share no selection/highlight state |
+The type system already declares `'chart'` in `EvidenceType`, but no
+path produces or renders it.
+
+## Analysis Goals That Need Visualization
+
+Not every analysis story benefits from a chart. The decision depends on
+what the analysis is trying to convey. Here are the common analytical
+intents in the builder app and how visualization serves each:
+
+### 1. Comparison — "How does A compare to B?"
+
+The analyst wants to see relative magnitude across categories: revenue by
+region, error counts by service, spend by department.
+
+**What the visualization conveys:** Rank order and relative gap at a
+glance. A horizontal bar chart sorted by value answers "which is biggest
+and by how much" in under two seconds — something a 20-row table cannot.
+
+**Chart type:** Bar (horizontal for long labels, vertical for short).
+Sorted descending unless the categories have a natural order.
+
+### 2. Trend — "How has X changed over time?"
+
+The analyst is looking for direction, inflection, seasonality, or
+anomaly in a time-ordered metric.
+
+**What the visualization conveys:** Trajectory shape. A line chart shows
+whether the metric is growing, flat, or declining, and where it
+inflected. Area charts add volume perception for cumulative or stacked
+time series.
+
+**Chart type:** Line (single metric), area (stacked or cumulative),
+multi-line (comparison across segments over time).
+
+### 3. Composition — "What makes up the whole?"
+
+The analyst wants to understand proportional contribution: channel mix,
+cost breakdown, status distribution.
+
+**What the visualization conveys:** Part-to-whole relationship. A pie or
+donut chart answers "what share does each part hold" for ≤ 8 categories.
+A stacked bar answers the same question when there are too many slices
+or when comparison across groups matters.
+
+**Chart type:** Pie (≤ 8 categories, single level), stacked bar (more
+categories or cross-group comparison).
+
+### 4. Distribution — "What does the spread look like?"
+
+The analyst wants to understand concentration, variance, or outliers:
+latency distribution, price range, score histogram.
+
+**What the visualization conveys:** Shape of the data — normal,
+skewed, bimodal, long-tailed. Scatter plots show joint distributions
+between two numeric dimensions.
+
+**Chart type:** Scatter (two numeric axes), histogram (binned frequency
+— deferred to a later phase).
+
+### 5. Correlation — "Are X and Y related?"
+
+The analyst suspects a relationship between two measures and wants
+visual confirmation before running a statistical test.
+
+**What the visualization conveys:** Direction and strength of association.
+A scatter plot with optional size encoding answers "do these two things
+move together?"
+
+**Chart type:** Scatter with optional size/color encoding.
+
+### 6. Anomaly — "Is anything unusual?"
+
+The analyst is scanning for outliers in an otherwise regular pattern:
+a sudden spike, a missing period, a data quality gap.
+
+**What the visualization conveys:** Deviation from the expected shape.
+This is often a line chart with a clear baseline, or a bar chart where
+one bar is visually disproportionate.
+
+**Chart type:** Same as comparison or trend, but the chart's value is
+highlighting the exception rather than the overall pattern.
+
+### When NOT to Visualize
+
+- **Metadata queries** (DESCRIBE, SHOW SCHEMAS, list catalogs) — the
+  answer is a catalog listing, not an analytical finding.
+- **Single-value results** — "total revenue is $4.2M" is better as a
+  number in the conclusion text than as a bar chart with one bar.
+- **Schema inspection** — column names and types are structural
+  information, not analytical evidence.
+- **Very few rows (< 2)** — no shape to see.
+- **Very many categories (> 50)** — the chart becomes unreadable; a
+  sorted table with conditional formatting would be better (future work).
 
 ## Design Principles
 
-1. **Chart-as-evidence.** A chart is an evidence block, not a separate
-   artifact. It lives in the story's `evidence[]` array alongside tables
-   and text, preserving the narrative order.
+1. **Visualization serves the story.** A chart must make the conclusion
+   easier to believe or the next move easier to choose. If neither, show
+   a table.
 
-2. **Data, not images.** Charts are rendered client-side from structured
-   data, not from model-generated image URLs. This keeps the data
-   auditable, downloadable, and interactive.
+2. **Data, not images.** Charts render client-side from structured data.
+   The same data feeds the table view, the CSV export, and the chart.
+   Nothing is lost by switching views.
 
-3. **Graceful degradation.** If chart rendering fails or the data shape
-   is wrong, the evidence block falls back to the existing table view.
-   No user-visible error; just a quieter visualization.
+3. **Every chart has a dual.** Every chart evidence block can toggle to
+   its underlying data table, and every table block can toggle to a chart
+   (when the data is chartable). The user chooses the lens.
 
-4. **Model-guided, rule-constrained.** The agent may suggest a chart type
-   and column mapping, but the frontend validates the suggestion against
-   the actual data shape before rendering.
+4. **Graceful degradation.** If chart rendering fails — wrong column
+   types, missing fields, rendering error — the block falls back to the
+   table view silently.
 
-5. **Incremental adoption.** The first version should work without any
-   backend changes — chart detection and rendering are purely client-side
-   transforms over existing `tool_result` evidence blocks.
+5. **The agent gets smarter over time.** Phase 1 uses client-side
+   heuristics to auto-detect chart opportunities. Phase 2 lets the model
+   choose the visualization. Phase 3 gives the model a dedicated tool.
+   Each phase improves chart quality without breaking the prior one.
 
 ## Chart Specification
 
-### Extended `EvidenceBlock`
+The `ChartSpec` is the contract between detection (client heuristic or
+model guidance) and rendering (Recharts component). It is a declarative,
+column-oriented description of what to show.
 
 ```typescript
 export interface ChartSpec {
-  /** Chart type. Start with a small set; expand later. */
   chartType: 'bar' | 'line' | 'area' | 'pie' | 'scatter' | 'heatmap';
-
-  /** Column name or expression for the x-axis / category axis. */
-  xField: string;
-
-  /** One or more column names for y-axis / value series. */
-  yFields: string[];
-
-  /** Optional column for grouping / color encoding. */
-  colorField?: string;
-
-  /** Optional column for sizing (scatter, heatmap). */
-  sizeField?: string;
-
-  /** Axis labels. Defaults to column names. */
-  xLabel?: string;
+  xField: string;                    // category or time axis column
+  yFields: string[];                 // one or more value columns
+  colorField?: string;               // grouping / color encoding column
+  sizeField?: string;                // size encoding (scatter, heatmap)
+  xLabel?: string;                   // axis label override
   yLabel?: string;
-
-  /** Sort order for the category axis. */
   sort?: 'asc' | 'desc' | 'natural';
+  stacked?: boolean;                 // stack bar/area series
+  showLabels?: boolean;              // data labels on bars/points
+  title?: string;                    // chart title override
 
-  /** Whether to stack bar/area series. */
-  stacked?: boolean;
-
-  /** Whether to show data labels on bars/points. */
-  showLabels?: boolean;
-
-  /** Optional title override. Defaults to evidence block title. */
-  title?: string;
+  // Annotation for the story: what should the reader see?
+  insight?: string;                  // e.g. "APAC leads by 40% margin"
 }
 
 export interface EvidenceBlock {
@@ -130,28 +200,38 @@ export interface EvidenceBlock {
   createdAt: string;
   toolName?: string;
   toolInput?: string;
-
-  // New — only present when type === 'chart'
-  chartSpec?: ChartSpec;
+  chartSpec?: ChartSpec;             // present when type === 'chart'
 }
 ```
 
-### Why This Shape
+The `insight` field is optional but important: it carries the analytical
+message the chart is meant to convey. In Phase 1, the heuristic cannot
+produce it. In Phase 2, the model writes it. In Phase 3, the
+visualization tool generates it from the data and the question context.
 
-- **Declarative.** The chart spec describes what to show, not how to draw
-  it. The rendering library interprets the spec.
-- **Column-oriented.** The spec references column names from the tabular
-  data in `rawContent`, so the same `asRowTable()` parser feeds both
-  table and chart views.
-- **Extensible.** New chart types can be added without breaking existing
-  blocks. Unknown `chartType` values fall back to table.
+---
 
-## Detection Strategy
+## Phase 1: Client-Side Chart Rendering
 
-### Phase 1: Client-Side Heuristic Detection
+**Goal:** Make existing SQL evidence blocks chartable without any
+backend changes.
 
-The first phase does not require backend changes. Detection runs in
-`storyTransforms.ts` or a new `chartDetection.ts` module.
+### What It Delivers to the Story
+
+After Phase 1, a story that runs `execute_sql` and gets back a table of
+revenue by region will automatically show a bar chart above the table
+instead of requiring the analyst to eyeball the numbers. A time-series
+query will show a line chart. The analyst can always toggle to the table
+for exact values.
+
+The improvement is in the *evidence section* of the story: evidence
+blocks that previously forced the analyst to read raw numbers now offer a
+visual summary.
+
+### How Detection Works
+
+A new `chartDetection.ts` module examines every SQL tool result and
+classifies its columns:
 
 ```typescript
 function detectChartSpec(
@@ -159,22 +239,23 @@ function detectChartSpec(
   rawContent: string,
   tabular: RowOriented | null
 ): ChartSpec | null {
-  // Only attempt on SQL tool results with tabular data
+  // Only SQL tool results with tabular data
   if (!tabular || tabular.rows.length < 2) return null;
   if (toolName !== 'execute_sql' && toolName !== 'execute_sql_multi') return null;
 
   const { columns, rows } = tabular;
 
-  // Classify columns
+  // Classify columns into numeric and categorical
   const numericCols = columns.filter((c) =>
     rows.every((r) => r[c] == null || typeof r[c] === 'number' || !isNaN(Number(r[c])))
   );
   const categoryCols = columns.filter((c) => !numericCols.includes(c));
 
-  // No numeric columns → not chartable
   if (numericCols.length === 0) return null;
 
-  // Time series detection: a date/time-like category column + 1+ numeric
+  // --- Analytical intent mapping ---
+
+  // Trend: date-like category + numeric values → line or area
   const timeCols = categoryCols.filter(isLikelyDateColumn);
   if (timeCols.length > 0 && numericCols.length >= 1) {
     return {
@@ -185,7 +266,16 @@ function detectChartSpec(
     };
   }
 
-  // Categorical bar: 1 category column + 1-3 numeric columns, ≤ 30 rows
+  // Composition: 1 category + 1 numeric, very few rows → pie
+  if (categoryCols.length === 1 && numericCols.length === 1 && rows.length <= 8) {
+    return {
+      chartType: 'pie',
+      xField: categoryCols[0],
+      yFields: [numericCols[0]],
+    };
+  }
+
+  // Comparison: category + numeric, moderate row count → bar
   if (categoryCols.length >= 1 && numericCols.length >= 1 && rows.length <= 30) {
     return {
       chartType: 'bar',
@@ -195,7 +285,7 @@ function detectChartSpec(
     };
   }
 
-  // Scatter: 2+ numeric columns, no clear category
+  // Correlation: all numeric columns → scatter
   if (categoryCols.length === 0 && numericCols.length >= 2) {
     return {
       chartType: 'scatter',
@@ -205,70 +295,240 @@ function detectChartSpec(
     };
   }
 
-  // Pie: 1 category + 1 numeric, ≤ 8 rows
-  if (categoryCols.length === 1 && numericCols.length === 1 && rows.length <= 8) {
-    return {
-      chartType: 'pie',
-      xField: categoryCols[0],
-      yFields: [numericCols[0]],
-    };
-  }
-
   return null;
 }
 
 function isLikelyDateColumn(col: string): boolean {
   const lowered = col.toLowerCase();
-  return (
-    lowered.includes('date') ||
-    lowered.includes('time') ||
-    lowered.includes('month') ||
-    lowered.includes('year') ||
-    lowered.includes('quarter') ||
-    lowered.includes('week') ||
-    lowered.includes('day') ||
-    lowered.includes('period') ||
-    lowered.endsWith('_at') ||
-    lowered.endsWith('_ts')
-  );
+  return /date|time|month|year|quarter|week|day|period|_at$|_ts$/.test(lowered);
 }
 ```
 
-### Phase 2: Model-Guided Chart Spec
+### How Rendering Works
 
-In a later phase, the agent can emit chart specs directly. This requires
-a system prompt addition and a new structured output convention.
+**Library:** Recharts — React-native, declarative, CSS-variable-aware,
+~150 KB gzipped.
 
-**System prompt addition:**
+| Factor | Recharts | D3 | Observable Plot | ECharts |
+|--------|----------|----|-----------------|---------|
+| React native | ✅ | ❌ | ❌ | ❌ |
+| Bundle size | ~150 KB | ~70 KB | ~100 KB | ~800 KB |
+| Declarative | ✅ | ❌ | ✅ | ✅ |
+| Dark mode | CSS vars | Manual | CSS | Theme |
 
+**Components:**
+
+- `ChartEvidence.tsx` — reads `ChartSpec` + tabular data, renders the
+  appropriate Recharts chart (bar, line, area, pie, scatter).
+- `chartTheme.ts` — maps design system CSS variables into Recharts
+  colors, fonts, and tooltip styling.
+
+**Integration into `EvidenceContent`:**
+
+The existing component gains a chart-first branch. When the evidence
+block has `type === 'chart'` and a valid `chartSpec`, the chart renders
+above a collapsible "Show data table" toggle. If the spec is invalid
+or Recharts throws, the component catches the error and renders the
+existing table view.
+
+### How the Transform Pipeline Changes
+
+In `storyTransforms.ts`, the `tool_result` event handler adds chart
+detection before creating the evidence block:
+
+```typescript
+// Inside storyEventsFromStreamEvent, in the tool_result branch:
+const chartSpec = detectChartSpec(toolName, rawContent, tabular);
+const evidenceType = chartSpec ? 'chart' : isError ? 'error' : 'tool_result';
+// ... attach chartSpec to the evidence block
 ```
+
+### Interactivity
+
+Phase 1 charts are read-only evidence:
+
+- **Tooltip** on hover shows exact values.
+- **Legend click** toggles series visibility.
+- **View toggle** switches between chart and table within the same block.
+- **CSV download** (existing) remains available.
+- **PNG export** via Recharts SVG serialization (optional toolbar button).
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `client/package.json` | Add `recharts` dependency |
+| `client/src/features/analysis/types.ts` | Add `ChartSpec`, add `chartSpec?` to `EvidenceBlock` |
+| `client/src/features/analysis/chartDetection.ts` | **NEW** — heuristic detection |
+| `client/src/features/analysis/storyTransforms.ts` | Import detection, apply in `tool_result` handler |
+| `client/src/features/analysis/components/ChartEvidence.tsx` | **NEW** — Recharts wrapper |
+| `client/src/features/analysis/components/chartTheme.ts` | **NEW** — design token mapping |
+| `client/src/features/analysis/components/EvidenceContent.tsx` | Add chart branch before table fallback |
+
+Estimated scope: ~7 files, ~600 lines. No backend changes.
+
+### What Phase 1 Cannot Do
+
+- The heuristic has no understanding of the *question*. It cannot tell
+  whether a bar chart or a pie chart better serves the analyst's intent.
+  It only reads column types and row counts.
+- No `insight` annotation — the chart shows data but does not highlight
+  what matters.
+- No connection between chart interaction and story continuation — the
+  chart is passive evidence.
+
+---
+
+## Phase 2: Model-Guided Visualization
+
+**Goal:** Let the agent choose and annotate charts based on the
+analytical question, not just the data shape.
+
+### What It Delivers to the Story
+
+After Phase 2, the agent understands the analyst's question and decides
+whether and how to visualize each SQL result. The story's evidence
+blocks carry richer charts:
+
+- The chart type matches the analytical intent (comparison → bar,
+  trend → line), not just the column types.
+- The `insight` field contains a one-line annotation: "APAC grew 37%
+  QoQ, 3× the global average."
+- The chart title reflects the question, not the tool name.
+- The model can choose *not* to chart a result when a table is more
+  appropriate, even if the heuristic would have triggered.
+
+The improvement spans the *evidence section* and the *conclusion*: the
+model can reference the chart in its conclusion text, creating a tighter
+narrative loop between prose and visual evidence.
+
+### How the Agent Guides Visualization
+
+A new section in `system_prompt.py` teaches the agent when and how to
+request charts:
+
+```python
+VISUALIZATION_GUIDANCE = """
 ## Data Visualization
 
-When you execute SQL and the result is best understood visually, include
-a `__chart_spec__` key in your next text response with a JSON object:
+When a SQL result answers the user's question and the answer is best
+understood visually, include a chart specification in your response.
 
-{
+### When to Visualize
+
+| Analytical intent | Chart type | When to use |
+|-------------------|------------|-------------|
+| Comparison | bar | Ranking or relative magnitude across categories |
+| Trend | line / area | Change over time; seasonality; inflection |
+| Composition | pie / stacked bar | Part-to-whole; channel mix; cost split |
+| Correlation | scatter | Relationship between two numeric measures |
+| Anomaly | line or bar | Highlighting an exception in a pattern |
+
+### When NOT to Visualize
+
+- Metadata queries (DESCRIBE, SHOW, catalog listings)
+- Single-value results
+- Schema inspection
+- Results with < 2 rows
+
+### Specification Format
+
+After a SQL execution whose result should be visualized, include this
+JSON block in your text response:
+
+```json
+{"__chart_spec__": {
   "chartType": "bar",
   "xField": "region",
-  "yFields": ["total_revenue", "order_count"],
+  "yFields": ["total_revenue"],
   "sort": "desc",
-  "title": "Revenue by Region"
-}
-
-Supported chart types: bar, line, area, pie, scatter, heatmap.
-Only include __chart_spec__ when the data clearly benefits from
-visualization. Do not include it for metadata queries, schema
-inspections, or results with fewer than 2 rows.
+  "title": "Revenue by Region",
+  "insight": "APAC leads at $4.2M, 40% above EMEA"
+}}
 ```
 
-The frontend would parse `__chart_spec__` from the conclusion text,
-extract the JSON, attach it to the preceding SQL tool result evidence
-block, and remove the raw spec from the rendered text.
+The frontend will render the chart and attach the insight as an
+annotation. The spec is removed from the displayed text automatically.
+"""
+```
 
-### Phase 3: Dedicated Visualization Tool
+### How the Frontend Processes Model Specs
 
-The most powerful option: a backend tool that combines `execute_sql` with
-chart generation.
+In `storyTransforms.ts`, the conclusion text handler parses
+`__chart_spec__` JSON blocks:
+
+1. Scan the incoming `text_delta` / `text` events for the pattern.
+2. Extract the JSON and validate it against `ChartSpec`.
+3. Attach the spec to the most recent SQL tool result evidence block.
+4. Strip the raw `__chart_spec__` JSON from the rendered conclusion.
+
+Model-provided specs override any heuristic detection from Phase 1. If
+the model provides a spec, it wins. If the model does not, the Phase 1
+heuristic still fires as a fallback.
+
+### Insight Annotation Rendering
+
+When `chartSpec.insight` is present, the `ChartEvidence` component
+renders a subtle annotation below the chart:
+
+```
+┌─────────────────────────────────────────┐
+│  Revenue by Region           (bar chart)│
+│  █████████████  APAC   $4.2M            │
+│  █████████      EMEA   $3.0M            │
+│  ████████       AMER   $2.8M            │
+│  ██             LATAM  $0.6M            │
+│                                         │
+│  💡 APAC leads at $4.2M, 40% above EMEA │
+└─────────────────────────────────────────┘
+```
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `server/services/system_prompt.py` | Add visualization guidance section |
+| `client/src/features/analysis/storyTransforms.ts` | Parse `__chart_spec__` from conclusion text, attach to evidence |
+| `client/src/features/analysis/components/ChartEvidence.tsx` | Render `insight` annotation |
+
+### What Phase 2 Cannot Do
+
+- The model must embed the spec in free text, which is fragile.
+- The model cannot see the chart — it cannot refine axis ranges, color
+  choices, or label formatting based on rendering feedback.
+- Chart interaction still does not feed back into the story.
+
+---
+
+## Phase 3: Visualization Tool and Interactive Stories
+
+**Goal:** Make visualization a first-class tool the agent calls
+deliberately, and connect chart interactions to story continuation.
+
+### What It Delivers to the Story
+
+After Phase 3, the story has a richer feedback loop:
+
+1. The agent calls `visualize_data` instead of `execute_sql` when it
+   plans to visualize. This makes the intent explicit in the trace.
+2. The tool returns data + chart spec + auto-generated insight, all in
+   one structured response.
+3. When the analyst clicks a bar or data point in a chart, the click
+   generates a contextual follow-up prompt (e.g., "Drill into APAC
+   revenue — explain the top drivers") that appears as a next-move
+   suggestion or populates the input box.
+4. Hovering a chart element highlights the corresponding row in the
+   data table in the inspect panel — linking visual evidence to raw
+   evidence.
+
+The improvement spans the entire story arc: the **plan** mentions
+visualization intent, the **evidence** is richer, the **conclusion**
+references specific chart elements, and the **next moves** emerge from
+chart interaction.
+
+### The `visualize_data` Tool
+
+A new backend tool in `databricks_openai.py`:
 
 ```python
 @function_tool
@@ -279,10 +539,18 @@ async def visualize_data(
     y_fields: list[str] | None = None,
     color_field: str | None = None,
     title: str | None = None,
+    insight: str | None = None,
     warehouse_id: str | None = None,
 ) -> str:
-    """Execute SQL and return results with a chart specification."""
-    rows = await _execute_sql(...)
+    """Execute SQL and return results with a chart specification.
+
+    Use this instead of execute_sql when the result should be visualized
+    as a chart. The frontend renders the chart inline in the analysis
+    story. Provide chart_type, x_field, and y_fields to control the
+    visualization. Set chart_type='auto' to let the system detect the
+    best chart type from the data.
+    """
+    rows = await _execute_sql(sql_query, warehouse_id=warehouse_id, ...)
     spec = _build_chart_spec(rows, chart_type, x_field, y_fields, ...)
     return json.dumps({
         'data': rows,
@@ -291,424 +559,128 @@ async def visualize_data(
     })
 ```
 
-The `tool_result` handler in `storyEventsFromStreamEvent()` would check
-for `__visualization__: true` in the parsed result and set
-`type: 'chart'` on the evidence block.
+The `tool_result` handler in `storyEventsFromStreamEvent()` checks for
+`__visualization__: true` and sets `type: 'chart'` on the evidence block.
 
-## Rendering
+### Chart → Story Continuation
 
-### Library Choice: Recharts
-
-Recharts is the recommended rendering library for Phase 1:
-
-| Factor | Recharts | D3 | Observable Plot | ECharts |
-|--------|----------|----|-----------------|---------|
-| React native | ✅ | ❌ | ❌ | ❌ |
-| Bundle size | ~150 KB | ~70 KB | ~100 KB | ~800 KB |
-| Learning curve | Low | High | Medium | Medium |
-| Declarative | ✅ | ❌ | ✅ | ✅ |
-| Responsive | Built-in | Manual | Manual | Built-in |
-| TypeScript | ✅ | ✅ | ✅ | ✅ |
-| Dark mode | CSS vars | Manual | CSS | Theme |
-| Active maintenance | ✅ | ✅ | ✅ | ✅ |
-
-Recharts composes well with the existing React component model, supports
-dark mode through CSS custom properties, and requires minimal wrapper
-code for the chart types in scope.
-
-### Chart Component
-
-```
-features/analysis/components/
-  EvidenceContent.tsx          ← existing, add chart branch
-  ChartEvidence.tsx            ← new, renders ChartSpec + tabular data
-  chartTheme.ts                ← new, design token mapping
-```
-
-**`ChartEvidence.tsx`** — wraps Recharts components:
-
-```tsx
-import { useMemo } from 'react';
-import {
-  BarChart, Bar, LineChart, Line, AreaChart, Area,
-  PieChart, Pie, Cell, ScatterChart, Scatter,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer,
-} from 'recharts';
-import type { ChartSpec } from '@/features/analysis/types';
-import { chartColors, chartTheme } from './chartTheme';
-
-interface ChartEvidenceProps {
-  spec: ChartSpec;
-  rows: Record<string, unknown>[];
-  columns: string[];
-}
-
-export function ChartEvidence({ spec, rows, columns }: ChartEvidenceProps) {
-  const data = useMemo(() => prepareData(spec, rows), [spec, rows]);
-
-  const commonProps = {
-    data,
-    margin: { top: 8, right: 16, bottom: 24, left: 16 },
-  };
-
-  const chart = (() => {
-    switch (spec.chartType) {
-      case 'bar':
-        return (
-          <BarChart {...commonProps}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-            <XAxis dataKey={spec.xField} tick={chartTheme.axisTick} />
-            <YAxis tick={chartTheme.axisTick} />
-            <Tooltip contentStyle={chartTheme.tooltip} />
-            <Legend />
-            {spec.yFields.map((field, i) => (
-              <Bar
-                key={field}
-                dataKey={field}
-                fill={chartColors[i % chartColors.length]}
-                stackId={spec.stacked ? 'stack' : undefined}
-              />
-            ))}
-          </BarChart>
-        );
-
-      case 'line':
-        return (
-          <LineChart {...commonProps}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-            <XAxis dataKey={spec.xField} tick={chartTheme.axisTick} />
-            <YAxis tick={chartTheme.axisTick} />
-            <Tooltip contentStyle={chartTheme.tooltip} />
-            <Legend />
-            {spec.yFields.map((field, i) => (
-              <Line
-                key={field}
-                type="monotone"
-                dataKey={field}
-                stroke={chartColors[i % chartColors.length]}
-                strokeWidth={2}
-                dot={false}
-              />
-            ))}
-          </LineChart>
-        );
-
-      // ... area, pie, scatter, heatmap follow the same pattern
-
-      default:
-        return null; // fallback to table
-    }
-  })();
-
-  if (!chart) return null;
-
-  return (
-    <div className="mt-2 w-full">
-      {spec.title && (
-        <div className="mb-2 text-xs font-semibold text-[var(--color-text-heading)]">
-          {spec.title}
-        </div>
-      )}
-      <ResponsiveContainer width="100%" height={280}>
-        {chart}
-      </ResponsiveContainer>
-    </div>
-  );
-}
-```
-
-**`chartTheme.ts`** — maps design tokens into Recharts props:
+When a user clicks a chart element, the app generates a contextual
+follow-up:
 
 ```typescript
-export const chartColors = [
-  'var(--color-accent-primary)',
-  'var(--color-accent-secondary)',
-  'var(--color-success)',
-  'var(--color-warning)',
-  '#a78bfa', // violet
-  '#fb923c', // orange
-  '#34d399', // emerald
-  '#f87171', // rose
-];
-
-export const chartTheme = {
-  axisTick: {
-    fill: 'var(--color-text-muted)',
-    fontSize: 11,
-  },
-  tooltip: {
-    backgroundColor: 'var(--color-bg-elevated)',
-    border: '1px solid var(--color-border)',
-    borderRadius: '8px',
-    color: 'var(--color-text-primary)',
-    fontSize: '12px',
-  },
-};
-```
-
-### Integration into EvidenceContent
-
-The existing `EvidenceContent` component gains one branch:
-
-```tsx
-// In EvidenceContent.tsx, after the tabular check
-if (block.type === 'chart' && block.chartSpec && tabular) {
-  return (
-    <div className="mt-2">
-      <ChartEvidence spec={block.chartSpec} rows={tabular.rows} columns={tabular.columns} />
-      {/* Toggle to show underlying table */}
-      <details className="mt-2">
-        <summary className="cursor-pointer text-[10px] text-[var(--color-text-muted)]">
-          Show data table
-        </summary>
-        {/* existing table rendering */}
-      </details>
-    </div>
-  );
-}
-```
-
-## Transform Pipeline Changes
-
-### `storyTransforms.ts`
-
-The `tool_result` handler in `storyEventsFromStreamEvent()` should try
-chart detection before defaulting to `tool_result`:
-
-```typescript
-if (type === 'tool_result') {
-  const rawContent = asText(event.content);
-  const parsed = typeof event.content === 'string'
-    ? tryParseJson(event.content)
-    : event.content;
-  const tabular = parsed ? asRowTable(parsed) : null;
-
-  // Try chart detection
-  const toolName = typeof event.tool_name === 'string' ? event.tool_name : undefined;
-  const chartSpec = detectChartSpec(toolName, rawContent, tabular);
-
-  const evidenceType: EvidenceType = chartSpec
-    ? 'chart'
-    : isError ? 'error' : 'tool_result';
-
-  return [{
-    type: 'evidence.appended',
-    storyId,
-    block: {
-      id: makeId('evidence-tool'),
-      type: evidenceType,
-      title: /* ... */,
-      content: summary,
-      rawContent,
-      isError,
-      createdAt: nowIso(),
-      toolName,
-      toolInput,
-      chartSpec,     // new field
-    },
-  }];
-}
-```
-
-### View Toggle
-
-Each chart evidence block should allow toggling between chart and table
-view. The toggle state is local to the component, not persisted.
-
-```typescript
-// In EvidenceContent or a wrapper
-const [viewMode, setViewMode] = useState<'chart' | 'table'>('chart');
-```
-
-## Interactivity
-
-### Phase 1: Passive Charts
-
-- Tooltip on hover showing exact values.
-- Legend click to toggle series visibility.
-- Responsive container fills available width.
-- Download chart as PNG via a small toolbar button.
-- Download data as CSV (existing behavior preserved).
-
-### Phase 2: Selection → Next Moves
-
-When a user clicks a bar, slice, or data point, the app can generate a
-contextual next-move prompt:
-
-```typescript
-function onChartClick(dataPoint: Record<string, unknown>, spec: ChartSpec) {
+function onChartClick(
+  dataPoint: Record<string, unknown>,
+  spec: ChartSpec,
+  story: AnalysisStory
+) {
   const category = dataPoint[spec.xField];
-  const value = spec.yFields.map((f) => `${f}=${dataPoint[f]}`).join(', ');
-  const prompt = `Drill into ${category} (${value}) — explain drivers and anomalies.`;
-  // Dispatch as a next-move click
+  const values = spec.yFields.map((f) => `${f}=${dataPoint[f]}`).join(', ');
+  const prompt = `Drill into ${category} (${values}) — ` +
+    `explain the top drivers and any anomalies.`;
+  // Populate the input box for user confirmation, then send as next move
 }
 ```
 
-This connects chart interaction directly to the story-continuation flow,
-making the chart a navigation surface rather than a static image.
+This turns the chart into a **navigation surface** for the analysis
+story. Instead of the analyst typing a follow-up question, they click
+the segment they care about and the system proposes the question.
 
-### Phase 3: Linked Highlighting
+The click does NOT auto-invoke the agent. It populates the input box so
+the analyst can review and refine the question before sending. This
+preserves the analyst's agency.
 
-When the user hovers a data point in a chart, highlight the corresponding
-row in the table evidence block (if visible in the inspect panel). This
-requires a shared selection context between `ChartEvidence` and
-`EvidenceContent`.
+### Linked Highlighting
 
-## Backend Considerations
+When hovering a chart element, the inspect panel's evidence table
+highlights the corresponding row. This requires a lightweight shared
+selection context:
 
-### No Backend Changes Required for Phase 1
-
-Phase 1 is entirely client-side. The heuristic detection runs over
-existing `tool_result` event payloads. No new tools, no schema changes,
-no system prompt updates.
-
-### Phase 2: System Prompt Update
-
-Add a visualization guidance section to `system_prompt.py`:
-
-```python
-VISUALIZATION_GUIDANCE = """
-## Data Visualization
-
-When SQL results contain numeric data that benefits from visual comparison,
-include a chart specification in your response. The frontend will render it
-as an interactive chart alongside the data table.
-
-To request a chart, include this JSON in your text response after the SQL
-execution:
-
-```json
-{"__chart_spec__": {"chartType": "bar", "xField": "region", "yFields": ["revenue"], "sort": "desc"}}
+```typescript
+// Shared between ChartEvidence and EvidenceContent via React context
+interface EvidenceSelectionContext {
+  hoveredRowIndex: number | null;
+  setHoveredRowIndex: (index: number | null) => void;
+}
 ```
 
-Chart types: bar, line, area, pie, scatter, heatmap.
-Only suggest charts for results with 2+ rows and at least one numeric column.
-Do not suggest charts for metadata queries, DESCRIBE, SHOW, or schema inspection.
-"""
+### Updated System Prompt Guidance
+
+The system prompt in Phase 3 adds tool-selection guidance:
+
+```
+### When to Use visualize_data vs execute_sql
+
+| Situation | Tool |
+|-----------|------|
+| The user asked a question that benefits from visual comparison | `visualize_data` |
+| The result will be used as a chart in the analysis story | `visualize_data` |
+| The query is for metadata, schema, or configuration | `execute_sql` |
+| The result is a single value or status check | `execute_sql` |
+| You are writing data (INSERT, CREATE, GRANT) | `execute_sql` |
 ```
 
-### Phase 3: `visualize_data` Tool
-
-Add a new tool to `databricks_openai.py` that wraps `execute_sql` and
-returns data with a chart spec. The system prompt should guide the model
-to use this tool instead of `execute_sql` when visualization is the goal.
-
-## Dependency Impact
-
-### New Dependencies
-
-| Package | Version | Purpose | Size |
-|---------|---------|---------|------|
-| `recharts` | ^2.15 | Chart rendering | ~150 KB gzipped |
-| `recharts` peer: `react` | already present | — | — |
-
-Install:
-
-```bash
-cd databricks-builder-app-oai/client
-npm install recharts
-```
-
-No backend dependencies change in Phase 1.
-
-### Build Impact
-
-Recharts adds ~150 KB gzipped to the client bundle. This is acceptable
-for a data-heavy analysis application. Tree-shaking removes unused chart
-types if only a subset is imported.
-
-## File Changes Summary
-
-### Phase 1 (Client-Only)
-
-| File | Change |
-|------|--------|
-| `client/src/features/analysis/types.ts` | Add `ChartSpec` interface, add `chartSpec?` to `EvidenceBlock` |
-| `client/src/features/analysis/chartDetection.ts` | **NEW** — heuristic detection from tabular data |
-| `client/src/features/analysis/storyTransforms.ts` | Import detection, apply in `storyEventsFromStreamEvent` |
-| `client/src/features/analysis/components/ChartEvidence.tsx` | **NEW** — Recharts wrapper component |
-| `client/src/features/analysis/components/chartTheme.ts` | **NEW** — design token mapping |
-| `client/src/features/analysis/components/EvidenceContent.tsx` | Add `chart` branch before tabular fallback |
-| `client/package.json` | Add `recharts` dependency |
-
-### Phase 2 (System Prompt)
-
-| File | Change |
-|------|--------|
-| `server/services/system_prompt.py` | Add visualization guidance section |
-| `client/src/features/analysis/storyTransforms.ts` | Parse `__chart_spec__` from conclusion text |
-
-### Phase 3 (Backend Tool)
+### Files Changed
 
 | File | Change |
 |------|--------|
 | `server/services/tools/databricks_openai.py` | Add `visualize_data` function tool |
-| `server/services/system_prompt.py` | Guide model to use `visualize_data` |
+| `server/services/system_prompt.py` | Add tool-selection guidance |
+| `client/src/features/analysis/storyTransforms.ts` | Handle `__visualization__` in tool results |
+| `client/src/features/analysis/components/ChartEvidence.tsx` | Add click handler, hover events |
+| `client/src/features/analysis/components/EvidenceContent.tsx` | Linked highlight via selection context |
+| `client/src/features/analysis/components/RightInspectPanel.tsx` | Receive and display hover state |
 
-## Migration and Compatibility
+---
 
-- Existing stories and evidence blocks are unaffected. The `chartSpec`
-  field is optional and absent on all existing blocks.
-- Chart detection is opt-in — it only fires for SQL tool results with
-  numeric tabular data. Non-SQL evidence and metadata results are
-  unchanged.
-- The view toggle defaults to `'chart'` when a spec is present, but users
-  can always switch to table view.
-- If Recharts fails to render (bad data, missing columns), the component
-  catches the error and falls back to the existing table rendering
-  without user-visible breakage.
+## How Visualization Fits the Story Arc
+
+The following table maps each stage of an analysis story to the
+visualization capabilities added in each phase:
+
+| Story Stage | Today | Phase 1 | Phase 2 | Phase 3 |
+|-------------|-------|---------|---------|---------|
+| **Question** | Text only | Unchanged | Unchanged | Unchanged |
+| **Plan** | Agent states tool steps | Unchanged | Agent states "I'll visualize X" | Agent plans `visualize_data` call in trace |
+| **Evidence** | Table / JSON / error | Auto-detected chart for SQL results | Model-guided chart with insight annotation | Dedicated viz tool with structured spec |
+| **Conclusion** | Markdown text | Unchanged | References chart insights in prose | References interactive chart elements |
+| **Next Moves** | Heuristic or model suggestions | Unchanged | Unchanged | Chart-click generates contextual next moves |
+| **Inspect Panel** | Trace + evidence + context | Chart/table toggle in evidence | Insight annotation visible | Linked highlight between chart and table |
+
+## Compatibility and Migration
+
+- **Existing stories:** Unaffected. `chartSpec` is an optional field
+  absent from all existing evidence blocks.
+- **Phase transitions:** Each phase is additive. Phase 2 does not break
+  Phase 1 heuristics — it overrides them when the model provides a spec.
+  Phase 3 does not break Phase 2 — it adds a dedicated tool alongside
+  the text-embedded spec path.
+- **View toggle:** Always available. The analyst is never forced to view
+  a chart; the table is one click away.
+- **Error boundary:** If Recharts fails to render, the block silently
+  falls back to the existing table view.
 
 ## Open Questions
 
-1. **Chart export format.** Should chart PNG export use `html2canvas` or
-   Recharts' built-in SVG serialization? SVG is sharper but may not
-   include the tooltip state.
+1. **Maximum data points.** Should the chart renderer cap rows (e.g.,
+   50 bars, 500 scatter points) to prevent slow rendering, or rely on
+   the SQL query's LIMIT clause?
 
-2. **Maximum data points.** Should the chart renderer limit rows to
-   prevent performance issues (e.g., 500 points for scatter, 50 bars)?
-   Or should it rely on the SQL query to limit results?
+2. **Chart persistence.** Should `chartSpec` be persisted in
+   `executions.events_json` so replayed stories show charts? (Likely
+   yes — the spec is small and the replay path already re-processes
+   stored events via `replayStoredEventsForStory`.)
 
-3. **Heatmap data shape.** The heuristic detector does not yet handle
-   pivot-table-shaped data for heatmaps. Should this be deferred to
-   Phase 2 where the model can explicitly request heatmap?
+3. **Insight quality.** In Phase 2, the model writes the `insight`
+   annotation. Should the frontend validate it against the data (e.g.,
+   check that claimed percentages match the actual values)?
 
-4. **Chart persistence.** Currently, chart specs live only in the
-   client-side story state derived from SSE events. Should `chartSpec`
-   be persisted in `executions.events_json` so replayed stories show
-   charts? (Likely yes — the spec is small and the replay path already
-   re-processes stored events.)
+4. **Chart-click safety.** In Phase 3, chart clicks populate the input
+   box for user confirmation. Should there be an option for advanced
+   users to auto-send without confirmation?
 
-5. **Next-move integration depth.** Should chart clicks produce
-   immediate agent invocations, or populate the input box for user
-   review before sending? The "populate and let user confirm" pattern is
-   safer for the first version.
-
-## Implementation Phases
-
-### Phase 1: Client-Side Chart Rendering (Recommended First)
-
-- Add `recharts` dependency.
-- Implement `ChartSpec` type and `chartDetection.ts`.
-- Build `ChartEvidence.tsx` and `chartTheme.ts`.
-- Wire detection into `storyTransforms.ts`.
-- Add chart branch to `EvidenceContent.tsx`.
-- Add chart/table view toggle.
-- Test with representative SQL results.
-
-Estimated scope: ~6 files, ~600 lines.
-
-### Phase 2: Model-Guided Specs
-
-- Add visualization guidance to system prompt.
-- Parse `__chart_spec__` from conclusion text.
-- Allow model to override heuristic detection.
-
-### Phase 3: Visualization Tool + Interactivity
-
-- Add `visualize_data` backend tool.
-- Implement chart click → next-move integration.
-- Add linked highlighting between chart and table.
+5. **Heatmap data shape.** The Phase 1 heuristic does not detect pivot-
+   table-shaped data for heatmaps. Defer to Phase 2 where the model can
+   explicitly request heatmap with the right column mapping.
 
 ## References
 

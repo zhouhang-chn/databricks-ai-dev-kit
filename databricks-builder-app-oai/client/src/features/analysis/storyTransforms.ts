@@ -182,6 +182,7 @@ export function createAnalysisStory(args: {
     question: args.question,
     status: args.status || 'planning',
     conclusion,
+    activity: [],
     evidence: [],
     trace: [],
     nextMoves: args.status === 'done' ? defaultNextMoves(args.question) : [],
@@ -269,13 +270,57 @@ export function reduceAnalysisEvent(
         context: { ...story.context, conversationId: event.conversationId },
         updatedAt: nowIso(),
       }));
-    case 'conclusion.appended':
+    case 'plan.created':
       return updateStory(stories, event.storyId, (story) => ({
         ...story,
-        status: 'running',
-        conclusion: `${story.conclusion || ''}${event.text}`,
+        plan: event.plan,
         updatedAt: nowIso(),
       }));
+    case 'activity.appended':
+      return updateStory(stories, event.storyId, (story) => ({
+        ...story,
+        activity: [...story.activity, event.item],
+        updatedAt: nowIso(),
+      }));
+    case 'conclusion.appended':
+      return updateStory(stories, event.storyId, (story) => {
+        let newConclusion = `${story.conclusion || ''}${event.text}`;
+        let newPlan = story.plan;
+
+        if (!newPlan) {
+          const planRegex = /```json\s*([\s\S]*?"__plan__":[\s\S]*?)\s*```/;
+          const match = newConclusion.match(planRegex);
+          if (match) {
+            try {
+              const fullJson = match[1];
+              const parsed = JSON.parse(fullJson);
+              const planData = parsed.__plan__;
+              if (planData) {
+                newPlan = {
+                  objective: planData.objective || 'Analysis Plan',
+                  steps: (planData.steps || []).map((s: any) => ({
+                    id: s.id || `step-${Date.now()}`,
+                    description: s.description || 'Step',
+                    status: 'pending',
+                    toolCalls: [],
+                  })),
+                };
+                newConclusion = newConclusion.replace(match[0], '').trim();
+              }
+            } catch (e) {
+              // Ignore parse errors, wait for more chunks
+            }
+          }
+        }
+
+        return {
+          ...story,
+          status: 'running',
+          conclusion: newConclusion,
+          plan: newPlan,
+          updatedAt: nowIso(),
+        };
+      });
     case 'trace.appended':
       return updateStory(stories, event.storyId, (story) => appendTrace(story, event.step));
     case 'evidence.appended':
@@ -323,31 +368,60 @@ export function storyEventsFromStreamEvent(
     return [{ type: 'conclusion.appended', storyId, text: String(event.text) }];
   }
   if (type === 'thinking' && event.thinking) {
-    return [{
-      type: 'trace.appended',
-      storyId,
-      step: {
-        id: makeId('trace-thinking'),
-        label: 'Thinking',
-        status: 'running',
-        detail: String(event.thinking),
-        createdAt: nowIso(),
+    const text = String(event.thinking);
+    return [
+      {
+        type: 'trace.appended',
+        storyId,
+        step: {
+          id: makeId('trace-thinking'),
+          label: 'Thinking',
+          status: 'running',
+          detail: text,
+          createdAt: nowIso(),
+        },
       },
-    }];
+      {
+        type: 'activity.appended',
+        storyId,
+        item: {
+          id: makeId('activity-thinking'),
+          type: 'thinking',
+          content: text,
+          timestamp: Date.now(),
+        },
+      } as any,
+    ];
   }
   if (type === 'tool_use') {
     const toolName = String(event.tool_name || 'tool');
-    return [{
-      type: 'trace.appended',
-      storyId,
-      step: {
-        id: String(event.tool_id || makeId('trace-tool')),
-        label: toolName.replace(/^mcp__databricks__/, '').replace(/_/g, ' '),
-        status: 'running',
-        detail: asText(event.tool_input),
-        createdAt: nowIso(),
+    const toolInput = asText(event.tool_input);
+    const friendlyName = toolName.replace(/^mcp__databricks__/, '').replace(/_/g, ' ');
+    return [
+      {
+        type: 'trace.appended',
+        storyId,
+        step: {
+          id: String(event.tool_id || makeId('trace-tool')),
+          label: friendlyName,
+          status: 'running',
+          detail: toolInput,
+          createdAt: nowIso(),
+        },
       },
-    }];
+      {
+        type: 'activity.appended',
+        storyId,
+        item: {
+          id: String(event.tool_id || makeId('activity-tool')),
+          type: 'tool_use',
+          content: friendlyName,
+          toolName,
+          toolInput: tryParseJson(toolInput) as any,
+          timestamp: Date.now(),
+        },
+      } as any,
+    ];
   }
   if (type === 'tool_result') {
     const isError = Boolean(event.is_error);
@@ -356,6 +430,17 @@ export function storyEventsFromStreamEvent(
     const toolName = typeof event.tool_name === 'string' ? event.tool_name : undefined;
     const toolInput = event.tool_input != null ? asText(event.tool_input) : undefined;
     const friendlyName = toolName?.replace(/^mcp__databricks__/, '');
+    const activity: AnalysisEvent = {
+      type: 'activity.appended',
+      storyId,
+      item: {
+        id: makeId('activity-tool-res'),
+        type: 'tool_result',
+        content: summary,
+        isError,
+        timestamp: Date.now(),
+      }
+    };
     return [{
       type: 'evidence.appended',
       storyId,
@@ -372,7 +457,7 @@ export function storyEventsFromStreamEvent(
         toolName,
         toolInput,
       },
-    }];
+    }, activity as any];
   }
   if (type === 'todos' && Array.isArray(event.todos)) return [];
   if (type === 'next_moves.updated' && Array.isArray(event.moves)) {

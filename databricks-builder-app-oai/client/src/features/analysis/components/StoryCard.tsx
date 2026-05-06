@@ -1,7 +1,19 @@
-import { CheckCircle2, Loader2, Pin, Search, Wrench } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { 
+  Activity,
+  Brain, 
+  Check, 
+  CheckCircle2, 
+  ChevronDown, 
+  ChevronRight, 
+  Loader2, 
+  Pin, 
+  Search, 
+  Wrench 
+} from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { AnalysisStory, NextMove } from '@/features/analysis/types';
+import type { ActivityItem, AnalysisStory, NextMove } from '@/features/analysis/types';
 import { cn } from '@/lib/utils';
 
 function StatusBadge({ status }: { status: AnalysisStory['status'] }) {
@@ -43,6 +55,36 @@ function NextMoveButton({
   );
 }
 
+function ActivityRow({ item }: { item: ActivityItem }) {
+  const isThinking = item.type === 'thinking';
+  const isTool = item.type === 'tool_use';
+  const isResult = item.type === 'tool_result';
+
+  return (
+    <div className="flex items-start gap-2.5 py-1.5">
+      <div className="mt-0.5 shrink-0">
+        {isThinking ? (
+          <Brain className="h-3.5 w-3.5 text-[var(--color-text-muted)]" />
+        ) : isTool ? (
+          <Wrench className="h-3.5 w-3.5 text-[var(--color-accent-primary)]" />
+        ) : (
+          <Check className="h-3.5 w-3.5 text-[var(--color-success)]" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[12px] leading-5 text-[var(--color-text-primary)]">
+          {isThinking ? 'Thought for a few seconds' : item.content}
+        </div>
+        {(isThinking || isTool) && item.content && !isThinking && (
+          <div className="mt-1 text-[11px] text-[var(--color-text-muted)] line-clamp-1 opacity-60">
+            {item.content}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function StoryCard({
   story,
   isActive,
@@ -54,7 +96,18 @@ export function StoryCard({
   onSelect: (storyId: string) => void;
   onNextMove: (move: NextMove) => void;
 }) {
-  const visibleTrace = story.trace.slice(-4);
+  const [isExpanded, setIsExpanded] = useState(story.status !== 'done');
+  
+  // Auto-fold when completed
+  useEffect(() => {
+    if (story.status === 'done') {
+      setIsExpanded(false);
+    } else if (story.status === 'running') {
+      setIsExpanded(true);
+    }
+  }, [story.status]);
+
+  const activityCount = story.activity.length;
 
   return (
     <article
@@ -81,10 +134,45 @@ export function StoryCard({
         <StatusBadge status={story.status} />
       </header>
 
+      {/* Activity Feed / Scratchpad */}
+      {activityCount > 0 && (
+        <section className="mt-4 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/30">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsExpanded(!isExpanded);
+            }}
+            className="flex w-full items-center justify-between px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] hover:bg-[var(--color-bg-secondary)]/50 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Activity className="h-3.5 w-3.5" />
+              <span>
+                {story.status === 'done' ? `Worked for ${activityCount} steps` : 'Execution Activity'}
+              </span>
+            </div>
+            {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          </button>
+          
+          {isExpanded && (
+            <div className="border-t border-[var(--color-border)] px-3 py-1 bg-[var(--color-background)]/40">
+              <div className="space-y-0.5 divide-y divide-[var(--color-border)]/40">
+                {story.activity.map((item) => (
+                  <ActivityRow key={item.id} item={item} />
+                ))}
+                {story.status === 'running' && (
+                  <div className="flex items-center gap-2 py-3 text-[12px] text-[var(--color-text-muted)]">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>Processing...</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
       <section className="mt-4">
-        <div className="mb-1 text-xs font-semibold uppercase text-[var(--color-text-muted)]">
-          Conclusion
-        </div>
         {story.conclusion ? (
           <div className="prose prose-xs max-w-none text-[14px] leading-7 text-[var(--color-text-primary)]">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -99,31 +187,8 @@ export function StoryCard({
         )}
       </section>
 
-      {visibleTrace.length > 0 && (
-        <section className="mt-4">
-          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-[var(--color-text-muted)]">
-            <Wrench className="h-3.5 w-3.5" />
-            Trace
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {visibleTrace.map((step) => (
-              <span
-                key={step.id}
-                className="inline-flex max-w-full items-center gap-1.5 rounded-md bg-[var(--color-bg-secondary)] px-2 py-1 text-[11px] text-[var(--color-text-muted)]"
-              >
-                <span className={cn(
-                  'h-1.5 w-1.5 rounded-full',
-                  step.status === 'error' ? 'bg-[var(--color-error)]' : 'bg-[var(--color-success)]'
-                )} />
-                <span className="truncate">{step.label}</span>
-              </span>
-            ))}
-          </div>
-        </section>
-      )}
-
       {story.nextMoves.length > 0 && (
-        <section className="mt-4">
+        <section className="mt-6 border-t border-[var(--color-border)]/60 pt-4">
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-[var(--color-text-muted)]">
             <Pin className="h-3.5 w-3.5" />
             Next Moves
