@@ -4,7 +4,9 @@
 
 `databricks-analyst-app` is an externally hosted conversational analytics application for business-oriented analysis on Databricks data. It is designed for data scientists and business users who need trustworthy answers, repeatable analytical workflows, and clear evidence trails without manually finding tables, writing SQL, debugging joins, or building one-off charts.
 
-The app is inspired by the design lessons in [`docs/refer/Inside OpenAI’s in-house data agent.md`](../refer/Inside%20OpenAI%E2%80%99s%20in-house%20data%20agent.md), the reverse analysis in [`docs/refer/openai_data_agent_reverse_analysis_zh.md`](../refer/openai_data_agent_reverse_analysis_zh.md), and the frontend architecture guidance in [`docs/refer/data_agent_frontend_design_architecture_v3.pdf`](../refer/data_agent_frontend_design_architecture_v3.pdf): high-quality data agents need rich context, discovery-first table selection, closed-loop self-correction, reusable workflows, continuous evaluation, pass-through security, and a frontend that treats each answer as an operable analysis object. The Databricks version should ground those ideas in Unity Catalog, metric views, general-purpose cluster execution for the first phases, app-managed semantic retrieval such as pgvector, a PostgreSQL-compatible application database, system tables, and governed enterprise data access.
+The app is inspired by the design lessons in [`docs/refer/Inside OpenAI's in-house data agent.md`](../refer/Inside%20OpenAI%E2%80%99s%20in-house%20data%20agent.md), the reverse analysis in [`docs/refer/openai_data_agent_reverse_analysis_zh.md`](../refer/openai_data_agent_reverse_analysis_zh.md), and the frontend architecture guidance in [`docs/refer/data_agent_frontend_design_architecture_v3.pdf`](../refer/data_agent_frontend_design_architecture_v3.pdf): high-quality data agents need rich context, discovery-first table selection, closed-loop self-correction, reusable workflows, continuous evaluation, pass-through security, and a frontend that treats each answer as an operable analysis object. The Databricks version should ground those ideas in Unity Catalog, metric views, general-purpose cluster execution for the first phases, app-managed semantic retrieval such as pgvector, a PostgreSQL-compatible application database, system tables, and governed enterprise data access.
+
+The agent runtime uses the **OpenAI Agents SDK with DeepSeek v4 Pro/Flash** models via an AI Gateway OpenAI-compatible endpoint — the same proven stack from `databricks-builder-app-oai`. For a concrete comparison of what is reusable, what needs rebuilding, and what is net-new, see [`gap-analysis-vs-oai.md`](gap-analysis-vs-oai.md).
 
 ## Goals
 
@@ -166,6 +168,8 @@ Important modeling rule: context must be explicit. The app should not depend on 
 
 ### Frontend Architecture
 
+For the full implementation-level frontend design — component tree, type extensions, state architecture, evidence block types, streaming contract, and carry-over inventory from `databricks-builder-app-oai` — see [`frontend-design.md`](frontend-design.md).
+
 The frontend should use a layered architecture:
 
 | Layer | Responsibility |
@@ -232,11 +236,11 @@ Recommended implementation shape:
 - Use Databricks APIs for governed access to Databricks data, with general-purpose cluster execution until phase 3.
 - Start with a single main analyst agent loop rather than a premature multi-agent system; specialize through tools, context, workflows, and validation gates first.
 - Narrow the agent tool surface to analyst-safe, orthogonal operations with minimal overlap.
-- Use the Claude Agent SDK through an application-owned adapter; avoid running a Claude Code instance as a subprocess in the serving path.
+- Use the OpenAI Agents SDK with DeepSeek v4 Pro/Flash through the proven `AgentRuntime` adapter from `databricks-builder-app-oai`; no Claude Code subprocess in the serving path.
 - Keep frontend components behind a runtime boundary: UI emits analysis intent, context, and action events; backend owns planning, SQL generation, execution, and validation.
 - Add a context retrieval service and a workflow registry.
 - Store analysis sessions, query runs, feedback, approved memories, workflow definitions, context documents, and embeddings in a PostgreSQL-compatible application database with pgvector enabled.
-- Use MLflow tracing and evaluations for quality measurement.
+- Use MLflow tracing and evaluations for quality measurement (always-on, not optional).
 
 ## Deployment Model
 
@@ -563,14 +567,17 @@ Deferred:
 
 ## Initial Build Plan
 
-1. Scaffold `databricks-analyst-app` as an externally hosted FastAPI/React application with local development scripts and containerized deployment.
-2. Add phase 0 preflight checks for config, PostgreSQL + pgvector, PAT auth, cluster execution, metric views, Claude Agent SDK, MLflow, and Docker packaging.
-3. Implement user/session persistence in the PostgreSQL-compatible application database.
-4. Add PAT-based Databricks auth, cluster selection, and read-only SQL execution.
-5. Build context index tables and a pgvector-backed retrieval service.
-6. Implement analyst agent loop with plan, SQL, validation, execution, synthesis, and streaming.
-7. Build UI for StoryCards, Story Canvas, charts, right inspect panel, advanced SQL inspection, and feedback.
-8. Add workflow registry and three MVP workflows.
-9. Add memory proposal/approval for personal memories.
-10. Instrument MLflow traces.
-11. Build offline eval cases for the first business domain.
+1. Carry over OpenAI Agents SDK runtime, event normalization, Lakebase persistence, skills manager, and MLflow wiring from `databricks-builder-app-oai`.
+2. Define analyst tool contracts wrapping `databricks-tools-core` in OpenAI function-tool shape.
+3. Write analyst system prompt with discovery-first loop.
+4. Add phase 0 smoke checks for PAT auth, cluster execution, UC metadata, and metric views.
+5. Scaffold `databricks-analyst-app` as an externally hosted FastAPI/React application, extending builder app components.
+6. Implement server-anchored `analysis_stories`, `evidence_blocks`, and `story_events` persistence from day one.
+7. Add PAT-based Databricks auth, cluster selection, and read-only SQL execution.
+8. Build context index tables and a pgvector-backed retrieval service.
+9. Implement analyst agent loop with plan, SQL, validation, execution, synthesis, and streaming.
+10. Extend builder app's Story Canvas UI with richer evidence types and server-anchored story data.
+11. Add workflow registry and three MVP workflows.
+12. Add memory proposal/approval for personal memories.
+13. Instrument always-on MLflow traces.
+14. Build offline eval cases for the first business domain.
