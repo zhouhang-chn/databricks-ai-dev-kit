@@ -592,6 +592,15 @@ export default function ProjectPage() {
   useEffect(() => { currentConvIdRef.current = currentConversation?.id; }, [currentConversation?.id]);
   useEffect(() => { messageToolsRef.current = messageTools; }, [messageTools]);
 
+  // Clear input when switching conversations
+  useEffect(() => {
+    setInput('');
+    setStreamingText('');
+    setTodos([]);
+    setIsReconnecting(false);
+    setActiveExecutionId(null);
+  }, [currentConversation?.id]);
+
   const syncStoriesFromMessages = useCallback((nextMessages: Message[]) => {
     setAnalysisStories(prev => {
       const dbStories = storiesFromMessages({ messages: nextMessages, messageTools: messageToolsRef.current });
@@ -626,6 +635,7 @@ export default function ProjectPage() {
       // 2. Preserve "live" stories that weren't matched in dbStories
       // These are stories currently running or streaming that haven't been saved to DB yet
       const orphanedLiveStories = prev.filter(liveStory => 
+        liveStory.conversationId === currentConversation?.id &&
         !matchedLiveIds.has(liveStory.id) && 
         (liveStory.status === 'running' || liveStory.status === 'planning' || liveStory.trace.length > 0)
       );
@@ -659,6 +669,10 @@ export default function ProjectPage() {
     const loadData = async () => {
       try {
         setIsLoading(true);
+        // Clear old conversation state immediately
+        setMessages([]);
+        setAnalysisStories([]);
+        setActiveStoryId(undefined);
         const [projectData, conversationsData, clustersData, warehousesData] = await Promise.all([
           fetchProject(projectId),
           fetchConversations(projectId),
@@ -927,6 +941,7 @@ export default function ProjectPage() {
       setMessages([]);
       setAnalysisStories([]);
       setActiveStoryId(undefined);
+      setInput('');
       // Clear streaming UI (new conv isn't streaming yet)
       setStreamingText('');
       setTodos([]);
