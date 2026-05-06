@@ -104,15 +104,129 @@ function safeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80) || 'evidence';
 }
 
+function TableStatsRenderer({ data }: { data: any }) {
+  const tables = data.tables || [];
+  if (tables.length === 0) {
+    return (
+      <div className="mt-2 text-xs italic text-[var(--color-text-muted)]">
+        No tables found in {data.catalog}.{data.schema_name}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-6">
+      <div className="flex items-center gap-2 border-b border-[var(--color-border)]/40 pb-2">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+          Schema: {data.catalog}.{data.schema_name}
+        </span>
+      </div>
+
+      {tables.map((table: any, idx: number) => (
+        <div key={table.name || idx} className="space-y-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <h4 className="text-sm font-bold text-[var(--color-text-heading)]">
+              {table.name}
+            </h4>
+            <div className="flex gap-2">
+              {table.total_rows != null && (
+                <span className="rounded bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-primary)]">
+                  {table.total_rows.toLocaleString()} rows
+                </span>
+              )}
+              {table.format && (
+                <span className="rounded bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-primary)]">
+                  {table.format.toUpperCase()}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {table.comment && (
+            <p className="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+              {table.comment}
+            </p>
+          )}
+
+          {table.error && (
+            <div className="rounded border border-[var(--color-error)]/20 bg-[var(--color-error)]/5 px-2 py-1 text-[11px] text-[var(--color-error)]">
+              {table.error}
+            </div>
+          )}
+
+          {table.column_details && Object.keys(table.column_details).length > 0 && (
+            <div className="overflow-x-auto rounded-lg border border-[var(--color-border)]/60">
+              <table className="w-full text-left text-[11px]">
+                <thead className="bg-[var(--color-bg-secondary)]/50">
+                  <tr>
+                    <th className="px-3 py-2 font-bold text-[var(--color-text-muted)]">Column</th>
+                    <th className="px-3 py-2 font-bold text-[var(--color-text-muted)]">Type</th>
+                    <th className="px-3 py-2 font-bold text-[var(--color-text-muted)]">Comment</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--color-border)]/40">
+                  {Object.values(table.column_details).map((col: any) => (
+                    <tr key={col.name} className="hover:bg-[var(--color-bg-secondary)]/30">
+                      <td className="px-3 py-2 font-mono font-medium text-[var(--color-text-primary)]">{col.name}</td>
+                      <td className="px-3 py-2 text-[var(--color-text-muted)]">{col.data_type}</td>
+                      <td className="px-3 py-2 text-[var(--color-text-muted)] italic">{col.comment || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {table.sample_data && table.sample_data.length > 0 && (
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+                Sample Data
+              </span>
+              <div className="overflow-x-auto rounded-lg border border-[var(--color-border)]/60 no-scrollbar">
+                <table className="w-full text-left text-[10px]">
+                  <thead className="bg-[var(--color-bg-secondary)]/30">
+                    <tr>
+                      {Object.keys(table.sample_data[0]).map((k) => (
+                        <th key={k} className="px-2 py-1.5 font-bold text-[var(--color-text-muted)]">{k}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--color-border)]/20">
+                    {table.sample_data.slice(0, 5).map((row: any, ridx: number) => (
+                      <tr key={ridx}>
+                        {Object.values(row).map((val: any, vidx: number) => (
+                          <td key={vidx} className="px-2 py-1.5 text-[var(--color-text-primary)] whitespace-nowrap">
+                            {cellToString(val)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function EvidenceContent({ block }: { block: EvidenceBlock }) {
   const raw = block.rawContent ?? block.content ?? '';
   const parsed = useMemo(() => tryParseJson(raw), [raw]);
   const tabular = useMemo(() => (parsed ? asRowTable(parsed) : null), [parsed]);
   const [expanded, setExpanded] = useState(false);
 
+  if (block.toolName === 'get_table_stats_and_schema' || block.toolName === 'get_volume_folder_details') {
+    if (parsed && typeof parsed === 'object') {
+      return <TableStatsRenderer data={parsed} />;
+    }
+  }
+
   if (block.isError) {
     return (
-      <pre className="evidence-error mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-bg-tertiary)] p-2 text-[11px] leading-5 text-[var(--color-error)]">
+      <pre className="evidence-error mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-bg-tertiary)] p-2 text-[11px] leading-5 text-[var(--color-error)] no-scrollbar">
         {raw || block.content}
       </pre>
     );
@@ -142,7 +256,7 @@ export function EvidenceContent({ block }: { block: EvidenceBlock }) {
             CSV
           </button>
         </div>
-        <div className="evidence-markdown max-w-full overflow-x-auto rounded border border-[var(--color-border)]">
+        <div className="evidence-markdown max-w-full overflow-x-auto rounded border border-[var(--color-border)] no-scrollbar">
           <table>
             <thead>
               <tr>{tabular.columns.map((c) => <th key={c}>{c}</th>)}</tr>
@@ -198,7 +312,7 @@ export function EvidenceContent({ block }: { block: EvidenceBlock }) {
         </div>
         <pre
           className={cn(
-            'max-h-72 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-bg-tertiary)] p-2 text-[11px] leading-5 text-[var(--color-text-muted)]'
+            'max-h-72 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-bg-tertiary)] p-2 text-[11px] leading-5 text-[var(--color-text-muted)] no-scrollbar'
           )}
         >
           {visible}
@@ -219,7 +333,7 @@ export function EvidenceContent({ block }: { block: EvidenceBlock }) {
 
   // Plain string / markdown text.
   return (
-    <div className="evidence-markdown mt-2 max-w-full overflow-x-auto break-words text-xs leading-5 text-[var(--color-text-muted)]">
+    <div className="evidence-markdown mt-2 max-w-full overflow-x-auto break-words text-xs leading-5 text-[var(--color-text-muted)] no-scrollbar">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{raw || block.content}</ReactMarkdown>
     </div>
   );

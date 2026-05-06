@@ -403,22 +403,39 @@ export function reduceAnalysisEvent(
         updatedAt: nowIso(),
       }));
     case 'plan.created':
-      return updateStory(stories, event.storyId, (story) => ({
-        ...story,
-        status: 'planning',
-        plan: {
-          objective: event.objective,
-          steps: event.steps.map((s) => ({
-            id: s.id,
-            title: s.title,
-            status: 'pending' as const,
-            toolCalls: [],
-          })),
-          currentStepId: undefined,
-          revisions: story.plan?.revisions ?? [],
-        },
-        updatedAt: nowIso(),
-      }));
+      return updateStory(stories, event.storyId, (story) => {
+        // If we already have a plan with steps, and the new event has no steps,
+        // it might be a redundant "final" call from the agent. Ignore it to preserve state.
+        const currentSteps = story.plan?.steps || [];
+        const incomingSteps = Array.isArray(event.steps) ? event.steps : [];
+        if (currentSteps.length > 0 && incomingSteps.length === 0) {
+          return {
+            ...story,
+            plan: {
+              ...story.plan!,
+              objective: event.objective || story.plan!.objective,
+            },
+            updatedAt: nowIso(),
+          };
+        }
+
+        return {
+          ...story,
+          status: 'planning',
+          plan: {
+            objective: event.objective,
+            steps: incomingSteps.map((s, i) => ({
+              id: String(s.id || `step-${i + 1}`),
+              title: String(s.title || `Step ${i + 1}`),
+              status: 'pending',
+              toolCalls: [],
+            })),
+            currentStepId: undefined,
+            revisions: story.plan?.revisions ?? [],
+          },
+          updatedAt: nowIso(),
+        };
+      });
     case 'plan.step_started':
       return updateStory(stories, event.storyId, (story) => {
         if (!story.plan) return story;
@@ -480,17 +497,28 @@ export function reduceAnalysisEvent(
         };
       });
     case 'synthesis.appended':
-      return updateStory(stories, event.storyId, (story) => ({
-        ...story,
-        status: story.status === 'error' ? 'error' : 'done',
-        conclusion: {
-          summary: event.summary,
-          highlights: event.highlights,
-          nextSteps: event.nextSteps,
-        },
-        nextMoves: story.nextMoves.length > 0 ? story.nextMoves : defaultNextMoves(story.question),
-        updatedAt: nowIso(),
-      }));
+      return updateStory(stories, event.storyId, (story) => {
+        const incomingHighlights = Array.isArray(event.highlights) ? event.highlights : [];
+        const incomingNextSteps = Array.isArray(event.nextSteps) ? event.nextSteps : [];
+        
+        return {
+          ...story,
+          status: story.status === 'error' ? 'error' : 'done',
+          conclusion: {
+            summary: event.summary || story.conclusion?.summary || '',
+            // If the incoming highlights are empty, preserve the previous ones
+            highlights: incomingHighlights.length > 0 
+              ? incomingHighlights 
+              : (story.conclusion?.highlights || []),
+            // If the incoming next steps are empty, preserve the previous ones
+            nextSteps: incomingNextSteps.length > 0
+              ? incomingNextSteps
+              : (story.conclusion?.nextSteps || []),
+          },
+          nextMoves: story.nextMoves.length > 0 ? story.nextMoves : defaultNextMoves(story.question),
+          updatedAt: nowIso(),
+        };
+      });
     case 'plan.tool_call':
       return updateStory(stories, event.storyId, (story) =>
         attachToolCall(story, event.toolName, event.toolInput)
@@ -551,13 +579,19 @@ export function storyEventsFromStreamEvent(
   // produced by update_plan / submit_conclusion. Render them as plan transitions
   // and as native fields on the story; never as activity rows.
   if (type === 'plan.created') {
-    const steps = Array.isArray(event.steps)
-      ? (event.steps as Array<Record<string, unknown>>).map((s, i) => ({
-        id: String(s.id || `step-${i + 1}`),
-        title: String(s.title || s.description || `Step ${i + 1}`),
-      }))
-      : [];
-    return [{ type: 'plan.created', storyId, objective: String(event.objective || ''), steps }];
+    const rawSteps = event.steps;
+    let steps: any[] = [];
+    if (Array.isArray(rawSteps)) {
+      steps = rawSteps;
+    } else if (typeof rawSteps === 'string') {
+      steps = tryParseJson(rawSteps) as any[] || [];
+    }
+    
+    const formattedSteps = steps.map((s, i) => ({
+      id: String(s.id || `step-${i + 1}`),
+      title: String(s.title || s.description || `Step ${i + 1}`),
+    }));
+    return [{ type: 'plan.created', storyId, objective: String(event.objective || ''), steps: formattedSteps }];
   }
   if (type === 'plan.step_started') {
     return [{

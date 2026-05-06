@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useUser } from '@/contexts/UserContext';
 import {
   ArrowUp,
@@ -607,6 +607,7 @@ function ProjectManagementPanel({
 export default function ProjectPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user, workspaceUrl } = useUser();
 
   // State
@@ -635,6 +636,7 @@ export default function ProjectPage() {
   const [, setActiveExecutionId] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [messageTools, setMessageTools] = useState<Record<string, string[]>>({});
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Calculate default schema from user email + project name once available
   const userDefaultSchema = useMemo(() => toSchemaName(user, project?.name ?? null), [user, project?.name]);
@@ -697,7 +699,6 @@ export default function ProjectPage() {
         const generatedSchema = toSchemaName(user, projectData.name);
 
         // Load specific conversation from URL or first available
-        const searchParams = new URLSearchParams(window.location.search);
         const urlConvId = searchParams.get('conversationId');
         const targetConv = urlConvId 
           ? conversationsData.find(c => c.id === urlConvId) || conversationsData[0]
@@ -737,8 +738,8 @@ export default function ProjectPage() {
   }, [projectId, navigate, user, syncStoriesFromMessages]);
 
   // Handle conversation changes via URL
+  // Handle conversation changes via URL
   useEffect(() => {
-    const searchParams = new URLSearchParams(window.location.search);
     const urlConvId = searchParams.get('conversationId');
     if (urlConvId && urlConvId !== currentConversation?.id && projectId) {
       const switchConv = async () => {
@@ -756,7 +757,7 @@ export default function ProjectPage() {
       };
       switchConv();
     }
-  }, [projectId, currentConversation?.id, syncStoriesFromMessages]);
+  }, [projectId, searchParams, currentConversation?.id, syncStoriesFromMessages]);
 
   // Check for active execution when conversation loads and reconnect if needed
   useEffect(() => {
@@ -1508,6 +1509,8 @@ export default function ProjectPage() {
       onViewSkills={handleViewSkills}
       onOpenProjectSettings={() => setProjectPanelOpen(true)}
       isLoading={false}
+      isCollapsed={isSidebarCollapsed}
+      onToggleCollapse={setIsSidebarCollapsed}
     />
   );
 
@@ -1566,90 +1569,99 @@ export default function ProjectPage() {
           isSaving={isSavingProjectManagement}
         />
 
-        {/* Analysis Canvas */}
+        {/* Analysis Canvas and Input Area */}
         <div className="min-h-0 flex-1 overflow-hidden">
-          <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_20rem]">
-            <div className="min-h-0 overflow-y-auto">
-              <StoryCanvas
-                stories={analysisStories}
-                activeStoryId={activeStoryId}
-                onSelectStory={setActiveStoryId}
-                onNextMove={handleNextMove}
-                emptyTitle={runRole === 'user_preview' ? 'What would a user ask?' : 'What can I help you build?'}
-                emptyDescription={
-                  runRole === 'user_preview'
-                    ? 'Preview the published project with read-only tools and release-pinned context.'
-                    : 'Build data pipelines, generate synthetic data, create dashboards, and explore Databricks resources.'
-                }
-                starterPrompts={starterPrompts}
-                onStarterPrompt={handleStarterPrompt}
-              />
+          <div 
+            className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_20rem] transition-all duration-300"
+            style={{
+              gridTemplateColumns: isSidebarCollapsed 
+                ? 'minmax(0, 1fr) 536px' 
+                : 'minmax(0, 1fr) 20rem'
+            }}
+          >
+            {/* Middle Panel: StoryCanvas + Input */}
+            <div className="flex flex-col min-h-0 border-r border-[var(--color-border)]/40">
+              <div className="flex-1 overflow-y-auto no-scrollbar">
+                <StoryCanvas
+                  stories={analysisStories}
+                  activeStoryId={activeStoryId}
+                  onSelectStory={setActiveStoryId}
+                  onNextMove={handleNextMove}
+                  emptyTitle={runRole === 'user_preview' ? 'What would a user ask?' : 'What can I help you build?'}
+                  emptyDescription={
+                    runRole === 'user_preview'
+                      ? 'Preview the published project with read-only tools and release-pinned context.'
+                      : 'Build data pipelines, generate synthetic data, create dashboards, and explore Databricks resources.'
+                  }
+                  starterPrompts={starterPrompts}
+                  onStarterPrompt={handleStarterPrompt}
+                />
 
-
-
-              {isStreamingHere && analysisStories.length === 0 && (
-                <div className="mx-auto w-full max-w-4xl px-6 pb-6">
-                  {isReconnecting ? (
-                    <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Reconnecting to agent...</span>
-                    </div>
-                  ) : (
-                    <FunLoader todos={todos} className="py-1" />
-                  )}
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-            <RightInspectPanel story={activeStory} />
-          </div>
-        </div>
-
-        {/* Input Area */}
-        <div className="px-6 pb-5 pt-3">
-          <div className="mx-auto max-w-3xl">
-            <div className="relative rounded-2xl border border-[var(--color-border)] bg-[var(--color-background)] shadow-sm shadow-black/[0.03] focus-within:border-[var(--color-accent-primary)]/40 focus-within:shadow-lg focus-within:shadow-[var(--color-accent-primary)]/[0.06] transition-all duration-300">
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                placeholder="Message the assistant..."
-                rows={1}
-                className="w-full resize-none bg-transparent px-5 pt-4 pb-14 text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                style={{ maxHeight: 200 }}
-                disabled={isStreamingHere}
-              />
-              <div className="absolute bottom-3 left-5 right-3 flex items-center justify-between">
-                <span className="text-[11px] text-[var(--color-text-muted)]/40 select-none">
-                  <kbd className="px-1.5 py-0.5 rounded border border-[var(--color-border)]/40 bg-[var(--color-bg-secondary)]/50 text-[10px] font-mono">Enter</kbd> to send
-                </span>
-                {isStreamingHere ? (
-                  <button
-                    onClick={handleStopGeneration}
-                    className="flex items-center justify-center h-9 w-9 rounded-xl bg-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/90 text-white transition-all shadow-sm hover:shadow-md"
-                    title="Stop generation"
-                  >
-                    <Square className="h-3.5 w-3.5" />
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleSendMessage}
-                    disabled={!input.trim()}
-                    className={cn(
-                      'flex items-center justify-center h-9 w-9 rounded-xl transition-all',
-                      input.trim()
-                        ? 'bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/90 text-white shadow-sm shadow-[var(--color-accent-primary)]/30 hover:shadow-md hover:shadow-[var(--color-accent-primary)]/40'
-                        : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]/40 cursor-not-allowed'
+                {isStreamingHere && analysisStories.length === 0 && (
+                  <div className="mx-auto w-full max-w-4xl px-6 pb-6">
+                    {isReconnecting ? (
+                      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Reconnecting to agent...</span>
+                      </div>
+                    ) : (
+                      <FunLoader todos={todos} className="py-1" />
                     )}
-                    title="Send message"
-                  >
-                    <ArrowUp className="h-4.5 w-4.5" />
-                  </button>
+                  </div>
                 )}
+
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Input Area */}
+              <div className="px-6 pb-5 pt-3 bg-[var(--color-background)]">
+                <div className="mx-auto max-w-4xl w-full">
+                  <div className="relative rounded-2xl border border-[var(--color-border)] bg-[var(--color-background)] shadow-sm shadow-black/[0.03] focus-within:border-[var(--color-accent-primary)]/40 focus-within:shadow-lg focus-within:shadow-[var(--color-accent-primary)]/[0.06] transition-all duration-300">
+                    <textarea
+                      ref={inputRef}
+                      value={input}
+                      onChange={handleInputChange}
+                      onKeyDown={handleKeyDown}
+                      placeholder="Message the assistant..."
+                      rows={1}
+                      className="w-full resize-none bg-transparent px-5 pt-4 pb-14 text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                      style={{ maxHeight: 200 }}
+                      disabled={isStreamingHere}
+                    />
+                    <div className="absolute bottom-3 left-5 right-3 flex items-center justify-between">
+                      <span className="text-[11px] text-[var(--color-text-muted)]/40 select-none">
+                        <kbd className="px-1.5 py-0.5 rounded border border-[var(--color-border)]/40 bg-[var(--color-bg-secondary)]/50 text-[10px] font-mono">Enter</kbd> to send
+                      </span>
+                      {isStreamingHere ? (
+                        <button
+                          onClick={handleStopGeneration}
+                          className="flex items-center justify-center h-9 w-9 rounded-xl bg-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/90 text-white transition-all shadow-sm hover:shadow-md"
+                          title="Stop generation"
+                        >
+                          <Square className="h-3.5 w-3.5" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleSendMessage}
+                          disabled={!input.trim()}
+                          className={cn(
+                            'flex items-center justify-center h-9 w-9 rounded-xl transition-all',
+                            input.trim()
+                              ? 'bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/90 text-white shadow-sm shadow-[var(--color-accent-primary)]/30 hover:shadow-md hover:shadow-[var(--color-accent-primary)]/40'
+                              : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]/40 cursor-not-allowed'
+                          )}
+                          title="Send message"
+                        >
+                          <ArrowUp className="h-4.5 w-4.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
+
+            <RightInspectPanel story={activeStory} />
           </div>
         </div>
       </div>

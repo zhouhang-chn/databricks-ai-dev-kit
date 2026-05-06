@@ -39,7 +39,7 @@ export function RightInspectPanel({
 }) {
   return (
     <aside className="hidden h-full min-h-0 min-w-0 w-full overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-bg-secondary)]/20 xl:block">
-      <div className="h-full overflow-y-auto p-4 pb-8">
+      <div className="h-full overflow-y-auto p-4 pb-8 no-scrollbar">
         <div className="mb-4 flex items-center gap-2">
           <SlidersHorizontal className="h-4 w-4 text-[var(--color-accent-primary)]" />
           <h3 className="text-sm font-semibold text-[var(--color-text-heading)]">

@@ -93,24 +93,14 @@
   }
 }
 
-/* Scrollbar styling */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* Global scrollbar hiding while preserving functionality */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--color-text-muted);
-  opacity: 0.3;
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  opacity: 0.5;
+*::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, and Opera */
 }
 
 /* Compact prose for chat messages */
@@ -253,4 +243,14 @@
 .evidence-markdown ol {
   padding-left: 1.1em;
   margin: 0.25em 0;
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
 }
