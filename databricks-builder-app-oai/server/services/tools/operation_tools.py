@@ -6,7 +6,7 @@ def create_operation_tools() -> list:
   from agents import function_tool
   from ..operation_tracker import get_operation, list_operations as _list_operations
 
-  @function_tool
+  @function_tool(strict_mode=False)
   def check_operation_status(operation_id: str) -> dict:
     """Check status for a long-running operation by operation ID."""
     op = get_operation(operation_id)
@@ -23,7 +23,7 @@ def create_operation_tools() -> list:
       'completed_at': op.completed_at,
     }
 
-  @function_tool
+  @function_tool(strict_mode=False)
   def list_operations(status: str | None = None) -> list[dict]:
     """List tracked long-running operations, optionally filtered by status."""
     return _list_operations(status=status)

@@ -37,7 +37,7 @@ def create_project_file_tools(project_dir: Path, *, read_only: bool = False) -> 
 
   project_dir.mkdir(parents=True, exist_ok=True)
 
-  @function_tool
+  @function_tool(strict_mode=False)
   def read_project_file(path: str) -> str:
     """Read a UTF-8 text file from the project by project-relative path."""
     resolved = _resolve_project_path(project_dir, path)
@@ -52,7 +52,7 @@ def create_project_file_tools(project_dir: Path, *, read_only: bool = False) -> 
       )
     return resolved.read_text(encoding='utf-8')
 
-  @function_tool
+  @function_tool(strict_mode=False)
   def write_project_file(path: str, content: str) -> str:
     """Create or replace a UTF-8 text file under the project root."""
     encoded = content.encode('utf-8')
@@ -65,7 +65,7 @@ def create_project_file_tools(project_dir: Path, *, read_only: bool = False) -> 
     resolved.write_text(content, encoding='utf-8')
     return f'Wrote {_relative(project_dir, resolved)} ({len(encoded)} bytes).'
 
-  @function_tool
+  @function_tool(strict_mode=False)
   def edit_project_file(
     path: str,
     old_text: str,
@@ -90,7 +90,7 @@ def create_project_file_tools(project_dir: Path, *, read_only: bool = False) -> 
     resolved.write_text(updated, encoding='utf-8')
     return f'Edited {_relative(project_dir, resolved)} ({count} replacements).'
 
-  @function_tool
+  @function_tool(strict_mode=False)
   def list_project_files(pattern: str = '**/*') -> list[dict]:
     """List files under the project root matching a glob pattern."""
     results = []
@@ -106,7 +106,7 @@ def create_project_file_tools(project_dir: Path, *, read_only: bool = False) -> 
         break
     return results
 
-  @function_tool
+  @function_tool(strict_mode=False)
   def grep_project_files(pattern: str, file_glob: str = '**/*') -> list[dict]:
     """Search project text files for a literal string."""
     if not pattern:
@@ -131,7 +131,7 @@ def create_project_file_tools(project_dir: Path, *, read_only: bool = False) -> 
             return matches
     return matches
 
-  @function_tool
+  @function_tool(strict_mode=False)
   def get_project_tree(max_files: int = 200) -> list[str]:
     """Return a bounded, sorted project file tree."""
     max_files = min(max(max_files, 1), MAX_LIST_RESULTS)

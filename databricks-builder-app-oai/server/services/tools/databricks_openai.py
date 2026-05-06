@@ -83,7 +83,7 @@ def create_databricks_tools(
       'values ',
     ))
 
-  @function_tool
+  @function_tool(strict_mode=False)
   async def execute_sql(
     sql_query: str,
     warehouse_id: str | None = None,
@@ -113,7 +113,7 @@ def create_databricks_tools(
     )
     return json.dumps(_jsonable(rows), default=str)
 
-  @function_tool
+  @function_tool(strict_mode=False)
   async def list_sql_warehouses(limit: int = 20) -> str:
     """List SQL warehouses visible to the current Databricks identity."""
     from databricks_tools_core.sql.warehouse import list_warehouses
@@ -121,7 +121,7 @@ def create_databricks_tools(
     warehouses = await _to_thread_with_context(list_warehouses, limit=limit)
     return json.dumps(_jsonable(warehouses), default=str)
 
-  @function_tool
+  @function_tool(strict_mode=False)
   async def get_best_sql_warehouse() -> str:
     """Return the preferred SQL warehouse ID for the current workspace."""
     from databricks_tools_core.sql.warehouse import get_best_warehouse
@@ -129,7 +129,7 @@ def create_databricks_tools(
     warehouse_id = await _to_thread_with_context(get_best_warehouse)
     return json.dumps({'warehouse_id': warehouse_id}, default=str)
 
-  @function_tool
+  @function_tool(strict_mode=False)
   async def list_compute(resource: str = 'clusters') -> str:
     """List compute resources: clusters, node_types, or spark_versions."""
     from databricks_tools_core.auth import get_workspace_client

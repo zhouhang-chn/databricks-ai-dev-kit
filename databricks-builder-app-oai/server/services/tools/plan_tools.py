@@ -16,7 +16,7 @@ def create_plan_tools() -> list:
   """Build the update_plan and submit_conclusion @function_tool instances."""
   from agents import function_tool
 
-  @function_tool
+  @function_tool(strict_mode=False)
   def update_plan(
     op: Literal['create', 'start', 'finish', 'revise'],
     objective: str | None = None,
@@ -69,7 +69,7 @@ def create_plan_tools() -> list:
       }
     return {'op': op, 'ack': 'noop'}
 
-  @function_tool
+  @function_tool(strict_mode=False)
   def submit_conclusion(
     summary: str,
     highlights: list[dict] | None = None,

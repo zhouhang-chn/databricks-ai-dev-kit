@@ -5,10 +5,8 @@ from typing import Any
 
 from ..tools.plan_tools import PLAN_TOOL_NAMES
 
-# Track call_id → tool_name for plan tools so we can suppress their output
-# echoes (and any post-hoc retries) without ever emitting a generic
-# tool_use/tool_result. The OpenAI SDK fires the call before the output, so
-# we record on the call and look up on the output.
+# Track call_id -> tool_name for plan tools per-request would be better, but for now
+# we'll at least ensure we don't leak forever.
 _PLAN_CALL_IDS: set[str] = set()
 
 
@@ -78,11 +76,17 @@ def _plan_events_from_call(call_id: str, tool_name: str, tool_input: Any) -> lis
   if tool_name == 'update_plan':
     op = str(args.get('op') or '')
     if op == 'create':
+      steps = args.get('steps')
+      if isinstance(steps, str):
+        try:
+          steps = json.loads(steps)
+        except Exception:
+          steps = []
       return [{
         'type': 'plan.created',
         'call_id': call_id,
         'objective': str(args.get('objective') or ''),
-        'steps': args.get('steps') or [],
+        'steps': steps if isinstance(steps, list) else [],
       }]
     if op == 'start':
       return [{
@@ -100,10 +104,16 @@ def _plan_events_from_call(call_id: str, tool_name: str, tool_input: Any) -> lis
         'status': str(args.get('status') or 'done'),
       }]
     if op == 'revise':
+      steps = args.get('steps')
+      if isinstance(steps, str):
+        try:
+          steps = json.loads(steps)
+        except Exception:
+          steps = []
       return [{
         'type': 'plan.revised',
         'call_id': call_id,
-        'steps': args.get('steps') or [],
+        'steps': steps if isinstance(steps, list) else [],
         'reason': str(args.get('reason') or ''),
       }]
   return []
