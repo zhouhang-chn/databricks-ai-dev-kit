@@ -8,16 +8,12 @@ import {
   ChevronDown,
   Code2,
   Eye,
-  ExternalLink,
   FolderCog,
   Loader2,
   Save,
-  Settings2,
   ShieldCheck,
   Square,
-  Sparkles,
   UserRound,
-  Wrench,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -37,7 +33,6 @@ import {
 import type { AnalysisEvent, AnalysisStory, NextMove } from '@/features/analysis/types';
 import {
   createConversation,
-  deleteConversation,
   fetchClusters,
   fetchConversation,
   fetchConversations,
@@ -61,16 +56,6 @@ import type {
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
-// Combined activity item for display
-interface ActivityItem {
-  id: string;
-  type: 'thinking' | 'tool_use' | 'tool_result';
-  content: string;
-  toolName?: string;
-  toolInput?: Record<string, unknown>;
-  isError?: boolean;
-  timestamp: number;
-}
 
 interface ActiveStream {
   fullText: string;
@@ -82,51 +67,6 @@ interface ActiveStream {
   isReconnecting: boolean;
   storyId?: string;
   pendingMessages: Message[];
-}
-
-// Databricks logo mark SVG
-function DatabricksLogo({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
-      <path d="M18 2L3 10.5V12.5L18 21L33 12.5V10.5L18 2Z" fill="currentColor" />
-      <path d="M18 24.5L3 16V18L18 27L33 18V16L18 24.5Z" fill="currentColor" />
-      <path d="M18 30.5L3 22V24L18 33L33 24V22L18 30.5Z" fill="currentColor" opacity="0.7" />
-    </svg>
-  );
-}
-
-// Activity indicator - shows current tool with animated dots
-function ActivitySection({
-  items,
-}: {
-  items: ActivityItem[];
-  isStreaming: boolean;
-}) {
-  if (items.length === 0) return null;
-
-  const currentTool = [...items].reverse().find((item) => item.type === 'tool_use');
-  if (!currentTool) return null;
-
-  const toolName = currentTool.toolName?.replace('mcp__databricks__', '').replace(/_/g, ' ') || 'working';
-
-  return (
-    <div className="flex items-start gap-3 max-w-3xl">
-      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-[var(--color-accent-primary)] to-[var(--color-accent-secondary)] flex items-center justify-center shadow-sm mt-0.5">
-        <DatabricksLogo className="h-4 w-4 text-white" />
-      </div>
-      <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--color-bg-secondary)]/60 border border-[var(--color-border)]/30">
-        <Wrench className="h-3.5 w-3.5 text-[var(--color-accent-primary)] animate-pulse" />
-        <span className="text-xs text-[var(--color-text-muted)] capitalize">
-          {toolName}
-        </span>
-        <span className="flex gap-0.5">
-          <span className="w-1 h-1 rounded-full bg-[var(--color-text-muted)] animate-bounce" style={{ animationDelay: '0ms' }} />
-          <span className="w-1 h-1 rounded-full bg-[var(--color-text-muted)] animate-bounce" style={{ animationDelay: '150ms' }} />
-          <span className="w-1 h-1 rounded-full bg-[var(--color-text-muted)] animate-bounce" style={{ animationDelay: '300ms' }} />
-        </span>
-      </div>
-    </div>
-  );
 }
 
 // Custom dropdown for cluster/warehouse selection with status indicators
@@ -211,8 +151,6 @@ function ResourceDropdown<T extends { state: string }>({
     </div>
   );
 }
-
-
 
 // Sanitize string for schema name: only a-z, 0-9, _ allowed
 function sanitizeForSchema(str: string): string {
@@ -608,11 +546,11 @@ export default function ProjectPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user, workspaceUrl } = useUser();
+  const { user } = useUser();
 
   // State
   const [project, setProject] = useState<Project | null>(null);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [, setConversations] = useState<Conversation[]>([]);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [analysisStories, setAnalysisStories] = useState<AnalysisStory[]>([]);
@@ -655,9 +593,39 @@ export default function ProjectPage() {
   useEffect(() => { messageToolsRef.current = messageTools; }, [messageTools]);
 
   const syncStoriesFromMessages = useCallback((nextMessages: Message[]) => {
-    const stories = storiesFromMessages({ messages: nextMessages, messageTools: messageToolsRef.current });
-    setAnalysisStories(stories);
-    setActiveStoryId(stories[stories.length - 1]?.id);
+    setAnalysisStories(prev => {
+      const dbStories = storiesFromMessages({ messages: nextMessages, messageTools: messageToolsRef.current });
+      if (prev.length === 0) return dbStories;
+
+      // Merge strategy:
+      // 1. Start with dbStories.
+      // 2. For each dbStory, try to find a matching "live" story in prev.
+      // 3. A match is found if:
+      //    - They have the same ID (unlikely if IDs are message-based)
+      //    - They have the same conversationId and similar question
+      // 4. If matched, copy the plan, trace, and evidence from the live story to the db story.
+      
+      return dbStories.map(dbStory => {
+        const match = prev.find(liveStory => 
+          liveStory.id === dbStory.id || 
+          (liveStory.conversationId === dbStory.conversationId && 
+           liveStory.question.trim() === dbStory.question.trim())
+        );
+
+        if (match) {
+          return {
+            ...dbStory,
+            // Preserve rich state from live match
+            plan: match.plan || dbStory.plan,
+            trace: match.trace.length > dbStory.trace.length ? match.trace : dbStory.trace,
+            evidence: match.evidence.length > dbStory.evidence.length ? match.evidence : dbStory.evidence,
+            conclusionText: match.conclusionText || dbStory.conclusionText,
+            status: match.status === 'running' || match.status === 'planning' ? match.status : dbStory.status,
+          };
+        }
+        return dbStory;
+      });
+    });
   }, []);
 
   const applyStoryEvents = useCallback((stream: ActiveStream | undefined, events: AnalysisEvent[]) => {
@@ -737,7 +705,6 @@ export default function ProjectPage() {
     loadData();
   }, [projectId, navigate, user, syncStoriesFromMessages]);
 
-  // Handle conversation changes via URL
   // Handle conversation changes via URL
   useEffect(() => {
     const urlConvId = searchParams.get('conversationId');
@@ -939,57 +906,6 @@ export default function ProjectPage() {
     }
   }, [user, project, projectId, workspaceFolder]);
 
-  // Select a conversation
-  const handleSelectConversation = async (conversationId: string) => {
-    if (!projectId || currentConversation?.id === conversationId) return;
-
-    // Update ref immediately so stream callbacks target the right conversation
-    currentConvIdRef.current = conversationId;
-    // Reset reconnect tracking for the new conversation
-    reconnectAttemptedRef.current = null;
-
-    try {
-      const conv = await fetchConversation(projectId, conversationId);
-      setCurrentConversation(conv);
-
-      // Sync streaming UI state for the new conversation
-      const stream = allStreamsRef.current[conversationId];
-      if (stream) {
-        // Merge API messages with pending messages not yet saved to DB
-        const apiMessages = conv.messages || [];
-        const pending = stream.pendingMessages || [];
-        const apiIds = new Set(apiMessages.map(m => m.content + m.role));
-        const missingPending = pending.filter(m => !apiIds.has(m.content + m.role));
-        setMessages([...missingPending, ...apiMessages]);
-        const streamStories = stream.stories.length > 0
-          ? stream.stories
-          : storiesFromMessages({ messages: [...missingPending, ...apiMessages], messageTools: messageToolsRef.current });
-        setAnalysisStories(streamStories);
-        setActiveStoryId(stream.storyId || streamStories[streamStories.length - 1]?.id);
-        setStreamingText(stream.fullText);
-        setTodos([...stream.todos]);
-        setActiveExecutionId(stream.executionId);
-        setIsReconnecting(stream.isReconnecting);
-      } else {
-        setMessages(conv.messages || []);
-        syncStoriesFromMessages(conv.messages || []);
-        setStreamingText('');
-        setTodos([]);
-        setActiveExecutionId(null);
-        setIsReconnecting(false);
-      }
-      setSelectedClusterId(resolveClusterId(conv, project, clusters));
-      setSelectedWarehouseId(resolveWarehouseId(conv, project, warehouses));
-      setDefaultCatalog(resolveDefaultCatalog(conv, project));
-      setDefaultSchema(resolveDefaultSchema(conv, project, userDefaultSchema));
-      setWorkspaceFolder(resolveWorkspaceFolder(conv, project, user, projectId));
-      setMlflowExperimentName(resolveMlflowExperimentName(project));
-    } catch (error) {
-      console.error('Failed to load conversation:', error);
-      toast.error('Failed to load conversation');
-    }
-  };
-
   // Create new conversation
   const handleNewConversation = async () => {
     if (!projectId) return;
@@ -1020,51 +936,6 @@ export default function ProjectPage() {
     }
   };
 
-  // Delete conversation
-  const handleDeleteConversation = async (conversationId: string) => {
-    if (!projectId) return;
-
-    try {
-      await deleteConversation(projectId, conversationId);
-      setConversations((prev) => prev.filter((c) => c.id !== conversationId));
-
-      // Clean up any active stream for this conversation
-      const stream = allStreamsRef.current[conversationId];
-      if (stream) {
-        stream.abortController?.abort();
-        delete allStreamsRef.current[conversationId];
-        setStreamingConvIds(prev => prev.filter(id => id !== conversationId));
-      }
-
-      if (currentConversation?.id === conversationId) {
-        const remaining = conversations.filter((c) => c.id !== conversationId);
-        if (remaining.length > 0) {
-          const conv = await fetchConversation(projectId, remaining[0].id);
-          setCurrentConversation(conv);
-          setMessages(conv.messages || []);
-          syncStoriesFromMessages(conv.messages || []);
-          setSelectedClusterId(resolveClusterId(conv, project, clusters));
-          setSelectedWarehouseId(resolveWarehouseId(conv, project, warehouses));
-          setDefaultCatalog(resolveDefaultCatalog(conv, project));
-          setDefaultSchema(resolveDefaultSchema(conv, project, userDefaultSchema));
-          setWorkspaceFolder(resolveWorkspaceFolder(conv, project, user, projectId));
-          setMlflowExperimentName(resolveMlflowExperimentName(project));
-        } else {
-          setCurrentConversation(null);
-          setMessages([]);
-          setAnalysisStories([]);
-          setActiveStoryId(undefined);
-        }
-        setStreamingText('');
-        setTodos([]);
-        setActiveExecutionId(null);
-      }
-      toast.success('Conversation deleted');
-    } catch (error) {
-      console.error('Failed to delete conversation:', error);
-      toast.error('Failed to delete conversation');
-    }
-  };
 
   // Send message
   const handleSendMessage = useCallback(async () => {
@@ -1156,6 +1027,21 @@ export default function ProjectPage() {
               pendingMessages: [],
             };
             conversationId = newConvId;
+
+            // CRITICAL: Update the conversation_id of any temporary messages so they don't disappear
+            setMessages(prev => prev.map(m => 
+              (m.conversation_id === oldKey || m.conversation_id === '') 
+                ? { ...m, conversation_id: newConvId } 
+                : m
+            ));
+
+            // CRITICAL: Update stories associated with the old key
+            setAnalysisStories(prev => prev.map(s => 
+              (s.conversationId === oldKey || !s.conversationId) 
+                ? { ...s, conversationId: newConvId } 
+                : s
+            ));
+
             // Update streamingConvIds from old key to new key
             setStreamingConvIds(prev => prev.filter(id => id !== oldKey).concat(newConvId));
             // Set currentConversation immediately so UI stays consistent
@@ -1450,8 +1336,6 @@ export default function ProjectPage() {
     toast.success('User preview chat started');
   }, [handleNewConversation]);
 
-
-
   // Auto-resize textarea
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
@@ -1508,7 +1392,6 @@ export default function ProjectPage() {
     <Sidebar
       onViewSkills={handleViewSkills}
       onOpenProjectSettings={() => setProjectPanelOpen(true)}
-      isLoading={false}
       isCollapsed={isSidebarCollapsed}
       onToggleCollapse={setIsSidebarCollapsed}
     />

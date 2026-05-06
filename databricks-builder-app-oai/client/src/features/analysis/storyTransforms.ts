@@ -422,6 +422,10 @@ export function reduceAnalysisEvent(
         return {
           ...story,
           status: 'planning',
+          // If the question is generic, use the objective as the question
+          question: (story.question === 'New Chat' || !story.question) && event.objective 
+            ? event.objective 
+            : story.question,
           plan: {
             objective: event.objective,
             steps: incomingSteps.map((s, i) => ({
@@ -534,6 +538,28 @@ export function reduceAnalysisEvent(
         conclusionText: `${story.conclusionText || ''}${event.text}`,
         updatedAt: nowIso(),
       }));
+    case 'thinking.appended':
+      return updateStory(stories, event.storyId, (story) => {
+        const lastTrace = story.trace[story.trace.length - 1];
+        if (lastTrace && lastTrace.label === 'Thinking...' && lastTrace.status === 'running') {
+          // Update the last thinking step
+          const updatedTrace = [...story.trace];
+          updatedTrace[updatedTrace.length - 1] = {
+            ...lastTrace,
+            content: (lastTrace as any).content ? (lastTrace as any).content + event.text : event.text,
+            updatedAt: nowIso(),
+          } as any;
+          return { ...story, trace: updatedTrace, updatedAt: nowIso() };
+        }
+        // Create a new thinking step
+        return appendTrace(story, {
+          id: makeId('thinking'),
+          label: 'Thinking...',
+          status: 'running',
+          content: event.text,
+          createdAt: nowIso(),
+        } as any);
+      });
     case 'trace.appended':
       return updateStory(stories, event.storyId, (story) => appendTrace(story, event.step));
     case 'evidence.appended':
@@ -641,6 +667,12 @@ export function storyEventsFromStreamEvent(
 
   if (type === 'conversation.created' && typeof event.conversation_id === 'string') {
     return [{ type: 'story.attach_conversation', storyId, conversationId: event.conversation_id }];
+  }
+  if (type === 'thinking' || type === 'thinking_delta') {
+    const text = String(event.thinking || event.delta || event.text || '');
+    if (text) {
+      return [{ type: 'thinking.appended', storyId, text }];
+    }
   }
   if ((type === 'text_delta' || type === 'text') && event.text) {
     return [{ type: 'conclusion.appended', storyId, text: String(event.text) }];

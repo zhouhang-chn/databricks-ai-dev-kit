@@ -2,19 +2,16 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Plus,
-  MessageSquare,
-  Trash2,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
   Loader2,
   BookOpen,
-  FolderCog,
   FileText,
   Settings2,
   SquarePen,
 } from 'lucide-react';
-import type { Conversation, Project } from '@/lib/types';
+import type { Conversation } from '@/lib/types';
 import { useUser } from '@/contexts/UserContext';
 import { useProjects } from '@/contexts/ProjectsContext';
 import { fetchConversations, createConversation } from '@/lib/api';
@@ -24,7 +21,6 @@ import { toast } from 'sonner';
 interface SidebarProps {
   onViewSkills?: () => void;
   onOpenProjectSettings?: () => void;
-  isLoading?: boolean;
   isCollapsed: boolean;
   onToggleCollapse: (collapsed: boolean) => void;
 }
@@ -32,7 +28,6 @@ interface SidebarProps {
 export function Sidebar({
   onViewSkills,
   onOpenProjectSettings,
-  isLoading: initialLoading = false,
   isCollapsed,
   onToggleCollapse,
 }: SidebarProps) {

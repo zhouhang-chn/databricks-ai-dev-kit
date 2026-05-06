@@ -119,6 +119,7 @@ export type AnalysisEvent =
   | { type: 'plan.tool_result'; storyId: string; toolCallId?: string; resultSummary: string; evidenceId?: string; isError: boolean }
   | { type: 'synthesis.appended'; storyId: string; summary: string; highlights: ConclusionHighlight[]; nextSteps: string[] }
   | { type: 'conclusion.appended'; storyId: string; text: string }
+  | { type: 'thinking.appended'; storyId: string; text: string }
   | { type: 'trace.appended'; storyId: string; step: AnalysisStep }
   | { type: 'evidence.appended'; storyId: string; block: EvidenceBlock }
   | { type: 'story.completed'; storyId: string }
