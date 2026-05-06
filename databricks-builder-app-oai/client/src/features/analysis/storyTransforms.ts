@@ -647,15 +647,21 @@ export function storyEventsFromStreamEvent(
     return [{ type: 'plan.revised', storyId, steps, reason: String(event.reason || '') }];
   }
   if (type === 'synthesis.appended') {
-    const highlights = Array.isArray(event.highlights)
-      ? (event.highlights as Array<Record<string, unknown>>).map((h) => ({
+    const rawHighlights = event.highlights;
+    const parsedHighlights = typeof rawHighlights === 'string' ? tryParseJson(rawHighlights) : rawHighlights;
+    const highlights = Array.isArray(parsedHighlights)
+      ? (parsedHighlights as Array<Record<string, unknown>>).map((h) => ({
         label: String(h.label || ''),
         value: String(h.value || ''),
       })).filter((h) => h.label || h.value)
       : [];
-    const nextSteps = Array.isArray(event.next_steps)
-      ? (event.next_steps as unknown[]).map((s) => String(s)).filter(Boolean)
+
+    const rawNextSteps = event.next_steps;
+    const parsedNextSteps = typeof rawNextSteps === 'string' ? tryParseJson(rawNextSteps) : rawNextSteps;
+    const nextSteps = Array.isArray(parsedNextSteps)
+      ? (parsedNextSteps as unknown[]).map((s) => String(s)).filter(Boolean)
       : [];
+
     return [{
       type: 'synthesis.appended',
       storyId,

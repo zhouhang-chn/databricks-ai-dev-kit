@@ -597,15 +597,9 @@ export default function ProjectPage() {
       const dbStories = storiesFromMessages({ messages: nextMessages, messageTools: messageToolsRef.current });
       if (prev.length === 0) return dbStories;
 
-      // Merge strategy:
-      // 1. Start with dbStories.
-      // 2. For each dbStory, try to find a matching "live" story in prev.
-      // 3. A match is found if:
-      //    - They have the same ID (unlikely if IDs are message-based)
-      //    - They have the same conversationId and similar question
-      // 4. If matched, copy the plan, trace, and evidence from the live story to the db story.
-      
-      return dbStories.map(dbStory => {
+      // 1. Process dbStories and merge with matching live stories
+      const matchedLiveIds = new Set<string>();
+      const updatedDbStories = dbStories.map(dbStory => {
         const match = prev.find(liveStory => 
           liveStory.id === dbStory.id || 
           (liveStory.conversationId === dbStory.conversationId && 
@@ -613,18 +607,30 @@ export default function ProjectPage() {
         );
 
         if (match) {
+          matchedLiveIds.add(match.id);
           return {
             ...dbStory,
             // Preserve rich state from live match
             plan: match.plan || dbStory.plan,
             trace: match.trace.length > dbStory.trace.length ? match.trace : dbStory.trace,
             evidence: match.evidence.length > dbStory.evidence.length ? match.evidence : dbStory.evidence,
+            conclusion: match.conclusion || dbStory.conclusion,
             conclusionText: match.conclusionText || dbStory.conclusionText,
+            nextMoves: match.nextMoves.length > dbStory.nextMoves.length ? match.nextMoves : dbStory.nextMoves,
             status: match.status === 'running' || match.status === 'planning' ? match.status : dbStory.status,
           };
         }
         return dbStory;
       });
+
+      // 2. Preserve "live" stories that weren't matched in dbStories
+      // These are stories currently running or streaming that haven't been saved to DB yet
+      const orphanedLiveStories = prev.filter(liveStory => 
+        !matchedLiveIds.has(liveStory.id) && 
+        (liveStory.status === 'running' || liveStory.status === 'planning' || liveStory.trace.length > 0)
+      );
+
+      return [...updatedDbStories, ...orphanedLiveStories];
     });
   }, []);
 
@@ -738,54 +744,57 @@ export default function ProjectPage() {
       try {
         const { active, recent } = await fetchExecutions(projectId, currentConversation.id);
 
-        // Rebuild trace / evidence / next-moves on reload from stored stream
-        // events. `recent` is descending by created_at; pair the newest
-        // execution with the newest story so traces survive a refresh.
-        if (recent && recent.length > 0) {
-          setAnalysisStories((prevStories) => {
-            if (prevStories.length === 0) return prevStories;
-            let next = prevStories;
-            for (let i = 0; i < recent.length; i += 1) {
-              const story = next[next.length - 1 - i];
-              if (!story) break;
-              const exec = recent[i];
-              if (!exec?.events?.length) continue;
-              const events = replayStoredEventsForStory(story.id, exec.events);
-              if (events.length === 0) continue;
-              next = events.reduce((acc, evt) => reduceAnalysisEvent(acc, evt), next);
-            }
-            return next;
-          });
-        }
+        let reconConvId = currentConversation.id;
+        let reconnectStory: AnalysisStory | undefined;
+        let initialStories = analysisStories;
 
+        // 1. Create reconnect story if needed
         if (active && active.status === 'running') {
           console.log('[RECONNECT] Found active execution:', active.id);
-          const reconConvId = currentConversation.id;
-          const controller = new AbortController();
           const latestUserMessage = [...(currentConversation.messages || [])].reverse()
             .find((message) => message.role === 'user');
-          const reconnectStory = createAnalysisStory({
-            id: latestUserMessage ? `story-${latestUserMessage.id}` : undefined,
+          
+          reconnectStory = createAnalysisStory({
+            id: latestUserMessage ? `story-${latestUserMessage.id}` : `story-${active.id}`,
             conversationId: reconConvId,
             question: latestUserMessage?.content || currentConversation.title || 'Active analysis',
             status: 'running',
             messageIds: latestUserMessage ? [latestUserMessage.id] : [],
           });
-          setAnalysisStories((prev) => (
-            prev.some((story) => story.id === reconnectStory.id)
-              ? prev.map((story) => (
-                story.id === reconnectStory.id
-                  ? { ...story, status: 'running', updatedAt: new Date().toISOString() }
-                  : story
-              ))
-              : [...prev, reconnectStory]
-          ));
-          setActiveStoryId(reconnectStory.id);
+          
+          if (!initialStories.some(s => s.id === reconnectStory!.id)) {
+            initialStories = [...initialStories, reconnectStory];
+          } else {
+            initialStories = initialStories.map(s => s.id === reconnectStory!.id ? reconnectStory! : s);
+          }
+        }
+
+        // 2. Replay recent events onto the stories
+        if (recent && recent.length > 0) {
+          for (let i = 0; i < recent.length; i += 1) {
+            const story = initialStories[initialStories.length - 1 - i];
+            if (!story) break;
+            const exec = recent[i];
+            if (!exec?.events?.length) continue;
+            const events = replayStoredEventsForStory(story.id, exec.events);
+            if (events.length === 0) continue;
+            initialStories = events.reduce((acc, evt) => reduceAnalysisEvent(acc, evt), initialStories);
+          }
+        }
+
+        // 3. Update state with replayed data
+        setAnalysisStories(initialStories);
+
+        if (active && active.status === 'running' && reconnectStory) {
+          const controller = new AbortController();
+          
+          // Initialize stream.stories with the replayed state so reduceAnalysisEvent 
+          // can find the story and apply live updates correctly
           allStreamsRef.current[reconConvId] = {
             fullText: '',
             todos: [],
             tools: [],
-            stories: [reconnectStory],
+            stories: initialStories,
             executionId: active.id,
             abortController: controller,
             isReconnecting: true,

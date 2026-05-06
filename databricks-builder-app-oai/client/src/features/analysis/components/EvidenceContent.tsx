@@ -128,10 +128,20 @@ function TableStatsRenderer({ data }: { data: any }) {
             <h4 className="text-sm font-bold text-[var(--color-text-heading)]">
               {table.name}
             </h4>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {table.total_rows != null && (
                 <span className="rounded bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-primary)]">
                   {table.total_rows.toLocaleString()} rows
+                </span>
+              )}
+              {table.total_files != null && (
+                <span className="rounded bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-primary)]">
+                  {table.total_files.toLocaleString()} files
+                </span>
+              )}
+              {table.total_size_bytes != null && (
+                <span className="rounded bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-primary)]">
+                  {(table.total_size_bytes / 1024 / 1024).toFixed(2)} MB
                 </span>
               )}
               {table.format && (
@@ -161,6 +171,10 @@ function TableStatsRenderer({ data }: { data: any }) {
                   <tr>
                     <th className="px-3 py-2 font-bold text-[var(--color-text-muted)]">Column</th>
                     <th className="px-3 py-2 font-bold text-[var(--color-text-muted)]">Type</th>
+                    <th className="px-3 py-2 font-bold text-[var(--color-text-muted)]">Distinct</th>
+                    <th className="px-3 py-2 font-bold text-[var(--color-text-muted)]">Min</th>
+                    <th className="px-3 py-2 font-bold text-[var(--color-text-muted)]">Max</th>
+                    <th className="px-3 py-2 font-bold text-[var(--color-text-muted)]">Nulls</th>
                     <th className="px-3 py-2 font-bold text-[var(--color-text-muted)]">Comment</th>
                   </tr>
                 </thead>
@@ -169,7 +183,11 @@ function TableStatsRenderer({ data }: { data: any }) {
                     <tr key={col.name} className="hover:bg-[var(--color-bg-secondary)]/30">
                       <td className="px-3 py-2 font-mono font-medium text-[var(--color-text-primary)]">{col.name}</td>
                       <td className="px-3 py-2 text-[var(--color-text-muted)]">{col.data_type}</td>
-                      <td className="px-3 py-2 text-[var(--color-text-muted)] italic">{col.comment || '-'}</td>
+                      <td className="px-3 py-2 text-[var(--color-text-muted)] tabular-nums">{col.cardinality?.toLocaleString() || '-'}</td>
+                      <td className="px-3 py-2 text-[var(--color-text-muted)] truncate max-w-[80px]">{cellToString(col.min)}</td>
+                      <td className="px-3 py-2 text-[var(--color-text-muted)] truncate max-w-[80px]">{cellToString(col.max)}</td>
+                      <td className="px-3 py-2 text-[var(--color-text-muted)] tabular-nums">{col.null_count?.toLocaleString() || '-'}</td>
+                      <td className="px-3 py-2 text-[var(--color-text-muted)] italic min-w-[100px]">{col.comment || '-'}</td>
                     </tr>
                   ))}
                 </tbody>
