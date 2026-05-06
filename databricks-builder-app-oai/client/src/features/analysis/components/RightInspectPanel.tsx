@@ -1,14 +1,7 @@
-import { CheckCircle2, Circle, FileText, GitBranch, Loader2, SlidersHorizontal, Target } from 'lucide-react';
-import type { AnalysisStory, PlanStep } from '@/features/analysis/types';
+import { FileText, GitBranch, SlidersHorizontal } from 'lucide-react';
+import type { AnalysisStory } from '@/features/analysis/types';
 import { cn } from '@/lib/utils';
 import { EvidenceContent } from './EvidenceContent';
-
-function PlanStepIcon({ status }: { status: PlanStep['status'] }) {
-  if (status === 'running') return <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--color-accent-primary)]" />;
-  if (status === 'completed') return <CheckCircle2 className="h-3.5 w-3.5 text-[var(--color-success)]" />;
-  if (status === 'failed') return <span className="h-3.5 w-3.5 rounded-full bg-[var(--color-error)]" />;
-  return <Circle className="h-3.5 w-3.5 text-[var(--color-text-muted)]" />;
-}
 
 function summarizeInputLabel(toolName?: string, toolInput?: string): string {
   if (!toolInput) return 'Show input';
@@ -45,7 +38,7 @@ export function RightInspectPanel({
   story?: AnalysisStory;
 }) {
   return (
-    <aside className="hidden h-full min-h-0 w-80 shrink-0 overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-bg-secondary)]/20 xl:block">
+    <aside className="hidden h-full min-h-0 min-w-0 w-full overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-bg-secondary)]/20 xl:block">
       <div className="h-full overflow-y-auto p-4 pb-8">
         <div className="mb-4 flex items-center gap-2">
           <SlidersHorizontal className="h-4 w-4 text-[var(--color-accent-primary)]" />
@@ -60,34 +53,6 @@ export function RightInspectPanel({
           </div>
         ) : (
           <div className="space-y-6">
-            {story.plan && (
-              <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] p-3 shadow-sm">
-                <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-                  <Target className="h-3.5 w-3.5" />
-                  Analysis Plan
-                </div>
-                <div className="mb-4 text-xs leading-relaxed text-[var(--color-text-primary)]">
-                  {story.plan.objective}
-                </div>
-                <div className="space-y-2.5">
-                  {story.plan.steps.map((step) => (
-                    <div key={step.id} className="flex items-start gap-2.5">
-                      <div className="mt-0.5 shrink-0">
-                        <PlanStepIcon status={step.status} />
-                      </div>
-                      <span className={cn(
-                        'text-[11px] leading-4 transition-colors',
-                        step.status === 'completed' ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-primary)]',
-                        step.status === 'running' && 'font-medium text-[var(--color-accent-primary)]'
-                      )}>
-                        {step.description}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
             <section>
               <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-[var(--color-text-muted)]">
                 <GitBranch className="h-3.5 w-3.5" />

@@ -21,6 +21,7 @@ from ..skills_manager import (
 from ..system_prompt import get_system_prompt
 from ..tools.databricks_openai import create_databricks_tools
 from ..tools.operation_tools import create_operation_tools
+from ..tools.plan_tools import create_plan_tools
 from ..tools.project_files import create_project_file_tools
 from .base import AgentRunRequest
 from .openai_events import normalize_openai_event
@@ -193,6 +194,7 @@ class OpenAIAgentRuntime:
       )
 
       tools = [
+        *create_plan_tools(),
         *create_project_file_tools(project_dir, read_only=read_only_run),
         *create_databricks_tools(
           default_catalog=request.default_catalog,

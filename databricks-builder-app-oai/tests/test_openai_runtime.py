@@ -168,6 +168,136 @@ def test_tool_output_event_detects_error_status():
   }]
 
 
+def test_update_plan_create_emits_plan_created_and_suppresses_tool_use():
+  """update_plan(op="create") becomes a plan.created event, not a tool_use."""
+  events = normalize_openai_event(
+    Event(
+      type='run_item_stream_event',
+      item=Item(
+        type='tool_call_item',
+        raw_item={
+          'call_id': 'call_plan_1',
+          'name': 'update_plan',
+          'arguments': (
+            '{"op": "create", "objective": "Find Q3 anomalies", '
+            '"steps": [{"id": "step-1", "title": "Inspect schema"}]}'
+          ),
+        },
+      ),
+    )
+  )
+
+  assert events == [{
+    'type': 'plan.created',
+    'call_id': 'call_plan_1',
+    'objective': 'Find Q3 anomalies',
+    'steps': [{'id': 'step-1', 'title': 'Inspect schema'}],
+  }]
+
+
+def test_update_plan_start_finish_emit_step_events():
+  """update_plan start/finish translate into typed step transitions."""
+  start = normalize_openai_event(
+    Event(
+      type='run_item_stream_event',
+      item=Item(
+        type='tool_call_item',
+        raw_item={
+          'call_id': 'call_start',
+          'name': 'update_plan',
+          'arguments': '{"op": "start", "step_id": "step-1", "narrative": "Looking at sales grain"}',
+        },
+      ),
+    )
+  )
+  finish = normalize_openai_event(
+    Event(
+      type='run_item_stream_event',
+      item=Item(
+        type='tool_call_item',
+        raw_item={
+          'call_id': 'call_finish',
+          'name': 'update_plan',
+          'arguments': '{"op": "finish", "step_id": "step-1", "finding": "Daily grain"}',
+        },
+      ),
+    )
+  )
+
+  assert start == [{
+    'type': 'plan.step_started',
+    'call_id': 'call_start',
+    'step_id': 'step-1',
+    'narrative': 'Looking at sales grain',
+  }]
+  assert finish == [{
+    'type': 'plan.step_finished',
+    'call_id': 'call_finish',
+    'step_id': 'step-1',
+    'finding': 'Daily grain',
+    'status': 'done',
+  }]
+
+
+def test_submit_conclusion_emits_synthesis_event():
+  """submit_conclusion becomes a synthesis.appended event with structured fields."""
+  events = normalize_openai_event(
+    Event(
+      type='run_item_stream_event',
+      item=Item(
+        type='tool_call_item',
+        raw_item={
+          'call_id': 'call_concl',
+          'name': 'submit_conclusion',
+          'arguments': (
+            '{"summary": "Wrapped it up", '
+            '"highlights": [{"label": "Rows", "value": "3.2M"}], '
+            '"next_steps": ["Drill into Region EU"]}'
+          ),
+        },
+      ),
+    )
+  )
+
+  assert events == [{
+    'type': 'synthesis.appended',
+    'call_id': 'call_concl',
+    'summary': 'Wrapped it up',
+    'highlights': [{'label': 'Rows', 'value': '3.2M'}],
+    'next_steps': ['Drill into Region EU'],
+  }]
+
+
+def test_plan_tool_output_echo_is_suppressed():
+  """The output of a plan tool call must not produce a generic tool_result."""
+  # First the call: registers call_id as a plan call
+  normalize_openai_event(
+    Event(
+      type='run_item_stream_event',
+      item=Item(
+        type='tool_call_item',
+        raw_item={
+          'call_id': 'call_suppress',
+          'name': 'update_plan',
+          'arguments': '{"op": "create", "objective": "x", "steps": []}',
+        },
+      ),
+    )
+  )
+  # Then the output: should be dropped
+  output_events = normalize_openai_event(
+    Event(
+      type='run_item_stream_event',
+      item=Item(
+        type='tool_call_output_item',
+        raw_item={'call_id': 'call_suppress'},
+        output={'op': 'create', 'ack': 'plan_created'},
+      ),
+    )
+  )
+  assert output_events == []
+
+
 def test_model_settings_require_ai_gateway_env(monkeypatch):
   """Missing AI Gateway env vars fail clearly."""
   monkeypatch.delenv('OPENAI_API_KEY', raising=False)

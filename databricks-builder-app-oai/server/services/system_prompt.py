@@ -230,7 +230,7 @@ Do not use or request a generic Skill tool; no such tool is exposed in this runt
 ## Workflow
 
 1. **Use the selected skill guidance** when it applies to the user request
-2. **Propose a brief plan** (2-4 lines) before creating resources
+2. **Drive the plan with `update_plan`** before any data or write tool (see Plan-driven execution)
 3. **Use Databricks tools** for supported Databricks operations
 4. **Grant permissions** after creating any resource (see Permission Grants section)
 5. **Complete workflows automatically** - Don't stop halfway or ask users to do manual steps
@@ -242,7 +242,7 @@ Do not use or request a generic Skill tool; no such tool is exposed in this runt
     skill_workflow_section = """
 ## Workflow
 
-1. **Propose a brief plan** (2-4 lines) before creating resources
+1. **Drive the plan with `update_plan`** before any data or write tool (see Plan-driven execution)
 2. **Use Databricks tools** for supported Databricks operations
 3. **Grant permissions** after creating any resource (see Permission Grants section)
 4. **Complete workflows automatically** - Don't stop halfway or ask users to do manual steps
@@ -352,27 +352,73 @@ SQL queries, SQL warehouse inspection, compute inspection, and background operat
 
 - Do NOT include your reasoning process or chain-of-thought in your response
 - Do NOT explain what you're about to do in detail before doing it
-- DO output a structured plan using the `__plan__` JSON block before calling tools
-- DO provide clear, actionable output with resource links
-- Your response should primarily contain: plans, results, and resource links
+- DO drive the visible plan via the `update_plan` tool (see below)
+- DO end every analysis with a `submit_conclusion` call instead of free-form text
+- Free-form assistant text is a fallback for clarification turns only
 
-## Plan Before Action
+## Plan-driven execution (REQUIRED)
 
-**IMPORTANT: Before executing any tools, you MUST output a structured plan using the following markdown format:**
+The user sees your work as a vertical stepper. You drive the stepper through
+two app-owned tools. Do not write `__plan__` JSON blocks — those are ignored.
 
-```json
-{{
-  "__plan__": {{
-    "objective": "Brief summary of what you are trying to achieve",
-    "steps": [
-      {{ "id": "step-1", "description": "Do X" }},
-      {{ "id": "step-2", "description": "Do Y" }}
-    ]
-  }}
-}}
-```
+1. **Open the plan.** Before any data-fetching, code-execution, or write
+   tool, call:
 
-Then proceed with execution without waiting for approval.
+   ```
+   update_plan(op="create",
+               objective="<one sentence about the user's goal>",
+               steps=[{{"id": "step-1", "title": "<≤8 words>"}}, ...])
+   ```
+
+   Aim for 2-5 steps. Titles are user-facing — write them as intent
+   ("Inspect sales schema"), not tool names ("execute_sql").
+
+2. **Start each step.** Immediately before the tools that do the step's work:
+
+   ```
+   update_plan(op="start", step_id="step-1",
+               narrative="<one sentence in the user's language about what
+                          you are about to look at and why>")
+   ```
+
+   All tool calls between this and the matching `finish` automatically
+   attach to step-1 in the UI. **Do not pass `step_id` on those tool calls.**
+
+3. **Finish each step.** After the step's tools return:
+
+   ```
+   update_plan(op="finish", step_id="step-1",
+               finding="<one line summary of what you LEARNED, not what you ran>",
+               status="done")  # or "failed"
+   ```
+
+4. **Pivot if needed.** If new evidence makes the original plan wrong:
+
+   ```
+   update_plan(op="revise",
+               steps=[<new step list>],
+               reason="<one sentence: why we're changing course>")
+   ```
+
+   The UI shows the prior plan archived with the reason.
+
+5. **Submit the conclusion** instead of writing the final answer as text:
+
+   ```
+   submit_conclusion(
+       summary="<markdown executive summary, 2-5 sentences>",
+       highlights=[{{"label": "Rows scanned", "value": "3.2M"}}, ...],  # 0-5
+       next_steps=["<follow-up the user might want>", ...],             # optional
+   )
+   ```
+
+   This swaps the stepper for a synthesis card. Do not also write the same
+   summary as plain text.
+
+Lightweight read-only tools (`read_project_file`, `list_project_files`,
+`grep_project_files`, `get_project_tree`) are fine to call before
+`update_plan(op="create")`; the UI shows them as a discreet "context loaded"
+footer, not as a step.
 
 ## Project Context
 

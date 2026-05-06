@@ -4,9 +4,18 @@ import type {
   AnalysisStory,
   EvidenceBlock,
   NextMove,
+  PlanStep,
   StoryFromMessagesOptions,
   StreamStoryEvent,
+  ToolCallSummary,
 } from '@/features/analysis/types';
+
+const UTILITY_TOOL_NAMES = new Set([
+  'read_project_file',
+  'list_project_files',
+  'grep_project_files',
+  'get_project_tree',
+]);
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -67,13 +76,16 @@ function structuredSummary(value: unknown): string | null {
   }
 
   const message = record.message || record.summary || record.text;
-  if (typeof message === 'string' && message.trim()) return message.trim();
+  if (typeof message === 'string' && message.trim()) {
+    const trimmed = message.trim();
+    return trimmed.length > 80 ? `${trimmed.slice(0, 77)}...` : trimmed;
+  }
 
   const keys = Object.keys(record);
   if (keys.length > 0) {
     return keys.length === 1
-      ? 'Tool completed and returned 1 field.'
-      : `Tool completed and returned ${keys.length} fields.`;
+      ? '1 field returned.'
+      : `${keys.length} fields returned.`;
   }
 
   return 'Tool completed.';
@@ -83,7 +95,7 @@ function cleanToolError(text: string): string {
   const xmlMatch = text.match(/<tool_use_error>(.*?)<\/tool_use_error>/s);
   const cleaned = (xmlMatch ? xmlMatch[1] : text).trim();
   if (!cleaned) return 'Tool failed.';
-  return cleaned.length > 320 ? `${cleaned.slice(0, 317)}...` : cleaned;
+  return cleaned.length > 120 ? `${cleaned.slice(0, 117)}...` : cleaned;
 }
 
 function summarizeToolResult(content: unknown, isError: boolean): string {
@@ -94,9 +106,34 @@ function summarizeToolResult(content: unknown, isError: boolean): string {
   const summary = structuredSummary(parsed);
   if (summary) return summary;
 
-  if (!text) return 'Tool completed without a visible result.';
-  if (text[0] === '{' || text[0] === '[') return 'Tool completed and returned structured data.';
-  return text.length > 320 ? `${text.slice(0, 317)}...` : text;
+  if (!text) return 'Done.';
+  // Don't dump multi-line or markdown payloads inline — they belong in the inspector.
+  if (text[0] === '{' || text[0] === '[' || text.includes('\n')) return 'Returned structured data.';
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+}
+
+function summarizeToolInput(toolName: string, raw: string): string | undefined {
+  if (!raw) return undefined;
+  if (toolName === 'execute_sql' || toolName === 'execute_sql_multi') {
+    const parsed = tryParseJson(raw) as Record<string, unknown> | null;
+    const sql = parsed && (parsed.sql_query ?? parsed.query ?? parsed.sql);
+    if (typeof sql === 'string') {
+      const firstLine = sql.split('\n').map((line) => line.trim()).find((line) => line.length > 0) || sql;
+      return firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine;
+    }
+  }
+  if (toolName === 'execute_code') {
+    const parsed = tryParseJson(raw) as Record<string, unknown> | null;
+    const code = parsed && (parsed.code ?? parsed.script);
+    if (typeof code === 'string') {
+      const firstLine = code.split('\n').map((line) => line.trim()).find((line) => line.length > 0) || code;
+      return firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine;
+    }
+  }
+  // For project file tools, surface the path
+  const parsed = tryParseJson(raw) as Record<string, unknown> | null;
+  if (parsed && typeof parsed.path === 'string') return parsed.path;
+  return undefined;
 }
 
 function unescapePythonReprText(text: string): string {
@@ -171,21 +208,22 @@ export function createAnalysisStory(args: {
   conversationId?: string;
   question: string;
   status?: AnalysisStory['status'];
-  conclusion?: string;
+  conclusionText?: string;
   messageIds?: string[];
 }): AnalysisStory {
   const timestamp = nowIso();
-  const conclusion = cleanAssistantText(args.conclusion);
+  const conclusionText = cleanAssistantText(args.conclusionText);
+  const status = args.status || 'discovery';
   return {
     id: args.id || makeId('story'),
     conversationId: args.conversationId,
     question: args.question,
-    status: args.status || 'planning',
-    conclusion,
-    activity: [],
+    status,
+    contextLoads: [],
+    conclusionText,
     evidence: [],
     trace: [],
-    nextMoves: args.status === 'done' ? defaultNextMoves(args.question) : [],
+    nextMoves: status === 'done' ? defaultNextMoves(args.question) : [],
     context: {
       conversationId: args.conversationId,
       messageIds: args.messageIds || [],
@@ -212,8 +250,8 @@ export function storiesFromMessages({
       id: `story-${message.id}`,
       conversationId: message.conversation_id,
       question: message.content,
-      status: assistant?.is_error ? 'error' : assistant ? 'done' : 'planning',
-      conclusion: assistant?.content,
+      status: assistant?.is_error ? 'error' : assistant ? 'done' : 'discovery',
+      conclusionText: assistant?.content,
       messageIds: assistant ? [message.id, assistant.id] : [message.id],
     });
 
@@ -242,7 +280,7 @@ function updateStory(
 function appendTrace(story: AnalysisStory, step: AnalysisStep): AnalysisStory {
   return {
     ...story,
-    status: story.status === 'planning' ? 'running' : story.status,
+    status: story.status === 'done' || story.status === 'error' ? story.status : 'running',
     trace: [...story.trace, step],
     updatedAt: nowIso(),
   };
@@ -254,6 +292,100 @@ function appendEvidence(story: AnalysisStory, block: EvidenceBlock): AnalysisSto
     evidence: [...story.evidence, block],
     updatedAt: nowIso(),
   };
+}
+
+function attachToolCall(
+  story: AnalysisStory,
+  toolName: string,
+  inputPreview: string | undefined
+): AnalysisStory {
+  const summary: ToolCallSummary = {
+    toolName,
+    count: 1,
+    inputPreview,
+    resultSummary: '…',
+  };
+  // Utility reads before plan creation → contextLoads footer
+  if (UTILITY_TOOL_NAMES.has(toolName) && (!story.plan || !story.plan.currentStepId)) {
+    return mergeOrAppendSummary(story, summary, 'context');
+  }
+  if (!story.plan || !story.plan.currentStepId) {
+    // No active step yet — buffer as context until the agent commits to a step
+    return mergeOrAppendSummary(story, summary, 'context');
+  }
+  return mergeOrAppendSummary(story, summary, 'step');
+}
+
+function mergeOrAppendSummary(
+  story: AnalysisStory,
+  summary: ToolCallSummary,
+  target: 'step' | 'context'
+): AnalysisStory {
+  if (target === 'context') {
+    const existing = story.contextLoads.findIndex((s) => s.toolName === summary.toolName && !s.evidenceId);
+    let nextLoads: ToolCallSummary[];
+    if (existing >= 0) {
+      nextLoads = story.contextLoads.map((s, idx) => idx === existing ? { ...s, count: s.count + 1, inputPreview: s.inputPreview ?? summary.inputPreview } : s);
+    } else {
+      nextLoads = [...story.contextLoads, summary];
+    }
+    return { ...story, contextLoads: nextLoads, updatedAt: nowIso() };
+  }
+  // step target — find currentStep and append/merge there
+  if (!story.plan || !story.plan.currentStepId) return story;
+  const currentId = story.plan.currentStepId;
+  const nextSteps = story.plan.steps.map((step) => {
+    if (step.id !== currentId) return step;
+    const existing = step.toolCalls.findIndex((s) => s.toolName === summary.toolName && !s.evidenceId);
+    if (existing >= 0) {
+      const updated = step.toolCalls.map((s, idx) => idx === existing ? {
+        ...s,
+        count: s.count + 1,
+        inputPreview: s.inputPreview ?? summary.inputPreview,
+      } : s);
+      return { ...step, toolCalls: updated };
+    }
+    return { ...step, toolCalls: [...step.toolCalls, summary] };
+  });
+  return {
+    ...story,
+    plan: { ...story.plan, steps: nextSteps },
+    updatedAt: nowIso(),
+  };
+}
+
+function fillResultOnLastPending(
+  story: AnalysisStory,
+  resultSummary: string,
+  evidenceId: string | undefined,
+  isError: boolean
+): AnalysisStory {
+  const fillIn = (calls: ToolCallSummary[]): ToolCallSummary[] => {
+    for (let i = calls.length - 1; i >= 0; i -= 1) {
+      if (!calls[i].evidenceId) {
+        const updated = [...calls];
+        updated[i] = { ...calls[i], resultSummary, evidenceId, isError };
+        return updated;
+      }
+    }
+    return calls;
+  };
+
+  if (story.plan && story.plan.currentStepId) {
+    const nextSteps = story.plan.steps.map((step) =>
+      step.id === story.plan!.currentStepId
+        ? { ...step, toolCalls: fillIn(step.toolCalls) }
+        : step
+    );
+    // Did we actually fill anything in the active step? If yes, return.
+    const stepCalls = story.plan.steps.find((s) => s.id === story.plan!.currentStepId)?.toolCalls ?? [];
+    const hadPending = stepCalls.some((c) => !c.evidenceId);
+    if (hadPending) {
+      return { ...story, plan: { ...story.plan, steps: nextSteps }, updatedAt: nowIso() };
+    }
+  }
+  // Otherwise, try contextLoads (utility tool result before plan creation)
+  return { ...story, contextLoads: fillIn(story.contextLoads), updatedAt: nowIso() };
 }
 
 export function reduceAnalysisEvent(
@@ -273,54 +405,107 @@ export function reduceAnalysisEvent(
     case 'plan.created':
       return updateStory(stories, event.storyId, (story) => ({
         ...story,
-        plan: event.plan,
+        status: 'planning',
+        plan: {
+          objective: event.objective,
+          steps: event.steps.map((s) => ({
+            id: s.id,
+            title: s.title,
+            status: 'pending' as const,
+            toolCalls: [],
+          })),
+          currentStepId: undefined,
+          revisions: story.plan?.revisions ?? [],
+        },
         updatedAt: nowIso(),
       }));
-    case 'activity.appended':
-      return updateStory(stories, event.storyId, (story) => ({
-        ...story,
-        activity: [...story.activity, event.item],
-        updatedAt: nowIso(),
-      }));
-    case 'conclusion.appended':
+    case 'plan.step_started':
       return updateStory(stories, event.storyId, (story) => {
-        let newConclusion = `${story.conclusion || ''}${event.text}`;
-        let newPlan = story.plan;
-
-        if (!newPlan) {
-          const planRegex = /```json\s*([\s\S]*?"__plan__":[\s\S]*?)\s*```/;
-          const match = newConclusion.match(planRegex);
-          if (match) {
-            try {
-              const fullJson = match[1];
-              const parsed = JSON.parse(fullJson);
-              const planData = parsed.__plan__;
-              if (planData) {
-                newPlan = {
-                  objective: planData.objective || 'Analysis Plan',
-                  steps: (planData.steps || []).map((s: any) => ({
-                    id: s.id || `step-${Date.now()}`,
-                    description: s.description || 'Step',
-                    status: 'pending',
-                    toolCalls: [],
-                  })),
-                };
-                newConclusion = newConclusion.replace(match[0], '').trim();
-              }
-            } catch (e) {
-              // Ignore parse errors, wait for more chunks
-            }
-          }
-        }
-
+        if (!story.plan) return story;
+        const startedAt = nowIso();
+        const nextSteps = story.plan.steps.map((step) =>
+          step.id === event.stepId
+            ? { ...step, status: 'running' as const, narrative: event.narrative, startedAt }
+            : step
+        );
         return {
           ...story,
           status: 'running',
-          conclusion: newConclusion,
-          plan: newPlan,
+          plan: { ...story.plan, steps: nextSteps, currentStepId: event.stepId },
+          updatedAt: startedAt,
+        };
+      });
+    case 'plan.step_finished':
+      return updateStory(stories, event.storyId, (story) => {
+        if (!story.plan) return story;
+        const finishedAt = nowIso();
+        const nextSteps: PlanStep[] = story.plan.steps.map((step) =>
+          step.id === event.stepId
+            ? {
+              ...step,
+              status: event.status === 'failed' ? 'failed' : 'done',
+              finding: event.finding,
+              finishedAt,
+            }
+            : step
+        );
+        const nextCurrent = story.plan.currentStepId === event.stepId ? undefined : story.plan.currentStepId;
+        return {
+          ...story,
+          plan: { ...story.plan, steps: nextSteps, currentStepId: nextCurrent },
+          updatedAt: finishedAt,
+        };
+      });
+    case 'plan.revised':
+      return updateStory(stories, event.storyId, (story) => {
+        const prior = story.plan;
+        const nextRevisions = prior
+          ? [...prior.revisions, { steps: prior.steps, reason: event.reason, revisedAt: nowIso() }]
+          : [];
+        return {
+          ...story,
+          status: 'planning',
+          plan: {
+            objective: prior?.objective ?? '',
+            steps: event.steps.map((s) => ({
+              id: s.id,
+              title: s.title,
+              status: 'pending' as const,
+              toolCalls: [],
+            })),
+            currentStepId: undefined,
+            revisions: nextRevisions,
+          },
           updatedAt: nowIso(),
         };
       });
+    case 'synthesis.appended':
+      return updateStory(stories, event.storyId, (story) => ({
+        ...story,
+        status: story.status === 'error' ? 'error' : 'done',
+        conclusion: {
+          summary: event.summary,
+          highlights: event.highlights,
+          nextSteps: event.nextSteps,
+        },
+        nextMoves: story.nextMoves.length > 0 ? story.nextMoves : defaultNextMoves(story.question),
+        updatedAt: nowIso(),
+      }));
+    case 'plan.tool_call':
+      return updateStory(stories, event.storyId, (story) =>
+        attachToolCall(story, event.toolName, event.toolInput)
+      );
+    case 'plan.tool_result':
+      return updateStory(stories, event.storyId, (story) =>
+        fillResultOnLastPending(story, event.resultSummary, event.evidenceId, event.isError)
+      );
+    case 'conclusion.appended':
+      return updateStory(stories, event.storyId, (story) => ({
+        ...story,
+        status: story.status === 'done' || story.status === 'error' ? story.status : 'running',
+        conclusionText: `${story.conclusionText || ''}${event.text}`,
+        updatedAt: nowIso(),
+      }));
     case 'trace.appended':
       return updateStory(stories, event.storyId, (story) => appendTrace(story, event.step));
     case 'evidence.appended':
@@ -342,7 +527,7 @@ export function reduceAnalysisEvent(
       return updateStory(stories, event.storyId, (story) => appendEvidence({
         ...story,
         status: 'error',
-        conclusion: story.conclusion || event.error,
+        conclusionText: story.conclusionText || event.error,
       }, {
         id: makeId('evidence-error'),
         type: 'error',
@@ -361,6 +546,65 @@ export function storyEventsFromStreamEvent(
   event: StreamStoryEvent
 ): AnalysisEvent[] {
   const type = String(event.type || '');
+
+  // Plan / synthesis events from the runtime — these are the structured signals
+  // produced by update_plan / submit_conclusion. Render them as plan transitions
+  // and as native fields on the story; never as activity rows.
+  if (type === 'plan.created') {
+    const steps = Array.isArray(event.steps)
+      ? (event.steps as Array<Record<string, unknown>>).map((s, i) => ({
+        id: String(s.id || `step-${i + 1}`),
+        title: String(s.title || s.description || `Step ${i + 1}`),
+      }))
+      : [];
+    return [{ type: 'plan.created', storyId, objective: String(event.objective || ''), steps }];
+  }
+  if (type === 'plan.step_started') {
+    return [{
+      type: 'plan.step_started',
+      storyId,
+      stepId: String(event.step_id || ''),
+      narrative: String(event.narrative || ''),
+    }];
+  }
+  if (type === 'plan.step_finished') {
+    const status = String(event.status || 'done') === 'failed' ? 'failed' : 'done';
+    return [{
+      type: 'plan.step_finished',
+      storyId,
+      stepId: String(event.step_id || ''),
+      finding: String(event.finding || ''),
+      status,
+    }];
+  }
+  if (type === 'plan.revised') {
+    const steps = Array.isArray(event.steps)
+      ? (event.steps as Array<Record<string, unknown>>).map((s, i) => ({
+        id: String(s.id || `step-${i + 1}`),
+        title: String(s.title || s.description || `Step ${i + 1}`),
+      }))
+      : [];
+    return [{ type: 'plan.revised', storyId, steps, reason: String(event.reason || '') }];
+  }
+  if (type === 'synthesis.appended') {
+    const highlights = Array.isArray(event.highlights)
+      ? (event.highlights as Array<Record<string, unknown>>).map((h) => ({
+        label: String(h.label || ''),
+        value: String(h.value || ''),
+      })).filter((h) => h.label || h.value)
+      : [];
+    const nextSteps = Array.isArray(event.next_steps)
+      ? (event.next_steps as unknown[]).map((s) => String(s)).filter(Boolean)
+      : [];
+    return [{
+      type: 'synthesis.appended',
+      storyId,
+      summary: String(event.summary || ''),
+      highlights,
+      nextSteps,
+    }];
+  }
+
   if (type === 'conversation.created' && typeof event.conversation_id === 'string') {
     return [{ type: 'story.attach_conversation', storyId, conversationId: event.conversation_id }];
   }
@@ -369,34 +613,23 @@ export function storyEventsFromStreamEvent(
   }
   if (type === 'thinking' && event.thinking) {
     const text = String(event.thinking);
-    return [
-      {
-        type: 'trace.appended',
-        storyId,
-        step: {
-          id: makeId('trace-thinking'),
-          label: 'Thinking',
-          status: 'running',
-          detail: text,
-          createdAt: nowIso(),
-        },
+    return [{
+      type: 'trace.appended',
+      storyId,
+      step: {
+        id: makeId('trace-thinking'),
+        label: 'Thinking',
+        status: 'running',
+        detail: text,
+        createdAt: nowIso(),
       },
-      {
-        type: 'activity.appended',
-        storyId,
-        item: {
-          id: makeId('activity-thinking'),
-          type: 'thinking',
-          content: text,
-          timestamp: Date.now(),
-        },
-      } as any,
-    ];
+    }];
   }
   if (type === 'tool_use') {
     const toolName = String(event.tool_name || 'tool');
     const toolInput = asText(event.tool_input);
     const friendlyName = toolName.replace(/^mcp__databricks__/, '').replace(/_/g, ' ');
+    const inputPreview = summarizeToolInput(toolName.replace(/^mcp__databricks__/, ''), toolInput);
     return [
       {
         type: 'trace.appended',
@@ -410,17 +643,12 @@ export function storyEventsFromStreamEvent(
         },
       },
       {
-        type: 'activity.appended',
+        type: 'plan.tool_call',
         storyId,
-        item: {
-          id: String(event.tool_id || makeId('activity-tool')),
-          type: 'tool_use',
-          content: friendlyName,
-          toolName,
-          toolInput: tryParseJson(toolInput) as any,
-          timestamp: Date.now(),
-        },
-      } as any,
+        toolName: toolName.replace(/^mcp__databricks__/, ''),
+        toolInput: inputPreview,
+        toolCallId: typeof event.tool_id === 'string' ? event.tool_id : undefined,
+      },
     ];
   }
   if (type === 'tool_result') {
@@ -430,34 +658,34 @@ export function storyEventsFromStreamEvent(
     const toolName = typeof event.tool_name === 'string' ? event.tool_name : undefined;
     const toolInput = event.tool_input != null ? asText(event.tool_input) : undefined;
     const friendlyName = toolName?.replace(/^mcp__databricks__/, '');
-    const activity: AnalysisEvent = {
-      type: 'activity.appended',
-      storyId,
-      item: {
-        id: makeId('activity-tool-res'),
-        type: 'tool_result',
-        content: summary,
-        isError,
-        timestamp: Date.now(),
-      }
-    };
-    return [{
-      type: 'evidence.appended',
-      storyId,
-      block: {
-        id: makeId('evidence-tool'),
-        type: isError ? 'error' : 'tool_result',
-        title: isError
-          ? `${friendlyName || 'Tool'} (error)`
-          : friendlyName || 'Tool result',
-        content: summary,
-        rawContent,
-        isError,
-        createdAt: nowIso(),
-        toolName,
-        toolInput,
+    const evidenceId = makeId('evidence-tool');
+    return [
+      {
+        type: 'evidence.appended',
+        storyId,
+        block: {
+          id: evidenceId,
+          type: isError ? 'error' : 'tool_result',
+          title: isError
+            ? `${friendlyName || 'Tool'} (error)`
+            : friendlyName || 'Tool result',
+          content: summary,
+          rawContent,
+          isError,
+          createdAt: nowIso(),
+          toolName,
+          toolInput,
+        },
       },
-    }, activity as any];
+      {
+        type: 'plan.tool_result',
+        storyId,
+        toolCallId: typeof event.tool_use_id === 'string' ? event.tool_use_id : undefined,
+        resultSummary: summary,
+        evidenceId,
+        isError,
+      },
+    ];
   }
   if (type === 'todos' && Array.isArray(event.todos)) return [];
   if (type === 'next_moves.updated' && Array.isArray(event.moves)) {
@@ -486,10 +714,10 @@ export function storyEventsFromStreamEvent(
 }
 
 /**
- * Translate a list of stored stream events (from `executions.events_json`)
- * into analysis events for a given story id, skipping text/thinking events
- * (the assistant's text is already persisted as the message body, so replaying
- * deltas would double-append the conclusion).
+ * Translate stored stream events back into analysis events when reloading
+ * a conversation. Skips text/thinking/conversation events because the
+ * assistant text is already persisted as the message body — replaying it
+ * would double-append.
  */
 export function replayStoredEventsForStory(
   storyId: string,

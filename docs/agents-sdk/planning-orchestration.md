@@ -1,150 +1,281 @@
 # Analysis Planning & Orchestration
 
-## Overview
-As the Databricks Builder App evolves from simple single-turn query generation to complex, multi-step data analysis, the orchestration runtime must provide deep visibility into the agent's reasoning, execution plan, and progress. Currently, the agent operates in a "stream of consciousness" mode—emitting text and tool calls linearly. Our goal is to establish a structured, trackable lifecycle for analysis stories to ensure clear visibility into tool orchestration and evidence generation.
+## Why this doc was rewritten
 
-## Gap Analysis: Current vs. Target State
+The first iteration of this design instructed the agent to emit a `__plan__`
+JSON markdown block before tools, and asked it to thread a `step_id` argument
+through every subsequent tool call. The frontend parsed the markdown into a
+`PlanStep[]`, then rendered a separate flat "Execution Activity" feed of
+tool_use / tool_result events.
 
-### Current Implementation
-- **Prompt-Driven Planning:** The `system_prompt.py` instructs the agent to "Propose a brief plan (2-4 lines) before creating resources." This is emitted as unstructured raw text.
-- **Linear Execution:** The `openai_runtime.py` streams SDK events, which `openai_events.py` normalizes into generic `text`, `tool_use`, and `tool_result` events.
-- **Frontend Tracking:** `StoryCard` and `RightInspectPanel` track a linear `trace` of tool executions and collect `evidence` (tool results), but they have no concept of an overarching "Plan" or "Phase."
-- **Operation Tracking:** `operation_tracker.py` handles long-running async tools but does not tie them back to a conceptual analysis step.
+In practice that produced exactly the failure mode it was supposed to prevent:
 
-### Identified Gaps
-1. **Unstructured Plans:** Because plans are emitted as raw text, the UI cannot render a structured "To-Do" list or progress bar. The user cannot see what step the agent is currently on relative to the overall goal.
-2. **Lack of Goal Adherence Verification:** The agent might drift from its initial plan without the user knowing. There is no automated way to ensure the agent sticks to the steps it proposed.
-3. **Implicit Reasoning:** The agent's reasoning for *why* it chose a specific tool is either buried in system-generated text or omitted entirely if concise output is enforced.
-4. **Resumption & Error Recovery:** If an execution fails, there is no structured plan state to resume from.
+- Plan steps were write-once and frozen — `storyTransforms.ts` parsed the
+  block into `status: 'pending'` steps and never mutated them, so the checkboxes
+  were decorative.
+- No tool→step link existed — the system prompt never asked for `step_id`,
+  the `tool_use` reducer had no field for it, and `PlanStep.toolCalls` stayed
+  empty forever.
+- Re-planning was silently dropped — only the first `__plan__` block was
+  parsed, so any pivot was invisible to the user.
+- The "Execution Activity" rows were tool names (`read_project_file`,
+  `execute_sql`) repeated N times with raw payloads dumped inline. There was no
+  narrative, no grouping, no findings — just a noisy chronological feed.
 
-## Proposed Orchestration Lifecycle
+The lesson: **parsing prose for structure is fragile, and a static plan next to
+a flat activity stream is not a plan — it's a relabeled trace.** This doc
+replaces that contract with one driven by explicit tool calls and renders the
+plan itself as the primary surface, with tool calls grouped under each step.
 
-To bridge these gaps and align with a Senior Data Analyst's real-world workflow, we formalize the analysis lifecycle into five distinct, trackable phases: **Discovery**, **Plan**, **Proceed**, **Track**, and **Synthesis**.
+## Reference: deep-research UIs
 
-### 0. Discovery: Disambiguation & Context Gathering
-Before an analyst can write a meaningful plan, they must understand the data grain and clarify ambiguous requests (e.g., "Did you mean Gross or Net Sales?"). The orchestrator must not force a plan prematurely.
-*   **Mechanism:** Allow the agent to execute lightweight, read-only "Discovery" tools (like `DESCRIBE TABLE` or `list_catalogs`) or ask the user clarifying questions *before* locking in a formal plan.
-*   **UI Integration:** The `StoryCard` remains in a `gathering_context` state, displaying these preliminary checks or conversation turns without demanding a structured checklist yet.
+OpenAI Deep Research, Perplexity Pro, and Claude's research mode share three
+properties this design adopts:
 
-### 1. Plan: Structured Intent Generation
-Instead of asking the agent to write a plan in raw text, the runtime enforces the emission of a structured plan before executing heavy data-modifying or analytical tools.
+1. **Step = narrative, not tool.** Each row is "Comparing Q3 EU vs NA
+   revenue", written by the model in the user's language. Tool calls are
+   nested under the step, collapsed by default.
+2. **Exactly one step is `running` at a time** with a live "thinking" line.
+   Finished steps collapse to a one-line finding ("Found 12 anomaly days, all
+   in week 38").
+3. **The plan revises itself in place.** When the model pivots, the user sees
+   the new plan replace the old one with an explicit "revised" marker — not a
+   stale checklist next to a noisy feed.
 
-*   **Mechanism:** Introduce a `__plan__` semantic block in the output or a dedicated `submit_analysis_plan` tool.
-*   **Structure:**
-    *   `objective`: The high-level analytical goal.
-    *   `steps`: An array of discrete tasks (e.g., "1. Query sales table", "2. Filter anomalies").
-*   **UI Integration:** The frontend `StoryCard` parses this structure and displays a checklist or progress tracker. The story status reflects a clear `planning` state before shifting to `running`.
+## Lifecycle
 
-### 2. Proceed: Step-by-Step Execution
-The agent executes the plan by associating subsequent tool calls with specific steps in the structured plan.
+We keep the five conceptual phases (**Discovery → Plan → Proceed → Track →
+Synthesis**) from the original design, but only Plan, Proceed, Track, and
+Synthesis are enforced by the runtime. Discovery is implicit: it's the time
+before the first `update_plan(op="create")` call.
 
-*   **Mechanism:** The agent emits a signal (e.g., via a standard tool argument or a text marker) indicating which step index it is currently executing.
-*   **Tool Orchestration:** The backend orchestrator evaluates tool calls against the current active step. For long-running tools, the UI explicitly shows the current step as "yielding" or "async waiting."
+| Phase     | What happens                                                          | UI state                                |
+|-----------|-----------------------------------------------------------------------|-----------------------------------------|
+| Discovery | Agent reads `AGENTS.md`, lists tables, asks clarifying questions      | Spinner: "Scoping the work…"            |
+| Plan      | Agent calls `update_plan(op="create", objective, steps=[...])`       | Stepper appears with all steps `pending`|
+| Proceed   | Agent calls `update_plan(op="start", step_id, narrative)` + tool work | Step `running` with live narrative      |
+| Track     | Tool calls between `start` and `finish` auto-attach to active step    | Tools collapsed under step              |
+| Synthesis | Agent calls `submit_conclusion(summary, highlights[])`                | Stepper collapses, conclusion replaces  |
 
-### 3. Track: Evidence and Reasoning Association
-Every action must leave a structured trail that explains *why* it happened and *what* it produced, linking back to the original plan.
+Discovery is *time-bounded by the first `update_plan` call*, not gated. If the
+agent calls `update_plan(op="create")` immediately, discovery is a no-op. If
+the agent does some lightweight reads first (e.g. `get_project_tree`,
+`read_project_file`), those are recorded but rendered as a discreet "context
+loaded" footer, not as plan steps.
 
-*   **Evidence Graph:** Instead of a flat list, evidence generated by `tool_result` events is hierarchically linked to the plan steps.
-*   **Reasoning Visibility:** Encourage the model to emit short, structured `reasoning` notes alongside `tool_use` events.
-*   **Trace Refinement:** Upgrade the `NextMoveTraceStep` and UI `Trace` components to include the goal context and clear summaries of the generated evidence.
+## Model contract
 
-### 4. Synthesis: Generating the Final Narrative
-Data analysis is not merely completing a checklist; it culminates in storytelling. Once all steps are complete, the agent must shift from "execution mode" to "synthesis mode."
-*   **Mechanism:** After the final step completes, the agent utilizes a `submit_conclusion` tool or emits a `__conclusion__` block. This forces the agent to synthesize the fragmented evidence across all steps into a cohesive executive summary.
-*   **UI Integration:** The `StoryCard` transitions from the checklist view to presenting the final, formatted markdown narrative, embedding the most critical charts or insights generated during the "Proceed" phase.
+Two new app-owned tools replace the markdown-parsing contract.
 
-## Planning vs. Scratchpad: Handling Analytical Pivots
+### `update_plan`
 
-When designing agentic systems, there are generally two paradigms for tracking progress: the **Scratchpad** (used by coding assistants like Antigravity or Codex) and **Planning** (our target state for the Builder App). 
+A single tool with four operations encodes every transition the UI needs:
 
-### The Conceptual Difference
-1. **The Scratchpad (Internal Working Memory):** Highly flexible, unstructured, and hidden from the user. The agent uses it to dump thoughts, paste code snippets, and iteratively debug. It excels at unpredictable rabbit holes (like software debugging) but provides terrible UI observability because it lacks a formal structure.
-2. **The Plan (Formal Contract):** Structured, semantic, and highly visible. It sets user expectations by displaying a clear "To-Do" checklist. It excels at building trust and narrative in data analysis but can become brittle if the agent encounters unexpected data and needs to pivot.
+```python
+update_plan(
+    op: Literal["create", "start", "finish", "revise"],
+    *,
+    # create / revise:
+    objective: str | None = None,
+    steps: list[{"id": str, "title": str}] | None = None,
+    reason: str | None = None,         # revise only — why we're pivoting
+    # start:
+    step_id: str | None = None,
+    narrative: str | None = None,      # what I'm about to do, in the user's language
+    # finish:
+    finding: str | None = None,        # one-line summary of what I learned
+    status: Literal["done", "failed"] = "done",
+)
+```
 
-### Blending Both for Data Analysis
-Data analysis stories require the trust-building visibility of a **Plan**, but the resilience of a **Scratchpad** when data is messy. The Databricks Builder App will blend these concepts:
+Why a tool, not a JSON marker:
 
-*   **The Public Plan (The Narrative):** Emitted at the start of the story. The UI renders this as the high-level steps (e.g., "1. Join tables, 2. Check for nulls, 3. Plot distribution").
-*   **The Private Scratchpad (The Pivot):** Used *during* a plan step. If Step 2 requires writing five complex SQL queries to figure out why a join failed, the agent uses an internal scratchpad (or reasoning blocks) to iterate. It only emits the final "Evidence" to the UI once it resolves the issue, preventing the user's view from being spammed with failed intermediate queries.
-*   **Dynamic Re-Planning:** If the scratchpad reveals that the original plan is no longer viable (e.g., the requested table doesn't exist), the agent can emit a new `__plan__` block to formally revise the public checklist, keeping the user informed of the pivot.
+- It's a discrete event the runtime routes — not a streaming-text parsing
+  problem. Partial JSON arriving mid-chunk is a non-issue.
+- It forces the model to commit to a step transition *before* the next tool
+  call. This is the missing link the original design lacked: any `tool_use`
+  between `start(step_id=X)` and `finish(step_id=X)` auto-attaches to step X
+  on the backend. The model never has to remember to thread `step_id` into
+  every tool argument list.
+- Pivots become first-class. `op="revise"` archives the prior step list with a
+  visible reason, replaces it, and resets `currentStepId` to the new first
+  step.
 
-## Detailed System Design
+### `submit_conclusion`
 
-### 1. Key Data Structures
-To formalize the plan, we introduce explicit frontend interfaces that model the plan, its individual steps, and the overall story state.
+```python
+submit_conclusion(
+    summary: str,                                     # markdown executive summary
+    highlights: list[{"label": str, "value": str}],   # 0-5 KPIs
+    next_steps: list[str] | None = None,              # follow-up actions
+)
+```
+
+Calling this transitions the story to `done`. The stepper auto-collapses; the
+final assistant text stops being the conclusion (the conclusion is now
+structured), and the markdown summary is rendered with highlights as chips.
+
+### What the agent sees in the system prompt
+
+The prompt no longer asks for any `__plan__` markdown block. It says:
+
+> 1. Before calling any data-fetching or write tools, call
+>    `update_plan(op="create", objective, steps)`. Steps are short titles
+>    (≤8 words). Aim for 2-5 steps.
+> 2. Before each step, call `update_plan(op="start", step_id, narrative)`. The
+>    narrative is one sentence in the user's language describing intent.
+> 3. After each step, call `update_plan(op="finish", step_id, finding)`. The
+>    finding is one line summarizing what you learned (not what you ran).
+> 4. If you need to change the plan mid-flight, call
+>    `update_plan(op="revise", steps, reason)`.
+> 5. When all steps are done, call `submit_conclusion(summary, highlights)`
+>    instead of writing a regular markdown response.
+
+## Frontend data model
+
+The story replaces its flat `activity: ActivityItem[]` with a richer
+`plan.steps`:
 
 ```typescript
-type PlanStepStatus = 'pending' | 'running' | 'completed' | 'failed';
+type PlanStepStatus = 'pending' | 'running' | 'done' | 'failed';
+
+interface ToolCallSummary {
+  toolName: string;        // raw tool name
+  count: number;           // collapsed when same tool fires multiple times
+  inputPreview?: string;   // 1-line input summary (SQL first line, etc.)
+  resultSummary: string;   // "1 table, 24 columns" — never raw markdown
+  evidenceId?: string;     // link to RightInspectPanel for the raw payload
+  isError?: boolean;
+}
 
 interface PlanStep {
-  id: string;              // e.g., "step-1"
-  description: string;     // e.g., "Join sales and customer tables"
+  id: string;
+  title: string;             // from create — "Inspect sales schema"
+  narrative?: string;        // from start — "Looking at sales table grain"
+  finding?: string;          // from finish — "Daily grain, 18 months, no nulls"
   status: PlanStepStatus;
-  toolCalls: string[];     // Array of trace step IDs associated with this step
+  toolCalls: ToolCallSummary[];
+  startedAt?: string;
+  finishedAt?: string;
 }
 
 interface AnalysisPlan {
   objective: string;
   steps: PlanStep[];
-  currentStepId?: string;  // The step currently being executed
+  currentStepId?: string;
+  revisions: Array<{ steps: PlanStep[]; reason: string; revisedAt: string }>;
+}
+
+interface Conclusion {
+  summary: string;
+  highlights: Array<{ label: string; value: string }>;
+  nextSteps?: string[];
+}
+
+interface AnalysisStory {
+  // ... unchanged identity fields ...
+  status: 'discovery' | 'planning' | 'running' | 'done' | 'error';
+  plan?: AnalysisPlan;
+  conclusion?: Conclusion;        // structured, not raw markdown
+  contextLoads: ToolCallSummary[]; // utility tools fired before plan creation
+  evidence: EvidenceBlock[];      // unchanged — raw payloads for inspector
 }
 ```
 
-The core `AnalysisStory` type will be extended to include an optional `plan: AnalysisPlan`.
+`ActivityItem` is gone. There is no flat activity stream.
 
-### 2. Generation (Model Output)
-The backend orchestration must predictably generate this structure before diving into tools.
+## Stream events
 
-*   **Tool-Based Generation:** We introduce a `submit_plan(objective: string, steps: string[])` tool to the agent's core toolkit.
-*   **Prompt Enforcement:** The `system_prompt.py` mandates that the agent calls `submit_plan` *before* invoking any data-fetching or execution tools (like `execute_sql`).
-*   **Event Normalization:** The `openai_events.py` normalization layer detects the `submit_plan` tool call and translates it into a standard `AnalysisEvent` of type `plan_created`.
+`normalize_openai_event` intercepts the two new tools and emits semantic
+events instead of generic `tool_use` / `tool_result`:
 
-### 3. Executing and Tracking
-Once a plan is generated, subsequent tool executions must map to the active step.
+| Frontend event           | Triggered by                              | Payload                              |
+|--------------------------|-------------------------------------------|--------------------------------------|
+| `plan.created`           | `update_plan(op="create", ...)`           | `{ objective, steps }`               |
+| `plan.step_started`      | `update_plan(op="start", ...)`            | `{ step_id, narrative }`             |
+| `plan.step_finished`     | `update_plan(op="finish", ...)`           | `{ step_id, finding, status }`       |
+| `plan.revised`           | `update_plan(op="revise", ...)`           | `{ steps, reason }`                  |
+| `synthesis.appended`     | `submit_conclusion(...)`                  | `{ summary, highlights, next_steps }`|
 
-*   **Implicit Step Progression:** The agent passes a `step_id` argument to subsequent analytical tools (e.g., `execute_sql(query, step_id="step-1")`).
-*   **Trace Linkage:** As `tool_use` events stream to the Builder App, the `step_id` metadata links the tool execution trace to the `PlanStep.toolCalls` array.
-*   **Status Updates:**
-    *   When the first tool associated with a `step_id` begins, the step status transitions from `pending` to `running`.
-    *   When the agent moves to the next `step_id` (or explicitly signals completion), the previous step transitions to `completed`.
+Generic `tool_use` / `tool_result` events for these two tools are **suppressed**
+by the runtime — they should never appear in the activity stream. Every other
+tool's `tool_use` is auto-routed by the reducer to `plan.currentStepId`'s
+`toolCalls` (or to `contextLoads` if no plan exists yet).
 
-### 4. Displaying on UI
-The `StoryCard` and `RightInspectPanel` will evolve to render the structured plan.
+## UI rendering rules
 
-*   **Loading State:** While the story status is `planning`, the UI displays a skeleton loader anticipating the `plan_created` event.
-*   **The Checklist:** Once the plan is received, `StoryCard` renders a vertical stepper or checklist detailing the `objective` and `steps`.
-*   **Live Association:** As tool executions and `evidence` stream in, they are visually nested under the currently active `PlanStep` rather than appended to a flat, decoupled list at the bottom of the card.
-*   **Pivots:** If the agent calls `submit_plan` again (a "Scratchpad" pivot), the UI smoothly transitions the checklist to reflect the new direction, archiving the old plan steps.
+The `StoryCard` activity section is replaced by a stepper. Rules:
 
-### 5. Parallel Execution Support
-Modern analysis often requires concurrent operations (e.g., scanning multiple tables at once, kicking off several Databricks jobs, or fanning out sub-agent LLM calls). The orchestration design supports this across three vectors:
+1. **Step rows are the primary surface.** One row per step, vertical stepper.
+   - Status icon (pending circle / running spinner / done check / failed dot).
+   - Title (the user-facing intent, from `create`).
+   - When `running`, also show `narrative` italicized below the title.
+   - When `done`, replace narrative with `finding`.
+2. **Tools are nested, collapsed, and grouped by name.**
+   - Same tool fired N times in one step → one row with `×N` badge, not N rows.
+   - Tool result is rendered as `resultSummary` (≤80 chars), never raw payload.
+   - Click expands the row to show input preview; raw payload stays in the
+     existing `RightInspectPanel` evidence drawer.
+3. **Utility reads are demoted.**
+   - `read_project_file`, `list_project_files`, `grep_project_files`,
+     `get_project_tree` — these go to `contextLoads`, rendered as a one-line
+     footer on the appropriate step ("Loaded 3 project files"), not as
+     first-class tool rows.
+4. **Empty plan = scoping placeholder.**
+   - Status `discovery` (no plan yet) shows a single "Scoping the work…" line.
+   - The stepper does not render until `plan.created`.
+5. **Revisions show, don't hide.**
+   - When `plan.revised` fires, the prior step list is moved into
+   `plan.revisions` with the reason, and a "Plan revised: <reason>" banner
+   appears above the stepper. The user can expand to see the prior plan.
+6. **Synthesis swaps the stepper.**
+   - When `synthesis.appended` fires, the stepper collapses to a single
+     "Worked through N steps" row that expands on click. The conclusion
+     summary + highlights chips replace it as the primary content.
 
-*   **Concurrent Tool Calls:** The OpenAI runtime natively supports multi-tool calling within a single turn. A single `PlanStep` (e.g., "Inspect multiple schemas") can be associated with multiple concurrent `toolCalls`. The step remains in the `running` state until the `tool_result` events for *all* concurrent tools resolve.
-*   **Async Databricks Operations:** By leveraging the existing `operation_tracker.py`, the agent can dispatch multiple heavy Databricks operations (e.g., materialized view generation) concurrently. The orchestrator returns immediate `operation_id`s, allowing the agent to poll them simultaneously without blocking the event stream.
-*   **DAG-Based Step Progression (Future Extension):** To support non-linear plans, the `PlanStep` structure can be extended with a `dependencies: string[]` field. Instead of strict sequential execution, the orchestrator and UI can allow multiple steps to be `running` simultaneously as long as their dependency constraints are met. 
-*   **Sub-Agent Fan-Out:** If the agent delegates tasks (e.g., via a `run_parallel_analysis` tool that triggers multiple LLM calls), the parent story simply tracks the fan-out tool under the active `PlanStep`. The UI renders the sub-agent streams as nested, concurrent "sub-traces" inside the step's evidence block.
+`RightInspectPanel` keeps the evidence drawer (raw tool payloads) but loses
+its own duplicate plan section — there's only one plan, in the stepper.
 
-### 6. Supporting Diverse Analytical Intents
-Different analytical tasks require different planning and execution shapes. The `AnalysisPlan` structure is designed to flexibly accommodate various analytical archetypes (aligning with the intents already defined in `next_moves.py` such as `drill`, `compare`, `validate`, `explain`, `pivot`):
+## What this design intentionally does NOT do
 
-*   **Descriptive Analysis ("What happened?"):** These are typically straightforward, linear plans. The steps are sequential (e.g., "1. Fetch raw data", "2. Aggregate by month", "3. Generate trend visualization"). The standard step-by-step UI checklist handles this perfectly.
-*   **Decomposition & Drill-Down:** When breaking down a high-level metric (e.g., Revenue = Traffic × Conversion), the orchestrator utilizes **Sub-Agent Fan-Out** or **Concurrent Tool Calls**. The plan step might be "Decompose Revenue Drop", and the agent fires parallel queries to check Traffic, Conversion, and Average Order Value simultaneously.
-*   **Diagnostic & Root Cause Analysis (RCA):** RCA is highly unpredictable. The system supports this via the **Scratchpad Pivot**. The initial plan might just be "1. Formulate hypotheses, 2. Test hypothesis A". As the agent iterates privately, it uses dynamic re-planning (`submit_plan`) to update the checklist once a root cause (e.g., "Outage in Region EU") is discovered, shifting the narrative mid-flight.
-*   **Validation ("Is this correct?"):** Validation plans rely heavily on rigid dependencies. Step 1 might be "Run data quality assertions (null checks, bounds)". If Step 1 returns an error in the `evidence` block, the orchestrator or agent halts, preventing the execution of Step 2 ("Generate report"), ensuring the user sees the validation failure immediately.
-*   **Workflow Templates:** The project's semantic context (`project_config.py`) can inject predefined `workflow_templates` into the `system_prompt.py`. If a user asks for RCA, the agent is pre-loaded with an RCA-specific plan structure, standardizing how diagnostic plans are generated across the application.
+These were in earlier drafts and are explicitly out of scope:
 
-## Implementation Roadmap
+- **`__plan__` markdown block** — gone. Tool calls only.
+- **`step_id` argument on every tool** — gone. Auto-attach via active step.
+- **User approval gates between steps** — Phase 3 in the prior draft. Not
+  built; the user can stop the run with the existing stop button.
+- **DAG steps with `dependencies: string[]`** — Future extension only. Steps
+  remain a linear list for now.
+- **Sub-agent fan-out** — Future extension. A single step still maps to a
+  single agent.
+- **Workflow templates injected from `project_config.py`** — not implemented.
+  The agent decides plan shape from the user request.
+- **Discovery as a separate enforced state machine** — implicit only. Time
+  before the first `update_plan(op="create")` is "discovery"; nothing more.
 
-### Phase 1: Semantic Plan Markers (Near-Term)
-- **Prompting:** Update `system_prompt.py` to instruct the agent to wrap its plan in a specific, parsable markdown structure (e.g., ````json { "plan": [...] } ````).
-- **Frontend Parsing:** Update `storyTransforms.ts` to detect this marker and parse it into a new `AnalysisPlan` object attached to the `AnalysisStory` state.
-- **Rendering:** Render the parsed plan in `StoryCard` as a preliminary checklist.
+## Implementation slice
 
-### Phase 2: Orchestrator Enforced Planning (Mid-Term)
-- **Tool Creation:** Add a mandatory `submit_plan` tool that the agent must call before executing any data-modifying or heavy analysis tools.
-- **Approval Flow:** Optionally pause the stream to allow user approval of the plan, integrating with the existing `agent_policy: { mode: 'build_with_approval' }`.
-- **Progress Tracking:** Track progress by having subsequent tool calls reference the active `step_id`.
+The minimum viable change touches eight files and ships in one PR:
 
-### Phase 3: Interactive Orchestration (Long-Term)
-- **User Intervention:** Allow users to modify the plan in the UI mid-flight (e.g., reordering steps or injecting a new requirement).
-- **Resiliency:** Implement resume capabilities where a failed `Story` can restart from the last successful plan step, rather than starting the entire analysis from scratch.
+1. `server/services/tools/plan_tools.py` (new) — define `update_plan` and
+   `submit_conclusion` as `@function_tool`s. Their bodies just return the
+   structured args; the runtime intercepts the events.
+2. `server/services/agent_runtime/openai_runtime.py` — register the new tools
+   alongside `create_project_file_tools`, `create_databricks_tools`,
+   `create_operation_tools`.
+3. `server/services/agent_runtime/openai_events.py` — when a `tool_call_item`
+   has `tool_name in {"update_plan", "submit_conclusion"}`, emit the matching
+   semantic event and suppress the corresponding `tool_use` / `tool_result`.
+4. `server/services/system_prompt.py` — delete the `__plan__` markdown
+   instructions; add the five-rule tool-driven contract.
+5. `client/src/features/analysis/types.ts` — expand `PlanStep`, add
+   `Conclusion`, `ToolCallSummary`, `contextLoads`; remove `ActivityItem`.
+6. `client/src/features/analysis/storyTransforms.ts` — new reducer cases for
+   `plan.created` / `plan.step_started` / `plan.step_finished` /
+   `plan.revised` / `synthesis.appended`; auto-attach generic `tool_use` to
+   `plan.currentStepId`'s `toolCalls`; demote utility reads to `contextLoads`;
+   delete the `__plan__` markdown parser.
+7. `client/src/features/analysis/components/StoryCard.tsx` — replace
+   `ActivityRow` / `Execution Activity` with the stepper.
+8. `client/src/features/analysis/components/RightInspectPanel.tsx` — drop the
+   duplicate plan section; keep evidence drawer.

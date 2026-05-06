@@ -3,6 +3,14 @@
 import json
 from typing import Any
 
+from ..tools.plan_tools import PLAN_TOOL_NAMES
+
+# Track call_id → tool_name for plan tools so we can suppress their output
+# echoes (and any post-hoc retries) without ever emitting a generic
+# tool_use/tool_result. The OpenAI SDK fires the call before the output, so
+# we record on the call and look up on the output.
+_PLAN_CALL_IDS: set[str] = set()
+
 
 def _get(obj: Any, name: str, default: Any = None) -> Any:
   if isinstance(obj, dict):
@@ -56,6 +64,51 @@ def _parse_tool_arguments(arguments: Any) -> Any:
     return arguments
 
 
+def _plan_events_from_call(call_id: str, tool_name: str, tool_input: Any) -> list[dict]:
+  """Translate an update_plan / submit_conclusion call into UI events."""
+  args = tool_input if isinstance(tool_input, dict) else {}
+  if tool_name == 'submit_conclusion':
+    return [{
+      'type': 'synthesis.appended',
+      'call_id': call_id,
+      'summary': str(args.get('summary') or ''),
+      'highlights': args.get('highlights') or [],
+      'next_steps': args.get('next_steps') or [],
+    }]
+  if tool_name == 'update_plan':
+    op = str(args.get('op') or '')
+    if op == 'create':
+      return [{
+        'type': 'plan.created',
+        'call_id': call_id,
+        'objective': str(args.get('objective') or ''),
+        'steps': args.get('steps') or [],
+      }]
+    if op == 'start':
+      return [{
+        'type': 'plan.step_started',
+        'call_id': call_id,
+        'step_id': str(args.get('step_id') or ''),
+        'narrative': str(args.get('narrative') or ''),
+      }]
+    if op == 'finish':
+      return [{
+        'type': 'plan.step_finished',
+        'call_id': call_id,
+        'step_id': str(args.get('step_id') or ''),
+        'finding': str(args.get('finding') or ''),
+        'status': str(args.get('status') or 'done'),
+      }]
+    if op == 'revise':
+      return [{
+        'type': 'plan.revised',
+        'call_id': call_id,
+        'steps': args.get('steps') or [],
+        'reason': str(args.get('reason') or ''),
+      }]
+  return []
+
+
 def _is_error_output(raw_item: Any, output: Any) -> bool:
   """Best-effort error flag for tool output items."""
   status = str(_get(raw_item, 'status', '') or '').lower()
@@ -100,35 +153,48 @@ def normalize_openai_event(event: Any) -> list[dict]:
       item_type in {'tool_call_output_item', 'function_call_output_item'}
       or 'tool_call_output' in item_type
     ):
+      call_id = (
+        _get(item, 'call_id')
+        or _get(raw_item, 'call_id')
+        or _get(raw_item, 'id')
+        or ''
+      )
+      # Plan tool outputs are pure echoes of the call; the call already produced
+      # the semantic event. Suppress so the UI never sees a generic tool_result.
+      if call_id and call_id in _PLAN_CALL_IDS:
+        _PLAN_CALL_IDS.discard(call_id)
+        return []
       output = _get(item, 'output') or _get(raw_item, 'output')
       return [{
         'type': 'tool_result',
-        'tool_use_id': (
-          _get(item, 'call_id')
-          or _get(raw_item, 'call_id')
-          or _get(raw_item, 'id')
-          or ''
-        ),
+        'tool_use_id': call_id,
         'content': _text_from_content(output),
         'is_error': _is_error_output(raw_item, output),
       }]
 
     if item_type in {'tool_call_item', 'function_call_item'} or 'tool_call' in item_type:
       arguments = _get(raw_item, 'arguments') or _get(item, 'arguments') or {}
+      tool_input = _parse_tool_arguments(arguments)
+      tool_id = (
+        _get(item, 'call_id')
+        or _get(raw_item, 'call_id')
+        or _get(raw_item, 'id')
+        or _get(item, 'id', '')
+      )
+      tool_name = (
+        _get(item, 'tool_name')
+        or _get(raw_item, 'name')
+        or _get(item, 'name', 'tool')
+      )
+      if tool_name in PLAN_TOOL_NAMES:
+        if tool_id:
+          _PLAN_CALL_IDS.add(tool_id)
+        return _plan_events_from_call(tool_id, tool_name, tool_input)
       return [{
         'type': 'tool_use',
-        'tool_id': (
-          _get(item, 'call_id')
-          or _get(raw_item, 'call_id')
-          or _get(raw_item, 'id')
-          or _get(item, 'id', '')
-        ),
-        'tool_name': (
-          _get(item, 'tool_name')
-          or _get(raw_item, 'name')
-          or _get(item, 'name', 'tool')
-        ),
-        'tool_input': _parse_tool_arguments(arguments),
+        'tool_id': tool_id,
+        'tool_name': tool_name,
+        'tool_input': tool_input,
       }]
 
     if item_type in {'message_output_item', 'message_item'} or 'message' in item_type:

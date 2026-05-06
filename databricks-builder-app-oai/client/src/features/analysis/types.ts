@@ -1,22 +1,53 @@
 import type { Message } from '@/lib/types';
 
-export type StoryStatus = 'planning' | 'running' | 'done' | 'error';
+export type StoryStatus = 'discovery' | 'planning' | 'running' | 'done' | 'error';
 export type EvidenceType = 'text' | 'table' | 'chart' | 'tool_result' | 'error';
 export type AnalysisStepStatus = 'running' | 'done' | 'error';
 export type NextMoveType = 'drill' | 'compare' | 'validate' | 'explain' | 'pivot';
-export type PlanStepStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type PlanStepStatus = 'pending' | 'running' | 'done' | 'failed';
+
+export interface ToolCallSummary {
+  toolName: string;
+  count: number;
+  inputPreview?: string;
+  resultSummary: string;
+  evidenceId?: string;
+  isError?: boolean;
+}
 
 export interface PlanStep {
   id: string;
-  description: string;
+  title: string;
+  narrative?: string;
+  finding?: string;
   status: PlanStepStatus;
-  toolCalls: string[];
+  toolCalls: ToolCallSummary[];
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+export interface PlanRevision {
+  steps: PlanStep[];
+  reason: string;
+  revisedAt: string;
 }
 
 export interface AnalysisPlan {
   objective: string;
   steps: PlanStep[];
   currentStepId?: string;
+  revisions: PlanRevision[];
+}
+
+export interface ConclusionHighlight {
+  label: string;
+  value: string;
+}
+
+export interface Conclusion {
+  summary: string;
+  highlights: ConclusionHighlight[];
+  nextSteps: string[];
 }
 
 export interface AnalysisContext {
@@ -60,24 +91,15 @@ export interface NextMove {
   source?: 'model' | 'heuristic';
 }
 
-export interface ActivityItem {
-  id: string;
-  type: 'thinking' | 'tool_use' | 'tool_result';
-  content: string;
-  toolName?: string;
-  toolInput?: string;
-  isError?: boolean;
-  timestamp: number;
-}
-
 export interface AnalysisStory {
   id: string;
   conversationId?: string;
   question: string;
   status: StoryStatus;
   plan?: AnalysisPlan;
-  activity: ActivityItem[];
-  conclusion?: string;
+  contextLoads: ToolCallSummary[];
+  conclusion?: Conclusion;
+  conclusionText?: string;       // raw assistant text fallback when no submit_conclusion
   evidence: EvidenceBlock[];
   trace: AnalysisStep[];
   nextMoves: NextMove[];
@@ -89,8 +111,13 @@ export interface AnalysisStory {
 export type AnalysisEvent =
   | { type: 'story.created'; story: AnalysisStory }
   | { type: 'story.attach_conversation'; storyId: string; conversationId: string }
-  | { type: 'plan.created'; storyId: string; plan: AnalysisPlan }
-  | { type: 'activity.appended'; storyId: string; item: ActivityItem }
+  | { type: 'plan.created'; storyId: string; objective: string; steps: Array<{ id: string; title: string }> }
+  | { type: 'plan.step_started'; storyId: string; stepId: string; narrative: string }
+  | { type: 'plan.step_finished'; storyId: string; stepId: string; finding: string; status: 'done' | 'failed' }
+  | { type: 'plan.revised'; storyId: string; steps: Array<{ id: string; title: string }>; reason: string }
+  | { type: 'plan.tool_call'; storyId: string; toolName: string; toolInput?: string; toolCallId?: string }
+  | { type: 'plan.tool_result'; storyId: string; toolCallId?: string; resultSummary: string; evidenceId?: string; isError: boolean }
+  | { type: 'synthesis.appended'; storyId: string; summary: string; highlights: ConclusionHighlight[]; nextSteps: string[] }
   | { type: 'conclusion.appended'; storyId: string; text: string }
   | { type: 'trace.appended'; storyId: string; step: AnalysisStep }
   | { type: 'evidence.appended'; storyId: string; block: EvidenceBlock }
@@ -117,4 +144,16 @@ export interface StreamStoryEvent {
   error?: unknown;
   todos?: unknown;
   moves?: unknown;
+  // Plan / synthesis fields produced by the runtime's normalize_openai_event
+  call_id?: unknown;
+  step_id?: unknown;
+  narrative?: unknown;
+  finding?: unknown;
+  status?: unknown;
+  objective?: unknown;
+  steps?: unknown;
+  reason?: unknown;
+  summary?: unknown;
+  highlights?: unknown;
+  next_steps?: unknown;
 }
