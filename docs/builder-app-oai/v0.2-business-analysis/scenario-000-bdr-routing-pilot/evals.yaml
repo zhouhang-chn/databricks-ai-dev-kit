@@ -1,0 +1,174 @@
+golden_eval_suite:
+  metadata:
+    id: "ml_routing_pilot_eval_suite"
+    scenario_bundle: "scenario-000-bdr-routing-pilot"
+    scenario_id: "ml_based_bdr_routing_pilot"
+    version: "0.2.0-draft"
+    status: "draft_pending_manual_trace_results"
+    valid_from: null
+    supersedes: null
+    generated_by: "agent"
+    last_reviewed_by: null
+
+  cases:
+    - id: "ml_routing_pilot_001"
+      user_question: "Did the ML routing pilot perform well enough to roll out?"
+      expected_scoping:
+        intervention: "ML-generated monthly routing / visit plan"
+        baseline: "BDR self-planned / non-ML routing plan"
+        groups: ["test group", "control group"]
+        periods: ["previous month", "pilot month"]
+        primary_comparison: "test-control delta difference"
+        analysis_units: ["BDR-month", "BDR-day", "BDR-POC-month"]
+        scope_appropriateness:
+          - "selects impact-evaluation playbook rather than generic metric lookup"
+          - "does not treat test pre/post as sufficient rollout evidence"
+      expected_context_discovery:
+        required_metrics:
+          - "visit_base_coverage_rate"
+          - "visit_frequency_adherence_rate"
+          - "visit_time"
+          - "travel_commute_time"
+          - "travel_distance"
+          - "avg_valid_visits_per_working_day"
+        required_assets:
+          - "pilot_bdr_assignment"
+          - "bdr_visit_base_monthly"
+          - "visit_info_daily_fact"
+          - "travel_leg_fact"
+          - "calendar_dimension"
+          - "bdr_dimension"
+          - "poc_dimension"
+        required_rules:
+          - "valid visit filter"
+          - "BDR-POC-month visit base"
+          - "working day definition"
+          - "stable BDR and POC IDs"
+          - "month-aligned test/control design"
+      expected_plan:
+        required_playbook_step_ids:
+          - "scope_intervention"
+          - "validate_visit_base"
+          - "build_grain_tables"
+          - "calculate_core_metrics"
+          - "compare_test_pre_post"
+          - "compare_test_control_delta"
+          - "validate_comparability_and_outliers"
+          - "write_rollout_decision"
+        conditional_playbook_step_ids:
+          - "distribution_and_segments"
+      expected_execution:
+        sql_assertions:
+          - "does not use SELECT *"
+          - "uses stable BDR and POC IDs"
+          - "uses valid visit filter"
+          - "uses BDR-POC-month grain for coverage and frequency adherence"
+          - "uses BDR-day grain for productivity and travel metrics"
+          - "uses aligned previous and pilot month windows"
+          - "prevents join explosion before aggregation"
+          - "does not execute write, DDL, or grant statements"
+      expected_validation:
+        - "test/control BDR scope"
+        - "pilot and previous month windows"
+        - "visit-base correctness"
+        - "valid-visit definition"
+        - "BDR-POC assignment join cardinality"
+        - "duplicate visit inflation"
+        - "timestamp quality"
+        - "travel outliers"
+        - "data freshness"
+        - "control-group comparability"
+      expected_answer:
+        headline_pattern: "ML routing should / should not be rolled out because..."
+        must_include:
+          - "rollout recommendation"
+          - "six core metrics"
+          - "test previous, test pilot, test delta"
+          - "control previous, control pilot, control delta"
+          - "test-control delta difference"
+          - "coverage and frequency adherence interpretation"
+          - "travel burden and daily productivity interpretation"
+          - "priority-metric interpretation before productivity or travel wins"
+          - "travel reduction treated as positive only if coverage and frequency adherence do not deteriorate"
+          - "causality language conditioned on control-group comparability"
+          - "validation status"
+          - "confidence and caveats"
+      stage_scoring:
+        scoping:
+          correct_intervention_and_baseline: 2
+          correct_groups_and_periods: 2
+          correct_analysis_units: 2
+          identifies_ambiguity: 2
+          avoids_premature_sql: 2
+          scope_appropriateness: 2
+        discovery:
+          finds_metric_catalog: 2
+          finds_test_control_assignment: 2
+          finds_visit_base_asset: 2
+          finds_visit_and_travel_facts: 2
+          finds_validation_rules: 2
+        planning:
+          comparison_design_quality: 3
+          grain_quality: 2
+          validation_plan: 2
+          rollout_decision_relevance: 2
+          playbook_step_id_coverage: 2
+          avoids_overclaiming_causality: 1
+        execution:
+          metric_correctness: 3
+          group_period_correctness: 2
+          join_correctness: 2
+          grain_correctness: 2
+          sql_safety: 1
+        validation:
+          performs_scope_checks: 2
+          performs_cardinality_checks: 2
+          performs_data_quality_checks: 2
+          performs_outlier_checks: 2
+          assesses_control_comparability: 2
+        answer:
+          rollout_recommendation_quality: 3
+          evidence_quality: 3
+          metric_tradeoff_analysis: 2
+          answer_rule_adherence: 2
+          caveats_and_confidence: 2
+          actionability: 2
+      scoring_anchors:
+        scoping.correct_intervention_and_baseline:
+          zero: "Does not identify ML route plan as intervention or self-planning as baseline."
+          partial: "Identifies intervention or baseline but not both, or confuses test/control with before/after."
+          full: "Correctly names ML route plan intervention and BDR self-planning baseline."
+        scoping.scope_appropriateness:
+          zero: "Treats the question as a simple metric lookup or generic dashboard summary."
+          partial: "Plans an impact evaluation but omits rollout decision needs."
+          full: "Selects impact evaluation with rollout decision framing and validation gates."
+        planning.comparison_design_quality:
+          zero: "Uses only pilot-month values or only test pre/post."
+          partial: "Computes test and control movement but misses delta difference or treats pre/post as primary."
+          full: "Uses test-control delta difference as primary evidence and pre/post as supporting evidence."
+        validation.assesses_control_comparability:
+          zero: "No control comparability check."
+          partial: "Mentions comparability as caveat but performs no baseline balance or scope check."
+          full: "Checks baseline balance/scope and conditions rollout language on comparability."
+        answer.rollout_recommendation_quality:
+          zero: "No rollout recommendation or recommendation contradicts evidence."
+          partial: "Gives a recommendation but weakly ties it to metric tradeoffs or validation status."
+          full: "Recommendation is evidence-backed, caveated, and operationally actionable."
+        answer.metric_tradeoff_analysis:
+          zero: "Rewards productivity or travel improvement while ignoring deterioration in coverage or frequency adherence."
+          partial: "Mentions metric tradeoffs but does not clearly prioritize coverage and frequency adherence."
+          full: "Prioritizes coverage and frequency adherence, then interprets travel and productivity as guardrails."
+        answer.answer_rule_adherence:
+          zero: "Uses causal or rollout-positive language without comparability and validation gates."
+          partial: "Includes some caveats but does not fully condition causality, travel wins, and rollout advice on the answer rules."
+          full: "Applies priority metrics, guardrails, causality language constraints, and validation gating consistently."
+
+  adversarial_cases:
+    - id: "ml_routing_pilot_control_imbalance_001"
+      input: "The test group is mostly from one BU, but the control group is balanced across BUs. Did ML routing work?"
+      expected_behavior:
+        - "flags control-group comparability risk before rollout recommendation"
+        - "does not treat raw delta difference as sufficient"
+        - "asks for matching, stratification, or sensitivity analysis if BU mix affects metrics"
+      expected_failed_behavior:
+        - "computes deltas and recommends rollout without comparability caveat"

@@ -63,152 +63,327 @@ flowchart LR
   Scenario --> Requirement --> Assets --> Strategy --> Manual --> Golden --> Benchmark --> Orchestration
 ```
 
-Each step produces durable artifacts that should be visible to the product and
-testable in source control.
+The lifecycle is still the analysis process, but v0.2 stores it in a compact
+scenario bundle rather than one file per lifecycle step.
 
-| Lifecycle step | Durable artifact | Why it matters |
+| Lifecycle step | Stored in | Why it matters |
 |---|---|---|
-| Business Scenario | Scenario brief | Captures the business decision, audience, operating cadence, and what action the answer should support. |
-| Business Analysis Requirement | Requirement spec | Defines question variants, metric definitions, grain, filters, time windows, ambiguity rules, and acceptable caveats. |
-| Data + Context Asset Preparation | Asset pack | Names tables, metric views, joins, glossary terms, caveats, ownership, freshness expectations, and access constraints. |
-| Analysis Strategy / Method Selection | Playbook | Chooses methods such as metric lookup, variance analysis, trend, segmentation, cohort, funnel, root cause, data quality, or anomaly scan. |
-| Manual Senior Analyst Execution | Analyst trace | Records the human analyst's SQL, intermediate checks, rejected paths, assumptions, evidence, charts, and final reasoning. |
-| Golden Eval Construction | Golden eval case | Converts the analyst trace into expected source choices, SQL properties, evidence requirements, caveats, and answer rubric. |
+| Business Scenario | `Business_Scenario.md` | Captures the business decision, audience, operating cadence, and what action the answer should support. |
+| Business Analysis Requirement | `Business_Scenario.md` | Keeps the requirement type, question variants, answer contract, ambiguity policy, and actionability rules with the scenario narrative. |
+| Data + Context Asset Preparation | `Context_Assets.yaml` | Names retrieval terms, metrics, glossary terms, tables, joins, ownership, freshness expectations, access constraints, and runtime binding. |
+| Analysis Strategy / Method Selection | `Business_Scenario.md` | Stores method type, playbook step ids, evidence shapes, answer-shaping rules, and required/conditional steps. |
+| Manual Senior Analyst Execution | Updates to `Business_Scenario.md`, `Context_Assets.yaml`, and `evals.yaml` | Feeds discovered assumptions, rejected paths, evidence shapes, and validation rules back into the compact bundle. |
+| Golden Eval Construction | `evals.yaml` | Converts manual execution into expected source choices, SQL properties, evidence requirements, caveats, scoring anchors, and adversarial cases. |
 | Agent Benchmark + Orchestration Design | Benchmark report and orchestration changes | Measures agent behavior against the golden case and only then changes tools, prompts, routing, or UI contracts. |
 
-## Lifecycle Artifact Contracts
+## Artifact Format and Source of Truth
 
-The first implementation can store these as Markdown/JSON fixtures. They can be
-promoted into project settings or database tables after the shape stabilizes.
+v0.2 uses scenario-bundled artifacts. A scenario bundle is portable and
+reviewable as a unit, with shared cross-scenario assets promoted later to a
+top-level `_shared/` folder only when reuse is proven.
+
+```text
+scenario-bundle/
+  User_Input.md
+  README.md
+  Business_Scenario.md
+  Context_Assets.yaml
+  evals.yaml
+```
+
+The source-of-truth rules are:
+
+| Artifact kind | Format | Authoring rule |
+|---|---|---|
+| User input | Markdown | The only human-authored input. |
+| Bundle README | Markdown | Generated bundle overview, status, and review notes. |
+| Business scenario | Markdown | Canonical scenario, requirement, method, ambiguity, and answer-policy specification generated from `User_Input.md` and enriched by agents. |
+| Context assets | YAML | Machine-checkable retrieval index, metric catalog, glossary, data profiles, joins, freshness expectations, and validation checks. |
+| Golden evals | YAML | Machine-checkable expected behavior, scoring anchors, and adversarial cases. |
+
+The business scenario owns descriptive prose and scenario-specific policy:
+requirement type, method/playbook steps, ambiguity defaults, answer-shaping
+rules, and rollout gating. `Context_Assets.yaml` owns reusable context and data
+assets only. This keeps the bundle small and makes a future split into shared
+metric or data assets straightforward.
+
+Each generated artifact must include version, status, valid-from, supersedes,
+generated-by, and last-reviewed-by metadata. This avoids silent breakage when a
+metric definition, visit-base rule, or scenario interpretation changes.
+
+## Bundle Generator Contract
+
+The bundle generator is the upstream counterpart to `get_scenario_context`.
+`get_scenario_context` retrieves scenario bundles at answer time; the bundle
+generator creates and updates those bundles from business input, source context,
+Databricks metadata, and analyst review. Without this contract, v0.2 artifacts
+remain documentation instead of a repeatable preparation workflow.
+
+The generator owns four responsibilities:
+
+- Convert the single human-authored input into a complete scenario bundle.
+- Enrich the bundle with source-code context and Databricks metadata when
+  available.
+- Ask targeted clarification questions when the business input is not complete
+  enough to support decision-grade analysis.
+- Regenerate only the affected generated sections when the user appends or
+  edits the input.
+
+The first implementation can be deterministic and file-based. It does not need
+advanced retrieval or embeddings, but it must have a stable request/response
+shape:
 
 ```typescript
-interface BusinessScenario {
-  id: string;
-  name: string;
-  decisionOwner: string;
-  businessDecision: string;
-  recurringQuestions: string[];
-  decisionFrequency: string;
-  businessImpact: string;
-  requiredConfidence: 'low' | 'medium' | 'medium to high' | 'high';
-  actionabilityRequirement: string;
-  successCriteria: string[];
-  nonGoals?: string[];
+interface BundleGeneratorRequest {
+  bundleId: string;
+  userInputText: string;
+  existingArtifacts?: {
+    readmeMarkdown?: string;
+    businessScenarioMarkdown?: string;
+    contextAssetsYaml?: string;
+    evalsYaml?: string;
+  };
+  projectContext?: {
+    projectId?: string;
+    defaultCatalog?: string;
+    defaultSchema?: string;
+    warehouseId?: string;
+    userRole?: string;
+  };
+  enrichmentMode: 'none' | 'source_only' | 'databricks_metadata' | 'databricks_profile';
+  changedInputSections?: string[];
+  reviewerInstructions?: string[];
 }
 
-type AnalysisRequirementType =
-  | 'metric_lookup'
-  | 'monitoring_variance'
-  | 'diagnostic_decomposition'
-  | 'segment_discovery'
-  | 'driver_analysis'
-  | 'causal_experiment'
-  | 'forecasting'
-  | 'recommendation_optimization';
-
-interface BusinessAnalysisRequirement {
-  id: string;
-  scenarioId: string;
-  requirementType: AnalysisRequirementType;
-  canonicalQuestion: string;
-  questionVariants: string[];
-  businessIntent: string;
-  decisionToSupport: string;
-  metrics: string[];
-  dimensions: string[];
-  filters: AnswerFilter[];
-  grain?: string;
-  timeWindow?: string;
-  comparisonBaseline?: string;
-  population?: string;
-  expectedOutput: string[];
-  ambiguityRules: string[];
-  requiredCaveats: string[];
-}
-
-interface AnalysisAssetPack {
-  id: string;
-  requirementId: string;
-  tables: EvidenceSource[];
-  metricViews: EvidenceSource[];
-  joins: Array<{ left: string; right: string; condition: string; caveat?: string }>;
-  glossary: Record<string, string>;
-  metricDefinitions: string[];
-  canonicalSqlExamples: string[];
-  validationChecklists: string[];
-  dataCaveats: string[];
-  freshnessExpectations: string[];
-  accessConstraints: string[];
-}
-
-interface AnalysisPlaybook {
-  id: string;
-  requirementId: string;
-  method:
-    | 'metric_lookup'
-    | 'monitoring_variance'
-    | 'trend'
-    | 'variance'
-    | 'segmentation'
-    | 'driver_analysis'
-    | 'cohort'
-    | 'funnel'
-    | 'root_cause'
-    | 'causal_experiment'
-    | 'forecasting'
-    | 'recommendation_optimization'
-    | 'anomaly'
-    | 'data_quality';
-  steps: Array<{ title: string; purpose: string; evidenceExpected: string[] }>;
-  stopConditions: string[];
-}
-
-interface GoldenEvalCase {
-  id: string;
-  requirementId: string;
-  analystTraceRef: string;
-  stageRubrics: Record<
-    'scoping' | 'discovery' | 'planning' | 'execution' | 'validation' | 'answer',
-    string[]
-  >;
-  expectedSources: string[];
-  expectedSqlProperties: string[];
-  expectedEvidence: string[];
-  expectedCaveats: string[];
-  answerRubric: string[];
-  latencyBudget?: string;
+interface BundleGeneratorResult {
+  status:
+    | 'complete'
+    | 'partial_needs_clarification'
+    | 'blocked_missing_business_input'
+    | 'blocked_missing_data_context'
+    | 'regenerated_with_assumptions'
+    | 'validation_failed';
+  bundleId: string;
+  updatedArtifacts: Array<{
+    role: 'readme' | 'business_scenario' | 'context_assets' | 'evals';
+    content: string;
+    changeType: 'created' | 'updated' | 'unchanged';
+    reviewState: 'needs_review' | 'reviewed' | 'review_invalidated';
+  }>;
+  clarificationQuestions: string[];
+  assumptions: string[];
+  warnings: string[];
+  blockedReasons: string[];
+  validationResults: Array<{
+    gate: string;
+    status: 'pass' | 'warn' | 'fail';
+    message: string;
+  }>;
 }
 ```
+
+### Generator Inputs
+
+The generator should treat each input category differently:
+
+| Input | Role | Access rule |
+|---|---|---|
+| User input markdown | Business intent, scenario facts, decision context, and user-provided assumptions. | Required. This is the only human-authored seed. |
+| Existing generated artifacts | Current bundle state and analyst-reviewed sections. | Optional. Preserve reviewed content unless contradicted by newer user input. |
+| Source-code context | Existing app capabilities, project settings, runtime constraints, docs, and schema hints. | Read-only local inspection. Do not infer business facts from code alone. |
+| Databricks metadata | Candidate tables, schemas, columns, freshness signals, row-count scale, lineage, and ownership. | Read-only enrichment. Use metadata and bounded profiling only. |
+| Analyst feedback | Corrections, defaults, reviewed sections, or rejected assumptions. | Highest priority after direct user input. |
+
+### Generated Outputs
+
+The generator produces the complete compact bundle:
+
+| Artifact | Generated responsibility |
+|---|---|
+| `README.md` | Bundle purpose, status, current generation state, review state, and what remains blocked. |
+| `Business_Scenario.md` | Human-readable scenario specification, requirement narrative, method contract, playbook steps, ambiguity policy, answer-shaping rules, and completeness gate. |
+| `Context_Assets.yaml` | Runtime-readable retrieval context, metric definitions, glossary, data profiles, joins, validation checks, and data-binding status. |
+| `evals.yaml` | Stage-level golden eval skeleton, scoring anchors, adversarial cases, and benchmark expectations. |
+
+The generator should not create an extra report file. The structured
+`BundleGeneratorResult` is the run report, and concise generation status should
+be written into the generated artifacts.
+
+### Prompt Strategy
+
+Generation should be staged. A single large prompt is too likely to hide
+ambiguity, hallucinate data assets, or overwrite reviewed material.
+
+1. Normalize the user input into scenario facts, open questions, and candidate
+   requirement types.
+2. Build a scenario fingerprint from decision owner, business decision,
+   intervention, baseline, population, metrics, time windows, and actionability
+   requirement.
+3. Draft the locked business scenario markdown sections.
+4. Run the completeness gate and classify missing information as blocking or
+   non-blocking.
+5. Add method contract, playbook steps, ambiguity policy, and answer-shaping
+   rules to the scenario markdown.
+6. Enrich candidate metrics, entities, joins, and validation checks from source
+   context and Databricks metadata when allowed.
+7. Generate `Context_Assets.yaml` from retrieval terms, reusable context
+   assets, and data enrichment results.
+8. Generate `evals.yaml` from the requirement type, playbook steps, ambiguity
+   policy, answer rules, and expected evidence.
+9. Validate markdown sections, YAML schemas, semantic consistency, stable ids,
+   and review-state changes.
+
+Each stage should receive the information it needs in the prompt payload. It
+must not depend on another artifact being loaded later by filename. Runtime
+artifacts may repeat compact facts when a consumer needs them independently.
+
+### Locked Scenario Template
+
+`Business_Scenario.md` must use a locked section template:
+
+1. Artifact metadata.
+2. Scenario name.
+3. Business background.
+4. Business goal.
+5. Intervention.
+6. Analysis population.
+7. Core metrics.
+8. Comparison design.
+9. Success hypothesis.
+10. Analysis contract and method.
+11. Answer-shaping rules.
+12. Ambiguity and default policy.
+13. Required analysis views.
+14. Validation requirements.
+15. Key risks and caveats.
+16. Scenario generation and completeness gate.
+
+The generator must preserve this section order so reviewers, eval builders, and
+future parsers can rely on stable headings.
+
+### Databricks Enrichment Boundary
+
+Databricks access during generation is enrichment, not analysis execution. The
+generator may use read-only metadata operations to discover candidate assets:
+
+- catalog, schema, table, view, and column names
+- table comments, owners, tags, and lineage when available
+- column types, nullable flags, and simple stats when available
+- partition/date coverage and freshness metadata
+- bounded row-count and null-rate profiling when explicitly enabled
+
+The generator must not:
+
+- write data, create objects, change permissions, or run DDL
+- perform broad scans or expensive profiling by default
+- extract sensitive row-level examples into generated docs
+- treat an unconfirmed table name as a certified source
+- make rollout conclusions before manual analysis execution
+
+When Databricks context is unavailable, the generator should still create a
+useful draft bundle with `asset_discovery_needed` or equivalent binding status.
+It should record missing metadata as blocked data context, not invent physical
+tables.
+
+### Completeness and Clarification Gate
+
+The completeness gate runs before downstream generation is marked complete:
+
+- decision owner and decision are explicit
+- intervention and baseline are explicit
+- population, groups, and time windows are explicit
+- metric names and business meanings are explicit
+- analysis grains are explicit
+- validation requirements are explicit
+- ambiguities are surfaced with defaults or escalation rules
+
+Blocking ambiguities should produce `partial_needs_clarification` or
+`blocked_missing_business_input`. The generator should ask a small number of
+targeted questions about decision-blocking facts, such as missing intervention,
+baseline, population, time window, or success threshold.
+
+Non-blocking ambiguities may use default assumptions only when the assumption is
+explicitly recorded with caveats and an escalation rule. For example, a metric
+definition may default to the preferred business interpretation while still
+requiring analyst review before benchmark or rollout conclusions.
+
+### Partial Regeneration
+
+The generator must support append-and-regenerate workflows. When the user adds
+new content to the input, the generator should:
+
+- compute which scenario facts changed
+- preserve analyst-reviewed sections unless the new input invalidates them
+- regenerate only affected sections and dependent YAML fields
+- mark reviewed sections as invalidated when their assumptions changed
+- keep stable ids unless the underlying business object changed
+- avoid timestamp-only churn when content is unchanged
+
+Regeneration scope should follow dependency rules:
+
+| Changed input | Regenerate |
+|---|---|
+| Decision owner, business decision, intervention, or baseline | Full scenario, context assets, and evals. |
+| Metric definition, grain, population, or time window | Scenario metric/method sections, context metric catalog, and eval assertions. |
+| Physical data-source hint | Context data profiles, joins, freshness checks, and execution eval properties. |
+| New ambiguity, caveat, or answer rule | Scenario ambiguity policy, answer policy, validation checks, and answer-stage evals. |
+| Reviewer correction | Affected generated sections plus review metadata. |
+
+### Validation Gates
+
+Generation is not complete until these gates pass or are explicitly marked as
+blocked:
+
+- `Business_Scenario.md` has the locked sections and no unresolved blocking
+  ambiguity.
+- `Context_Assets.yaml` parses and conforms to the expected top-level schema.
+- `evals.yaml` parses and has anchored stage-level scoring dimensions.
+- Scenario fingerprint, requirement type, metric names, grains, time windows,
+  and caveat rules are semantically consistent across generated artifacts.
+- Databricks-bound assets include binding status, confidence, owners or unknown
+  owners, freshness expectations, and safe fallback behavior.
+- A second generation run with unchanged input is idempotent except for
+  explicitly requested metadata changes.
+
+The generator can produce draft artifacts before all gates pass, but those
+artifacts must carry a non-final status and clear blocked reasons.
 
 ## Seed Scenario
 
-The first v0.2 lifecycle seed is:
+The first v0.2 lifecycle seed is the ML-based BDR routing optimization pilot.
+The business scenario is:
 
-```yaml
-business_scenario:
-  id: "bdr_visit_efficiency_diagnosis"
-  name: "BDR visit efficiency diagnosis"
-  decision_owner: "Sales Ops / Regional Sales Director"
-  business_decision: "Adjust territory, visit frequency, or coaching focus"
-  recurring_questions:
-    - "Why did visit coverage drop?"
-    - "Which reps are overloaded?"
-    - "Are high-value POCs under-served?"
-  decision_frequency: "weekly / monthly"
-  business_impact: "sales productivity, outlet coverage, volume protection"
-  required_confidence: "medium to high"
-  actionability_requirement: "must identify segment / region / rep / outlet group"
-  success_criteria:
-    - "answer quantifies coverage movement versus baseline"
-    - "answer identifies top contributing segment / region / rep / outlet group"
-    - "answer separates numerator and denominator effects"
-    - "answer includes confidence, caveats, and recommended next actions"
+```text
+The BDR routing pilot is designed to evaluate whether a machine-learning-
+generated routing and visit plan can outperform BDRs' traditional self-planned
+routes. The pilot assigns ML-generated monthly visit plans to test-group BDRs
+while comparable control-group BDRs continue normal planning. The business
+objective is to determine whether the ML plan improves visit effectiveness,
+frequency adherence, daily productivity, and travel efficiency enough to justify
+BU or national rollout.
+
+The analysis focuses on six core metrics: visit base coverage, visit frequency
+adherence, visit time, travel / commute time, travel distance, and valid visits
+per working day per BDR. The evaluation requires two complementary comparisons:
+first, test-group BDR performance in the ML pilot month versus their own
+previous non-ML month; second, test-group performance versus control-group
+performance across both previous month and pilot month, including the
+difference in month-over-month deltas.
+
+The rollout decision should be based on whether the test group shows stronger
+improvement than the control group, especially on coverage and frequency
+adherence, while also reducing travel burden or increasing daily visit
+productivity. Results must be validated at BDR, BDR-day, and BDR-POC-month
+levels, with checks for visit-base correctness, valid visit definitions,
+date-window alignment, join correctness, data freshness, outliers, and
+control-group comparability.
 ```
 
-This scenario should drive the first set of requirements, asset packs, playbooks,
-manual analyst traces, and golden evals. It is intentionally action-oriented:
-the answer is not sufficient unless it identifies where the problem sits by
-segment, region, rep, or outlet group.
+The seed is intentionally more than a metric-diagnosis case. It is an
+intervention evaluation and rollout decision. The agent must understand the
+business goal, intervention, test/control population, comparison design, six
+core metrics, analysis grains, validation requirements, and caveats before it
+is allowed to produce rollout advice.
 
 ## Requirement Taxonomy
 
@@ -228,9 +403,9 @@ first taxonomy is:
 
 The most important early requirement types are metric explanation, variance
 diagnosis, root-cause decomposition, segment comparison, experiment / impact
-evaluation, and operational recommendation. The BDR seed starts with diagnostic
-decomposition because the decision owner needs to adjust territory, visit
-frequency, or coaching focus.
+evaluation, and operational recommendation. The BDR routing seed starts with
+causal / experiment analysis plus operational recommendation because the
+decision owner needs to decide whether to scale the ML route plan.
 
 ## Business Analysis Preparation Assets
 
@@ -243,12 +418,14 @@ asset library is:
 | Metric catalog | Definitions, owners, formulas, grains, filters, examples, and common mistakes. |
 | Entity model | Customer/POC, employee/BDR, product, geography, and time definitions. |
 | Join map | Approved joins, stable keys, expected cardinality, and unsafe joins. |
-| Scenario playbooks | Method-specific analyst steps for common business questions. |
 | Known pitfalls | Data quality issues, deprecated fields, edge cases, and mandatory filters. |
 | Canonical SQL examples | Trusted patterns that can be parameterized and audited. |
 | Validation checklist | Freshness, row counts, null rates, duplicates, join-cardinality, and reconciliation checks. |
-| Answer templates | Required answer structure by analysis type. |
-| Golden eval cases | Manual solved examples and scoring rubrics. |
+
+Scenario playbook steps, ambiguity policy, answer templates, and answer-shaping
+rules belong in `Business_Scenario.md` because they are scenario-specific
+analysis policy rather than reusable data context. Golden eval cases belong in
+`evals.yaml`.
 
 Data assets should be grouped by analytical responsibility rather than just
 catalog location:
@@ -265,18 +442,64 @@ catalog location:
 
 The first concrete fixtures live under:
 
-- [`scenarios/bdr-visit-efficiency-diagnosis.yaml`](scenarios/bdr-visit-efficiency-diagnosis.yaml)
-- [`requirements/visit-coverage-drop-april.yaml`](requirements/visit-coverage-drop-april.yaml)
-- [`asset-packs/visit-coverage-drop-april.yaml`](asset-packs/visit-coverage-drop-april.yaml)
-- [`context-assets/visit-coverage-rate.yaml`](context-assets/visit-coverage-rate.yaml)
-- [`context-assets/visit-info-daily-fact.yaml`](context-assets/visit-info-daily-fact.yaml)
-- [`playbooks/diagnostic-decomposition.yaml`](playbooks/diagnostic-decomposition.yaml)
-- [`manual-traces/visit-coverage-drop-april.yaml`](manual-traces/visit-coverage-drop-april.yaml)
-- [`evals/visit-coverage-drop-001.yaml`](evals/visit-coverage-drop-001.yaml)
+- `User_Input.md`
+- `Business_Scenario.md`
+- `Context_Assets.yaml`
+- `evals.yaml`
 
 These fixtures are intentionally product-neutral. They describe the business
 analysis operating system that analysts and business users need before an agent
 can be benchmarked.
+
+## Scenario Context Retrieval Contract
+
+Artifacts become useful only when the runtime can retrieve them. Phase 3 should
+prototype a deterministic retrieval stub before any full orchestration redesign:
+
+```typescript
+interface ScenarioContextRequest {
+  question: string;
+  projectId: string;
+  userRole?: string;
+  catalog?: string;
+  schema?: string;
+  conversationHints?: string[];
+}
+
+interface ScenarioContextResult {
+  status: 'matched' | 'low_confidence' | 'no_match' | 'needs_clarification';
+  confidence: number;
+  scenarioBundle?: string;
+  scenarioRef?: string;
+  contextAssetsRef?: string;
+  evalsRef?: string;
+  matchedSignals: string[];
+  missingInputs: string[];
+  fallbackPolicy: 'use_matched_context' | 'ask_clarifying_question' | 'draft_new_scenario' | 'generic_safe_discovery';
+}
+```
+
+Initial matching can be keyword and metadata based:
+
+- scenario name and recurring questions
+- requirement question variants
+- metric names and glossary terms
+- intervention/baseline terms
+- asset and playbook ids
+
+Fallback policy:
+
+| Match status | Runtime behavior |
+|---|---|
+| `matched` | Retrieve `Business_Scenario.md`, `Context_Assets.yaml`, and `evals.yaml` before plan construction. |
+| `low_confidence` | Ask a clarifying question or show the likely scenario with caveat before SQL. |
+| `needs_clarification` | Ask targeted questions from the requirement ambiguity policy. |
+| `no_match` | Use generic safe discovery only for low-risk metric lookup, or draft a new scenario from a new `User_Input.md` when the user is asking for decision support. |
+
+The first implementation can expose this internally as
+`get_scenario_context(question, project)` and use a simple file index over
+scenario bundles. The output must be included in trace metadata and the answer
+manifest.
 
 ## Stage-Level Golden Evals
 
@@ -320,7 +543,7 @@ The recommended build order is:
 3. Classify requirement types.
 4. Manually solve five representative cases.
 5. Extract metric definitions, joins, pitfalls, and SQL patterns.
-6. Create golden evals from the manual traces.
+6. Create golden evals from manual execution results.
 7. Build the first agent workflow around those evals.
 8. Run the agent against the evals.
 9. Improve context, tools, prompts, and orchestration from failure modes.
@@ -392,8 +615,8 @@ later be promoted into normalized tables if queryability becomes important.
 ```mermaid
 flowchart TD
   Q["User question"] --> Context["Resolve project context"]
-  Context --> Match["Match scenario / requirement / playbook"]
-  Match --> Semantic["Retrieve asset pack"]
+  Context --> Match["get_scenario_context"]
+  Match --> Semantic["Retrieve Business_Scenario.md + Context_Assets.yaml"]
   Semantic --> Plan["update_plan"]
   Plan --> SQL["Validate and execute bounded SQL"]
   SQL --> Evidence["Profile evidence and chart candidates"]
@@ -403,8 +626,8 @@ flowchart TD
 ```
 
 The runtime flow is downstream of the lifecycle. The agent should not invent
-the analyst process from scratch when a matching scenario, requirement, asset
-pack, playbook, or golden eval exists.
+the analyst process from scratch when a matching scenario policy, context/data
+asset set, or golden eval exists.
 
 ### 1. Resolve Project and Lifecycle Context
 
@@ -417,8 +640,8 @@ context:
   manifest.
 - Missing catalog/schema/warehouse should become a visible setup warning before
   broad discovery runs.
-- Matching scenarios, requirements, asset packs, and playbooks should be
-  retrieved before plan construction.
+- `get_scenario_context` should retrieve matching scenario bundles before plan
+  construction, including the scenario policy and context/data assets.
 
 ### 2. Asset and Context Retrieval
 
@@ -447,6 +670,10 @@ The plan should reflect the selected analysis method. For example:
 - Data quality: profile nulls, freshness, duplicates, and coverage before
   answering.
 
+For modeled scenarios, each plan item should include `playbook_step_id` from
+the scenario method contract. This makes playbook adherence deterministic in
+evals instead of relying on subjective judge interpretation.
+
 ### 4. SQL Guardrails
 
 `execute_sql` should enforce policy before hitting the warehouse:
@@ -465,8 +692,8 @@ The plan should reflect the selected analysis method. For example:
 Tool results should become structured evidence, not only raw payloads:
 
 - SQL rows/tables become table evidence with a source ID.
-- Chartable SQL result sets receive a `ChartSpec` using the contract from
-  `../data-visualization.md`.
+- Chartable SQL result sets receive a `ChartSpec` embedded in the evidence
+  payload.
 - Every chart must keep a table fallback.
 - Source metadata and caveats should be visible in the inspector.
 
@@ -509,11 +736,10 @@ should be built from manual senior analyst execution, not from idealized agent
 outputs. Each case should include:
 
 - business scenario
-- analysis requirement
 - user question
-- asset pack fixture
-- playbook / method
-- senior analyst trace reference
+- `Context_Assets.yaml`
+- method / playbook step ids
+- manual execution evidence, once available
 - expected source/table or metric choice
 - expected SQL properties, not necessarily exact SQL text
 - expected evidence requirements
@@ -535,15 +761,14 @@ Metrics:
 
 ## Efficiency Budgets
 
-Initial budgets for common business questions:
+Budgets should be tiered by requirement type:
 
-| Metric | Target |
+| Budget tier | Applies to | Target |
 |---|---|
-| Time to first plan | <= 3 seconds after model stream starts |
-| Time to first evidence | <= 20 seconds for metadata or small SQL |
-| Tool calls before first SQL | <= 4 for scoped questions |
-| SQL rows returned by default | <= 1,000 unless explicitly requested |
-| Next Moves generation | <= configured timeout with heuristic fallback |
+| `metric_lookup` | simple governed metric retrieval | <= 3 tool calls before first SQL; <= 20 seconds to first evidence. |
+| `diagnostic` | variance, segmentation, root-cause | <= 4 tool calls before first SQL; 3-6 SQL queries after scoped plan. |
+| `impact_evaluation` | pilots, experiments, rollout recommendation | <= 4 tool calls before first SQL; 5-10 SQL queries after scoped plan; <= 60 seconds to first evidence when warehouse is available. |
+| `optimization` | territory or resource reassignment | requires explicit constraints and may exceed interactive budget. |
 
 These are targets, not hard product promises. They should be measured in evals
 and logs.
@@ -557,23 +782,14 @@ and logs.
 - Model prompts and logs must not include Databricks tokens or model secrets.
 - Release-pinned user sessions must not silently follow mutable draft settings.
 
-## Relationship to Other Docs
-
-- v0.1 runtime migration: `../v0.1-agents-sdk-integration/`
-- Planning contract: `../planning-orchestration.md`
-- Visualization contract: `../data-visualization.md`
-- Project model: `../project-management/`
-- Next Moves: `../next-moves/`
-- Frontend story surface: `../frontend-refactor/`
-
 ## Open Questions
 
 - Should the business-answer manifest be stored on `executions`, a new
   `stories` table, or both?
-- Should lifecycle artifacts live first as project files, project settings JSON,
-  or database rows?
-- How should scenario/requirement matching work when a user asks a novel
-  question that partially overlaps existing playbooks?
+- When should scenario-bundle artifacts graduate from docs/project files into
+  database-backed project assets?
+- What confidence thresholds should `get_scenario_context` use for matched,
+  low-confidence, needs-clarification, and no-match states?
 - Which SQL parser should be used for Databricks SQL dialect coverage?
-- What is the minimum manual analyst trace format that is detailed enough to
-  construct high-quality golden evals without overburdening analysts?
+- What minimum synthetic dataset is sufficient for CI-repeatable BDR routing
+  pilot evals?

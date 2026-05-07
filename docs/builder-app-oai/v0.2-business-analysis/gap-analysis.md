@@ -43,23 +43,20 @@ Without this lifecycle, the agent roadmap can over-optimize prompts, tools, SQL
 safety, or visualization before the team has agreed on what good human analysis
 looks like for real business scenarios.
 
-The first seed scenario is
-[`bdr-visit-efficiency-diagnosis.yaml`](scenarios/bdr-visit-efficiency-diagnosis.yaml).
-It covers Sales Ops / Regional Sales Director decisions around territory, visit
-frequency, and coaching focus, with recurring questions on visit coverage,
-overloaded reps, and high-value POC service levels.
+The first seed scenario is the ML-based BDR routing pilot. It covers a Sales
+Ops / Regional Sales Director / BU leadership decision on whether an
+ML-generated monthly routing and visit plan outperforms traditional BDR
+self-planning enough to justify BU or national rollout.
 
 The first drafted lifecycle fixtures are:
 
-- [`requirements/visit-coverage-drop-april.yaml`](requirements/visit-coverage-drop-april.yaml)
-- [`asset-packs/visit-coverage-drop-april.yaml`](asset-packs/visit-coverage-drop-april.yaml)
-- [`context-assets/visit-coverage-rate.yaml`](context-assets/visit-coverage-rate.yaml)
-- [`context-assets/visit-info-daily-fact.yaml`](context-assets/visit-info-daily-fact.yaml)
-- [`playbooks/diagnostic-decomposition.yaml`](playbooks/diagnostic-decomposition.yaml)
-- [`manual-traces/visit-coverage-drop-april.yaml`](manual-traces/visit-coverage-drop-april.yaml)
-- [`evals/visit-coverage-drop-001.yaml`](evals/visit-coverage-drop-001.yaml)
+- `User_Input.md`
+- `Business_Scenario.md`
+- `Context_Assets.yaml`
+- `evals.yaml`
 
 These are intentionally draft artifacts. They make the missing work concrete:
+implement the bundle generator that creates and updates them from user input,
 confirm source-specific data definitions with humans, run the senior analyst
 case manually, convert the trace into calibrated stage-level evals, and only
 then benchmark the agent.
@@ -131,10 +128,13 @@ What is strong:
 
 | Priority | Gap | Why it matters |
 |---|---|---|
-| P0 | Lifecycle artifacts are only draft fixtures. The BDR seed now has a scenario, first requirement, context assets, playbook, trace template, and eval skeleton, but no completed manual analyst trace. | Agent quality cannot be judged reliably until the human analytical process is captured and converted into calibrated evals. |
+| P0 | Lifecycle artifacts are only draft fixtures. The ML-based BDR routing seed now has `Business_Scenario.md`, `Context_Assets.yaml`, and `evals.yaml`, but no completed manual analyst execution. | Agent quality cannot be judged reliably until the human analytical process is captured and converted into calibrated evals. |
+| P0 | The bundle generator contract is documented but not implemented. It must create and update `README.md`, `Business_Scenario.md`, `Context_Assets.yaml`, and `evals.yaml` from `User_Input.md`, source-code context, Databricks metadata, and analyst review. | This is the gate that turns ad-hoc business input into a structured, runtime-retrievable analysis lifecycle. Without it, simplification only reduces file count; it does not create a repeatable preparation workflow. |
+| P0 | No runtime `get_scenario_context(question, project)` retrieval contract is implemented yet. | The agent can ignore the scenario bundle unless the runtime has a deterministic path to retrieve it before planning. |
 | P0 | No agreed requirement taxonomy is implemented in product or eval code. | A metric lookup, variance diagnosis, causal question, and optimization question require different data, method, validation, and answer style. |
-| P0 | Context assets are not yet operational. Metric definitions, data profiles, join maps, pitfalls, canonical SQL, validation checklists, and answer templates are docs fixtures rather than retrievable runtime assets. | The agent can still behave like a generic SQL chatbot instead of using senior analyst context. |
-| P0 | Golden evals do not yet score the full lifecycle stages. | Final-answer-only scoring cannot isolate whether a failure came from scoping, discovery, planning, SQL execution, validation, or synthesis. |
+| P0 | Context assets are not yet operational. Metric definitions, data profiles, join maps, pitfalls, canonical SQL, and validation checklists are scenario-bundle fixtures rather than retrievable runtime assets. | The agent can still behave like a generic SQL chatbot instead of using senior analyst context. |
+| P0 | Golden evals have first scoring anchors but are not calibrated against completed manual execution results. | Final-answer-only or uncalibrated scoring cannot reliably isolate whether a failure came from scoping, discovery, planning, SQL execution, validation, or synthesis. |
+| P0 | No real or synthetic Databricks dataset is bound to the seed `Context_Assets.yaml`. | Phase 5 manual execution and CI-repeatable evals are blocked until the data contract is runnable. |
 | P1 | The semantic layer is too thin. Preferred tables, glossary, sample queries, and caveats are prompt text, not a queryable semantic retrieval path. | The model can choose the wrong table, grain, metric definition, or filters when several similar assets exist. |
 | P1 | SQL correctness guardrails are mostly prompt/tool conventions. There is no mandatory query plan, schema-grounding step, SQL parse/lint gate, source manifest, row-limit policy, or evidence sufficiency check before synthesis. | The agent may produce plausible conclusions from partial, unsafe, or inefficient evidence. |
 | P1 | Read-only SQL enforcement is prefix-based and treats any query starting with `WITH` as read-only. | User-preview/read-only mode can allow unsafe CTE patterns unless SQL is parsed and classified. |
@@ -155,7 +155,7 @@ What is strong:
 | P1 | Long-running generated tools use in-memory operation state and per-call executors. | Concurrent slow Databricks calls create thread pressure and lose continuity across process restart. |
 | P2 | Execution events are stored as a growing JSON array in one row. | Long runs become increasingly expensive to append, replay, and query. |
 | P2 | Next Moves add a post-run model call by default. | Tail latency and cost increase, and incomplete `final_text` weakens relevance. |
-| P2 | No latency/tool-call budgets are defined for business answers. | Correctness scaffolding can make common analyst questions too slow. |
+| P2 | Latency/tool-call budgets are documented by tier but not measured. | Correctness scaffolding can make common analyst questions too slow if budget telemetry is not enforced. |
 
 ## Fit Against Business-Question Goal
 
@@ -172,29 +172,45 @@ What is strong:
 
 ## Recommended v0.2 Priorities
 
-1. Treat v0.2 as business-analysis preparation: scenario, requirement,
-   data/context assets, playbooks, manual traces, and golden evals first.
-2. Finish the BDR visit coverage requirement by confirming the metric,
-   denominator, population, date-window rules, and decision-owner expectations.
-3. Complete the first asset pack with governed table/view names, approved joins,
-   freshness checks, canonical SQL, owners, and known pitfalls.
-4. Run the first manual senior analyst execution and record SQL, validation,
+1. Treat v0.2 as business-analysis preparation: scenario, context assets,
+   manual execution, and golden evals first.
+2. Implement the bundle generator create/update contract, staged prompt
+   strategy, completeness gate, clarification loop, Databricks metadata
+   enrichment boundary, and partial-regeneration rules.
+3. Run the generator on the BDR routing pilot input and preserve draft status
+   until blocking business or data-context gaps are resolved.
+4. Prototype `get_scenario_context(question, project)` in Phase 3 so artifacts
+   are reachable by the runtime before broader orchestration work.
+5. Finish the BDR routing pilot requirement by confirming the intervention,
+   test/control scope, six metric definitions, date-window rules,
+   control-group matching logic, and rollout decision thresholds.
+6. Complete `Context_Assets.yaml` with governed table/view names, approved
+   joins, freshness checks, canonical SQL, owners, and known pitfalls.
+7. Bind `Context_Assets.yaml` to a real Databricks catalog/schema or create a
+   synthetic dataset so the lifecycle is runnable.
+8. Run the first manual senior analyst execution and record SQL, validation,
    rejected paths, caveats, and final narrative.
-5. Calibrate stage-level golden evals from the manual trace.
-6. Benchmark the current agent against the golden evals.
-7. Use measured failures to prioritize evidence manifests, SQL safety, semantic
+9. Calibrate stage-level golden evals from manual execution results.
+10. Benchmark the current agent against the golden evals.
+11. Use measured failures to prioritize evidence manifests, SQL safety, semantic
    retrieval, chart evidence, tool narrowing, and durable operation state.
-8. Expand from the seed scenario into a scenario-to-eval matrix covering visit
-   coverage drop, sales volume decline, campaign performance, territory
-   overload, customer churn, inventory shortage, price impact, and metric
-   lookup.
+12. Expand from the seed scenario into a scenario-to-eval matrix covering ML BDR
+   routing rollout, visit coverage drop, sales volume decline, campaign
+   performance, territory overload, customer churn, inventory shortage, price
+   impact, and metric lookup.
 
 ## Validation Still Needed
 
-- Scenario, requirement, asset-pack, playbook, analyst-trace, and golden-eval
-  fixture validation.
-- Senior analyst review of BDR visit coverage metric definition, denominator,
-  join keys, exclusions, and required caveats.
+- Scenario bundle validation for `Business_Scenario.md`,
+  `Context_Assets.yaml`, and `evals.yaml`.
+- Bundle generator validation for create runs, update runs, clarification
+  status, partial regeneration, review-state invalidation, idempotency, and
+  read-only Databricks metadata enrichment.
+- Retrieval validation for `get_scenario_context`.
+- Real or synthetic data binding for the BDR routing pilot `Context_Assets.yaml`.
+- Senior analyst review of ML routing pilot metric definitions, test/control
+  scope, visit-base denominator, join keys, exclusions, rollout thresholds, and
+  required caveats.
 - Stage-level eval validation for scoping, discovery, planning, execution,
   validation, and answer writing.
 - SQL safety tests for CTE plus write statements.

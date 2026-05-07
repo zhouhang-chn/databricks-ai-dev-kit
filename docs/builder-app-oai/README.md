@@ -9,13 +9,13 @@ progress tracking.
 
 | Path | Purpose |
 |---|---|
-| [`planning-orchestration.md`](planning-orchestration.md) | Current plan/synthesis event contract for analysis stories. |
-| [`data-visualization.md`](data-visualization.md) | Target design for chart evidence in analysis stories. |
-| [`project-management/`](project-management/) | Current project model, settings, releases, roles, governance, and action plan. |
-| [`next-moves/`](next-moves/) | Current backend Next Moves service design and action plan. |
-| [`frontend-refactor/`](frontend-refactor/) | Story canvas and inspect-panel frontend architecture notes. |
-| [`v0.1-agents-sdk-integration/`](v0.1-agents-sdk-integration/) | Historical migration track for replacing the Claude runtime with the OpenAI Agents SDK. |
-| [`v0.2-business-analysis/`](v0.2-business-analysis/) | Current gap-filling track for preparing business scenarios, requirements, context assets, playbooks, manual traces, golden evals, and agent benchmark work. |
+| `planning-orchestration.md` | Current plan/synthesis event contract for analysis stories. |
+| `data-visualization.md` | Target design for chart evidence in analysis stories. |
+| `project-management/` | Current project model, settings, releases, roles, governance, and action plan. |
+| `next-moves/` | Current backend Next Moves service design and action plan. |
+| `frontend-refactor/` | Story canvas and inspect-panel frontend architecture notes. |
+| `v0.1-agents-sdk-integration/` | Historical migration track for replacing the Claude runtime with the OpenAI Agents SDK. |
+| `v0.2-business-analysis/` | Current gap-filling track for preparing business scenarios, runtime context assets, golden evals, and agent benchmark work. |
 
 ## Versioned Progress Tracks
 
@@ -27,20 +27,23 @@ Each `vX.Y-*` folder should contain:
 - `action-plan.md`: implementation phases, acceptance gates, and validation.
 
 When a phase introduces progress-tracking artifacts, keep them under the
-versioned folder. For v0.2, the lifecycle artifact folders are `scenarios/`,
-`requirements/`, `asset-packs/`, `context-assets/`, `playbooks/`,
-`manual-traces/`, and `evals/`.
+versioned folder. For v0.2, scenario bundles are the canonical layout. A bundle
+contains the scenario input, generated markdown context, YAML assets, and YAML
+evals for one business scenario.
+
+Within v0.2 scenario bundles:
+
+- `User_Input.md` is the only human-authored seed input.
+- Markdown is used for descriptive analyst context, primarily
+  `Business_Scenario.md`.
+- YAML is used for runtime-readable context and evals:
+  `Context_Assets.yaml` and `evals.yaml`.
+- A future `_shared/` folder may hold reusable cross-scenario assets once reuse
+  is proven.
 
 The versioned folders are not the only documentation. They track progress for a
 phase. The active feature docs outside versioned folders should remain aligned
 with the latest source code and the current product goal.
-
-## Source References
-
-- App source: [`../../databricks-builder-app-oai/`](../../databricks-builder-app-oai/)
-- Legacy Builder App docs: [`../builder-app/`](../builder-app/)
-- v0.1 OpenAI Agents SDK migration: [`v0.1-agents-sdk-integration/`](v0.1-agents-sdk-integration/)
-- v0.2 business-analysis track: [`v0.2-business-analysis/`](v0.2-business-analysis/)
 
 ## Maintenance Rules
 

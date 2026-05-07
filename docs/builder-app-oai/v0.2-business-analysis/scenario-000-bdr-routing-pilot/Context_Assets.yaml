@@ -1,0 +1,228 @@
+context_assets:
+  metadata:
+    id: "ml_routing_pilot_context_assets"
+    scenario_bundle: "scenario-000-bdr-routing-pilot"
+    scenario_id: "ml_based_bdr_routing_pilot"
+    version: "0.2.0-draft"
+    status: "draft_requires_source_confirmation"
+    valid_from: null
+    supersedes: null
+    generated_by: "agent"
+    last_reviewed_by: null
+
+  # Section 1: retrieval context for matching this scenario bundle.
+  retrieval_index:
+    scenario_name: "ML-Based BDR Routing Optimization Pilot"
+    question_patterns:
+      - "Did the ML routing pilot work?"
+      - "Should we roll out the ML route plan?"
+      - "Did test BDRs improve more than control BDRs?"
+      - "Did ML routing improve coverage and frequency adherence?"
+      - "Did travel time or distance decrease under the ML plan?"
+    keywords:
+      - "ML routing"
+      - "BDR route plan"
+      - "test group"
+      - "control group"
+      - "pilot month"
+      - "visit base"
+      - "frequency adherence"
+      - "travel time"
+      - "travel distance"
+      - "rollout"
+    match_policy:
+      matched: "retrieve this bundle before plan construction"
+      low_confidence: "ask whether the user means the ML BDR routing pilot"
+      no_match: "use generic safe discovery only for low-risk metric lookup, or request new user-authored scenario input for decision-support questions"
+
+  # Section 2: reusable business context assets. Promote to shared assets when
+  # the same metrics or glossary terms are reused across multiple bundles.
+  metric_catalog:
+    grain_requirements:
+      - "BDR-month"
+      - "BDR-day"
+      - "BDR-POC-month"
+    metrics:
+      - name: "visit_base_coverage_rate"
+        business_meaning: "Share of valid visit-base POCs visited at least once during the month."
+        formula: "visited_pocs_in_visit_base / total_pocs_in_visit_base"
+        unit_grain: "BDR-POC-month rolled to BDR-month or segment-month"
+        poc_level_rule: "vb_adhere = 1 if monthly POC visit count > 0"
+        desired_direction: "increase_or_no_decline"
+        acceptable_movement_range:
+          plausible_delta_pct_points: [-20, 20]
+          flag_if_absolute_delta_pct_points_gt: 30
+        if_in_doubt_prefer: "valid visit-base denominator from certified BDR-POC-month asset"
+      - name: "visit_frequency_adherence_rate"
+        business_meaning: "Share of valid visit-base POCs whose actual monthly visits meet the required frequency rule."
+        formula: "frequency_adhered_pocs / total_pocs_in_visit_base"
+        unit_grain: "BDR-POC-month rolled to BDR-month or segment-month"
+        poc_level_rule: "vf_adhere = 1 if actual monthly visit count = required visit frequency"
+        desired_direction: "increase"
+        acceptable_movement_range:
+          plausible_delta_pct_points: [-25, 25]
+          flag_if_absolute_delta_pct_points_gt: 35
+        if_in_doubt_prefer: "exact-match adherence with caveat until business confirms minimum-frequency compliance"
+      - name: "visit_time"
+        business_meaning: "Time BDRs spend at POCs for business activity."
+        typical_measures:
+          - "total visit time"
+          - "average visit time per visit"
+          - "visit time per working day"
+        desired_direction: "stable_or_improve"
+        acceptable_movement_range:
+          plausible_delta_pct: [-30, 30]
+          flag_if_absolute_delta_pct_gt: 50
+        if_in_doubt_prefer: "median and p25/p75 distribution over average only"
+      - name: "travel_commute_time"
+        business_meaning: "Time BDRs spend moving between POCs."
+        typical_measures:
+          - "total travel time"
+          - "travel time per working day"
+          - "travel time per visit"
+        desired_direction: "decrease"
+        acceptable_movement_range:
+          plausible_delta_pct: [-40, 25]
+          flag_if_absolute_delta_pct_gt: 60
+        if_in_doubt_prefer: "winsorized or outlier-filtered travel time with raw sensitivity"
+      - name: "travel_distance"
+        business_meaning: "GPS-derived distance between visited POCs or route legs."
+        typical_measures:
+          - "total travel distance"
+          - "travel distance per working day"
+          - "travel distance per visit"
+        desired_direction: "decrease"
+        acceptable_movement_range:
+          plausible_delta_pct: [-40, 25]
+          flag_if_absolute_delta_pct_gt: 60
+        if_in_doubt_prefer: "GPS-derived route-leg distance with outlier profile"
+      - name: "avg_valid_visits_per_working_day"
+        business_meaning: "Daily execution productivity for active BDR working days."
+        formula: "total valid visits / valid working days"
+        working_day_definition: "A BDR-day is counted as a working day if the BDR has at least one valid visit on that day."
+        desired_direction: "increase_if_effectiveness_does_not_deteriorate"
+        acceptable_movement_range:
+          plausible_delta_pct: [-25, 35]
+          flag_if_absolute_delta_pct_gt: 50
+        if_in_doubt_prefer: "valid working days, not calendar days"
+
+  # Section 3: data assets, approved joins, and validation checks.
+  data_assets:
+    runtime_binding:
+      target_environment: "pending_real_or_synthetic_databricks_workspace"
+      catalog: null
+      schema: null
+      warehouse_id: null
+      data_profile_status: "not_bound"
+      synthetic_dataset_status: "not_created"
+    glossary:
+      BDR: "Business Development Representative"
+      POC: "Point of consumption / outlet / customer location"
+      visit_base: "set of POCs a BDR is expected to visit in a month"
+      valid_visit: "visit event that passes business-validity filters"
+      pilot_month: "month when test BDRs use the ML-generated route plan"
+      previous_month: "prior non-ML comparison month"
+    assets:
+      - asset_id: "pilot_bdr_assignment"
+        physical_name: null
+        asset_type: "assignment_dimension"
+        grain: "one row per BDR per pilot period"
+        refresh_cadence: "manual_or_daily_during_pilot"
+        expected_row_volume_order: "10^1_to_10^3"
+        required_fields:
+          - { name: "bdr_id", type: "string", nullable: false, pii: false, role: "stable_bdr_key" }
+          - { name: "pilot_group", type: "string", nullable: false, pii: false, allowed_values: ["test", "control"] }
+          - { name: "pilot_month", type: "date_or_month", nullable: false, pii: false }
+          - { name: "previous_month", type: "date_or_month", nullable: false, pii: false }
+      - asset_id: "bdr_visit_base_monthly"
+        physical_name: null
+        asset_type: "monthly_bridge"
+        grain: "one row per BDR-POC-month"
+        refresh_cadence: "monthly_with_possible_in_month_updates"
+        expected_row_volume_order: "10^5_to_10^7"
+        required_fields:
+          - { name: "bdr_id", type: "string", nullable: false, pii: false, role: "stable_bdr_key" }
+          - { name: "poc_id", type: "string", nullable: false, pii: false, role: "stable_poc_key" }
+          - { name: "month", type: "date_or_month", nullable: false, pii: false }
+          - { name: "required_visit_frequency", type: "integer", nullable: false, pii: false }
+          - { name: "valid_visit_base_flag", type: "boolean", nullable: false, pii: false }
+      - asset_id: "visit_info_daily_fact"
+        physical_name: null
+        asset_type: "core_fact"
+        grain: "one row per visit event"
+        refresh_cadence: "daily"
+        known_late_arriving_partitions: "visits can arrive 1-3 days late depending on device sync"
+        expected_row_volume_order: "10^6_to_10^8"
+        required_fields:
+          - { name: "visit_id", type: "string", nullable: false, pii: false, role: "stable_visit_key" }
+          - { name: "bdr_id", type: "string", nullable: false, pii: false, role: "stable_bdr_key" }
+          - { name: "poc_id", type: "string", nullable: false, pii: false, role: "stable_poc_key" }
+          - { name: "visit_start_ts", type: "timestamp", nullable: true, pii: false }
+          - { name: "visit_end_ts", type: "timestamp", nullable: true, pii: false }
+          - { name: "visit_date", type: "date", nullable: false, pii: false }
+          - { name: "valid_visit_flag", type: "boolean", nullable: false, pii: false }
+      - asset_id: "route_plan_monthly"
+        physical_name: null
+        asset_type: "plan_fact"
+        grain: "one row per planned BDR-POC visit or planned BDR route stop"
+        refresh_cadence: "monthly_or_on_plan_publish"
+        expected_row_volume_order: "10^4_to_10^6"
+        required_fields:
+          - { name: "bdr_id", type: "string", nullable: false, pii: false, role: "stable_bdr_key" }
+          - { name: "poc_id", type: "string", nullable: false, pii: false, role: "stable_poc_key" }
+          - { name: "planned_visit_date", type: "date", nullable: false, pii: false }
+          - { name: "planned_sequence", type: "integer", nullable: true, pii: false }
+          - { name: "plan_source", type: "string", nullable: false, pii: false }
+      - asset_id: "travel_leg_fact"
+        physical_name: null
+        asset_type: "derived_fact"
+        grain: "one row per BDR travel leg"
+        refresh_cadence: "daily"
+        expected_row_volume_order: "10^6_to_10^8"
+        required_fields:
+          - { name: "bdr_id", type: "string", nullable: false, pii: false, role: "stable_bdr_key" }
+          - { name: "travel_date", type: "date", nullable: false, pii: false }
+          - { name: "from_poc_id", type: "string", nullable: true, pii: false }
+          - { name: "to_poc_id", type: "string", nullable: true, pii: false }
+          - { name: "travel_time_minutes", type: "double", nullable: true, pii: false }
+          - { name: "travel_distance_km", type: "double", nullable: true, pii: false }
+      - asset_id: "calendar_dimension"
+        physical_name: null
+        asset_type: "dimension"
+        grain: "one row per date"
+        refresh_cadence: "static_or_annual"
+        expected_row_volume_order: "10^3_to_10^5"
+        required_fields:
+          - { name: "calendar_date", type: "date", nullable: false, pii: false }
+          - { name: "month", type: "date_or_month", nullable: false, pii: false }
+          - { name: "business_month", type: "date_or_month", nullable: true, pii: false }
+          - { name: "holiday_flag", type: "boolean", nullable: false, pii: false }
+          - { name: "working_day_flag", type: "boolean", nullable: false, pii: false }
+
+  approved_joins:
+    - left: "pilot_bdr_assignment.bdr_id"
+      right: "bdr_dimension.bdr_id"
+      expected_cardinality: "many_to_one"
+      caveat: "use stable BDR ID, not name"
+    - left: "bdr_visit_base_monthly.bdr_id"
+      right: "pilot_bdr_assignment.bdr_id"
+      expected_cardinality: "many_to_one_per_period"
+      caveat: "join with aligned previous/pilot month rules"
+    - left: "bdr_visit_base_monthly.poc_id"
+      right: "poc_dimension.poc_id"
+      expected_cardinality: "many_to_one"
+      caveat: "filter to valid visit-base POCs"
+    - left: "visit_info_daily_fact.bdr_id, visit_info_daily_fact.poc_id, month"
+      right: "bdr_visit_base_monthly.bdr_id, bdr_visit_base_monthly.poc_id, month"
+      expected_cardinality: "many_to_one_after_preaggregation"
+      caveat: "pre-aggregate visits to BDR-POC-month before joining"
+
+  validation_checks:
+    - "test/control BDR count by period"
+    - "visit-base BDR-POC-month count by group and month"
+    - "valid visit row count and distinct visit count by day"
+    - "duplicate visit_id check"
+    - "null rate for bdr_id, poc_id, visit timestamps, and required_visit_frequency"
+    - "BDR-POC assignment join cardinality"
+    - "travel-time and travel-distance outlier profile"
+    - "data freshness by source"
