@@ -18,6 +18,8 @@ import { fetchConversations, createConversation } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
+import { ProjectCreationModal } from './ProjectCreationModal';
+
 interface SidebarProps {
   onViewSkills?: () => void;
   onOpenProjectSettings?: () => void;
@@ -42,6 +44,7 @@ export function Sidebar({
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   const [expandedSeeAll, setExpandedSeeAll] = useState<Record<string, boolean>>({});
   const [hoveredProject, setHoveredProject] = useState<string | null>(null);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   
   // Use a ref to track loading state to avoid stale closure issues and unnecessary re-renders of the load function
   const loadingRef = useRef<Record<string, boolean>>({});
@@ -124,6 +127,17 @@ export function Sidebar({
     }
   };
 
+  const handleCreateProject = async (name: string) => {
+    try {
+      const p = await createProject(name);
+      toast.success('Project created');
+      navigate(`/projects/${p.id}`);
+    } catch (err) {
+      toast.error('Failed to create project');
+      throw err;
+    }
+  };
+
   return (
     <aside
       className={cn(
@@ -164,24 +178,19 @@ export function Sidebar({
           <div className="flex items-center justify-between px-2 mb-1">
             <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Projects</span>
             <button
-              onClick={async () => {
-                const name = prompt('Enter project name:');
-                if (name) {
-                  try {
-                    const p = await createProject(name);
-                    toast.success('Project created');
-                    navigate(`/projects/${p.id}`);
-                  } catch (err) {
-                    toast.error('Failed to create project');
-                  }
-                }
-              }}
+              onClick={() => setIsCreateModalOpen(true)}
               className="p-1 rounded-md hover:bg-[var(--color-border)]/50 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-all"
               title="New Project"
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
           </div>
+
+          <ProjectCreationModal 
+            isOpen={isCreateModalOpen}
+            onClose={() => setIsCreateModalOpen(false)}
+            onCreate={handleCreateProject}
+          />
 
           {projectsLoading ? (
             <div className="flex flex-col items-center justify-center py-10 opacity-50">
