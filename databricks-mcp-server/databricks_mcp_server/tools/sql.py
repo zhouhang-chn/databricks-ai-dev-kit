@@ -155,7 +155,7 @@ def get_table_stats_and_schema(
     table_stat_level: str = "SIMPLE",
     warehouse_id: str = None,
 ) -> Dict[str, Any]:
-    """Get schema and stats for tables. table_stat_level: NONE (schema only), SIMPLE (default, +row count), DETAILED (+cardinality/min/max/histograms).
+    """Get schema and stats for tables. table_stat_level: NONE (schema only), SIMPLE (default, +row count), DETAILED (full per-column profile incl. null/unique/value counts and samples — runs many aggregations per column and can take several minutes on wide or large tables; only use when the user explicitly asks for a data profile, otherwise stick to SIMPLE).
 
     table_names: list or glob patterns, None=all tables."""
     # Convert string to enum
