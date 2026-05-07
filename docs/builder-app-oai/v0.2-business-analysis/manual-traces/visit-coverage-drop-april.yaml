@@ -1,0 +1,63 @@
+manual_analysis_trace:
+  id: "visit_coverage_drop_april_manual_trace"
+  status: "draft_requires_senior_analyst_execution"
+  requirement_id: "visit_coverage_drop_april"
+  user_question: "Why did visit coverage drop in April?"
+  interpreted_question: >-
+    Diagnose month-over-month decline in valid distinct visited eligible POCs.
+
+  assumptions:
+    - "Coverage means at least one valid visit in month."
+    - "Eligible POCs are active assigned POCs."
+    - "National scope is acceptable if no region is specified, with segment drilldown."
+
+  data_assets_to_use:
+    - "visit_info_daily_fact"
+    - "POC dimension"
+    - "BDR assignment table"
+    - "calendar table"
+
+  context_assets_to_use:
+    - "visit_coverage_rate metric definition"
+    - "approved POC join map"
+    - "known visit_status filter rule"
+    - "data freshness profile"
+
+  analysis_plan:
+    - "Calculate coverage by month"
+    - "Decompose by region"
+    - "Separate numerator and denominator movement"
+    - "Check BDR activity and working-day movement"
+    - "Check POC tier impact"
+    - "Check data freshness and join cardinality"
+
+  sql_steps:
+    - id: "q1"
+      purpose: "monthly coverage"
+      status: "to_be_completed"
+    - id: "q2"
+      purpose: "regional contribution"
+      status: "to_be_completed"
+    - id: "q3"
+      purpose: "BDR productivity"
+      status: "to_be_completed"
+    - id: "q4"
+      purpose: "data-quality validation"
+      status: "to_be_completed"
+
+  validation_steps:
+    - "checked date range"
+    - "checked row count trend"
+    - "checked join cardinality"
+    - "checked denominator consistency"
+    - "checked freshness against expected daily cadence"
+
+  final_answer_template:
+    headline: "Coverage decline was mainly driven by..."
+    required_fields:
+      - "magnitude of decline"
+      - "top contributing segment"
+      - "primary driver"
+      - "confidence"
+      - "next action"
+    status: "to_be_completed_by_senior_analyst"

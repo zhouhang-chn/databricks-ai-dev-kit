@@ -15,7 +15,7 @@ progress tracking.
 | [`next-moves/`](next-moves/) | Current backend Next Moves service design and action plan. |
 | [`frontend-refactor/`](frontend-refactor/) | Story canvas and inspect-panel frontend architecture notes. |
 | [`v0.1-agents-sdk-integration/`](v0.1-agents-sdk-integration/) | Historical migration track for replacing the Claude runtime with the OpenAI Agents SDK. |
-| [`v0.2-business-analysis/`](v0.2-business-analysis/) | Current gap-filling track for reliable business-question answering. |
+| [`v0.2-business-analysis/`](v0.2-business-analysis/) | Current gap-filling track for preparing business scenarios, requirements, context assets, playbooks, manual traces, golden evals, and agent benchmark work. |
 
 ## Versioned Progress Tracks
 
@@ -25,6 +25,11 @@ Each `vX.Y-*` folder should contain:
   matters.
 - `design.md`: the target design for that phase.
 - `action-plan.md`: implementation phases, acceptance gates, and validation.
+
+When a phase introduces progress-tracking artifacts, keep them under the
+versioned folder. For v0.2, the lifecycle artifact folders are `scenarios/`,
+`requirements/`, `asset-packs/`, `context-assets/`, `playbooks/`,
+`manual-traces/`, and `evals/`.
 
 The versioned folders are not the only documentation. They track progress for a
 phase. The active feature docs outside versioned folders should remain aligned

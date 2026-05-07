@@ -1,0 +1,76 @@
+analysis_playbook:
+  id: "diagnostic_decomposition"
+  requirement_types:
+    - "diagnostic_decomposition"
+    - "driver_analysis"
+    - "segment_discovery"
+  purpose: >-
+    Diagnose why a metric moved by separating headline movement, segment
+    contribution, operational drivers, and data-quality drivers.
+
+  default_steps:
+    - id: "confirm_metric"
+      title: "Confirm metric definition"
+      evidence_expected:
+        - "metric owner"
+        - "formula"
+        - "required filters"
+        - "grain"
+      stop_conditions:
+        - "metric definition is missing or conflicting"
+
+    - id: "compare_periods"
+      title: "Compare current period versus baseline"
+      evidence_expected:
+        - "current value"
+        - "baseline value"
+        - "absolute change"
+        - "percentage-point or percentage change"
+
+    - id: "decompose_hierarchy"
+      title: "Decompose by business hierarchy"
+      evidence_expected:
+        - "segment contribution to total movement"
+        - "ranked regions / reps / tiers"
+        - "sparse segment flags"
+
+    - id: "separate_num_den"
+      title: "Separate numerator and denominator effects"
+      evidence_expected:
+        - "visited POC movement"
+        - "eligible POC movement"
+        - "net coverage impact"
+
+    - id: "check_operational_drivers"
+      title: "Check operational drivers"
+      evidence_expected:
+        - "active BDR count"
+        - "working days"
+        - "visits per BDR"
+        - "POC assignment change"
+        - "POC tier mix"
+
+    - id: "check_data_quality"
+      title: "Check data-quality drivers"
+      evidence_expected:
+        - "freshness"
+        - "row count trend"
+        - "null keys"
+        - "duplicate keys"
+        - "join cardinality"
+
+    - id: "write_answer"
+      title: "Write decision-ready answer"
+      evidence_expected:
+        - "headline"
+        - "quantified movement"
+        - "top drivers by contribution"
+        - "confidence"
+        - "caveats"
+        - "next actions"
+
+  answer_rules:
+    - "Rank by contribution to total movement, not only by change rate."
+    - "Separate numerator decline from denominator expansion."
+    - "Avoid causal wording unless design supports causal inference."
+    - "Always include validation checks and confidence level."

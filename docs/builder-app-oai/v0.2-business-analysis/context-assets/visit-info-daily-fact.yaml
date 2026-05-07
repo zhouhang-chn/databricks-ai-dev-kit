@@ -1,0 +1,41 @@
+data_asset_profile:
+  name: "visit_info_daily_fact"
+  business_entity: "POC visit"
+  asset_type: "core_fact"
+  grain: "one row per valid visit event or POC-day, depending on source certification"
+  owner: "Sales Data / Sales Ops"
+  freshness: "daily"
+
+  primary_keys:
+    - "visit_id"
+
+  common_join_keys:
+    poc: "poc_id"
+    employee: "employee_no"
+    date: "visit_date"
+    geography: "region_id"
+
+  trusted_use_cases:
+    - "visit count"
+    - "visit coverage"
+    - "visit duration"
+    - "BDR activity trend"
+
+  required_filters:
+    - "valid visit status filter"
+    - "active BDR-managed POC filter when used for coverage"
+    - "business calendar boundaries"
+
+  known_pitfalls:
+    - "visit_status must be filtered before coverage calculation"
+    - "employee name is not a stable key"
+    - "business day cutoff may differ from calendar day"
+    - "late-arriving visits can understate current-period coverage"
+    - "POC assignment changes can shift denominator by rep or territory"
+
+  validation_queries:
+    - "daily row count trend"
+    - "distinct POC count by month"
+    - "distinct employee count by month"
+    - "null rate for poc_id, employee_no, and visit_date"
+    - "duplicate visit_id check"

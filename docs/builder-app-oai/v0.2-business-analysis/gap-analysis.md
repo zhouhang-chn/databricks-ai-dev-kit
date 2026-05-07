@@ -23,6 +23,47 @@ into:
 The OAI app has the foundation for this, but it is still closer to a general
 Databricks builder/coding agent than a high-confidence business analyst.
 
+## Lifecycle Gap
+
+The next gap is not primarily an agent implementation gap. The larger gap is
+that the docs and source do not yet model the full lifecycle of business
+analysis:
+
+```text
+Business Scenario
+→ Business Analysis Requirement
+→ Data + Context Asset Preparation
+→ Analysis Strategy / Method Selection
+→ Manual Senior Analyst Execution
+→ Golden Eval Construction
+→ Agent Benchmark + Orchestration Design
+```
+
+Without this lifecycle, the agent roadmap can over-optimize prompts, tools, SQL
+safety, or visualization before the team has agreed on what good human analysis
+looks like for real business scenarios.
+
+The first seed scenario is
+[`bdr-visit-efficiency-diagnosis.yaml`](scenarios/bdr-visit-efficiency-diagnosis.yaml).
+It covers Sales Ops / Regional Sales Director decisions around territory, visit
+frequency, and coaching focus, with recurring questions on visit coverage,
+overloaded reps, and high-value POC service levels.
+
+The first drafted lifecycle fixtures are:
+
+- [`requirements/visit-coverage-drop-april.yaml`](requirements/visit-coverage-drop-april.yaml)
+- [`asset-packs/visit-coverage-drop-april.yaml`](asset-packs/visit-coverage-drop-april.yaml)
+- [`context-assets/visit-coverage-rate.yaml`](context-assets/visit-coverage-rate.yaml)
+- [`context-assets/visit-info-daily-fact.yaml`](context-assets/visit-info-daily-fact.yaml)
+- [`playbooks/diagnostic-decomposition.yaml`](playbooks/diagnostic-decomposition.yaml)
+- [`manual-traces/visit-coverage-drop-april.yaml`](manual-traces/visit-coverage-drop-april.yaml)
+- [`evals/visit-coverage-drop-001.yaml`](evals/visit-coverage-drop-001.yaml)
+
+These are intentionally draft artifacts. They make the missing work concrete:
+confirm source-specific data definitions with humans, run the senior analyst
+case manually, convert the trace into calibrated stage-level evals, and only
+then benchmark the agent.
+
 ## Documentation Strategy
 
 `docs/builder-app-oai/` is the documentation root for the OAI app. The root
@@ -90,6 +131,10 @@ What is strong:
 
 | Priority | Gap | Why it matters |
 |---|---|---|
+| P0 | Lifecycle artifacts are only draft fixtures. The BDR seed now has a scenario, first requirement, context assets, playbook, trace template, and eval skeleton, but no completed manual analyst trace. | Agent quality cannot be judged reliably until the human analytical process is captured and converted into calibrated evals. |
+| P0 | No agreed requirement taxonomy is implemented in product or eval code. | A metric lookup, variance diagnosis, causal question, and optimization question require different data, method, validation, and answer style. |
+| P0 | Context assets are not yet operational. Metric definitions, data profiles, join maps, pitfalls, canonical SQL, validation checklists, and answer templates are docs fixtures rather than retrievable runtime assets. | The agent can still behave like a generic SQL chatbot instead of using senior analyst context. |
+| P0 | Golden evals do not yet score the full lifecycle stages. | Final-answer-only scoring cannot isolate whether a failure came from scoping, discovery, planning, SQL execution, validation, or synthesis. |
 | P1 | The semantic layer is too thin. Preferred tables, glossary, sample queries, and caveats are prompt text, not a queryable semantic retrieval path. | The model can choose the wrong table, grain, metric definition, or filters when several similar assets exist. |
 | P1 | SQL correctness guardrails are mostly prompt/tool conventions. There is no mandatory query plan, schema-grounding step, SQL parse/lint gate, source manifest, row-limit policy, or evidence sufficiency check before synthesis. | The agent may produce plausible conclusions from partial, unsafe, or inefficient evidence. |
 | P1 | Read-only SQL enforcement is prefix-based and treats any query starting with `WITH` as read-only. | User-preview/read-only mode can allow unsafe CTE patterns unless SQL is parsed and classified. |
@@ -127,17 +172,31 @@ What is strong:
 
 ## Recommended v0.2 Priorities
 
-1. Add a business-answer evidence manifest and replay contract.
-2. Replace prefix SQL safety checks with parser-based classification and
-   bounded query policy.
-3. Build the semantic answering lane: candidate asset ranking, metric-view
-   helpers, schema/profile cache, and glossary-aware resolution.
-4. Add offline business-question evals with quality and latency criteria.
-5. Implement chart evidence for SQL results.
-6. Narrow tools per run and move long operation state to durable storage.
+1. Treat v0.2 as business-analysis preparation: scenario, requirement,
+   data/context assets, playbooks, manual traces, and golden evals first.
+2. Finish the BDR visit coverage requirement by confirming the metric,
+   denominator, population, date-window rules, and decision-owner expectations.
+3. Complete the first asset pack with governed table/view names, approved joins,
+   freshness checks, canonical SQL, owners, and known pitfalls.
+4. Run the first manual senior analyst execution and record SQL, validation,
+   rejected paths, caveats, and final narrative.
+5. Calibrate stage-level golden evals from the manual trace.
+6. Benchmark the current agent against the golden evals.
+7. Use measured failures to prioritize evidence manifests, SQL safety, semantic
+   retrieval, chart evidence, tool narrowing, and durable operation state.
+8. Expand from the seed scenario into a scenario-to-eval matrix covering visit
+   coverage drop, sales volume decline, campaign performance, territory
+   overload, customer churn, inventory shortage, price impact, and metric
+   lookup.
 
 ## Validation Still Needed
 
+- Scenario, requirement, asset-pack, playbook, analyst-trace, and golden-eval
+  fixture validation.
+- Senior analyst review of BDR visit coverage metric definition, denominator,
+  join keys, exclusions, and required caveats.
+- Stage-level eval validation for scoping, discovery, planning, execution,
+  validation, and answer writing.
 - SQL safety tests for CTE plus write statements.
 - Schema-fidelity tests for generated FastMCP tools.
 - Browser tests for plan events, synthesis cards, evidence replay,

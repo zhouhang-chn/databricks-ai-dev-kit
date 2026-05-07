@@ -1,0 +1,48 @@
+metric_definition:
+  name: "visit_coverage_rate"
+  business_meaning: >-
+    Share of eligible POCs visited at least once in the selected period.
+  formula: "distinct_visited_pocs / eligible_pocs"
+  owner: "Sales Ops"
+  grain: "region x month"
+
+  numerator:
+    name: "distinct_visited_pocs"
+    definition: "distinct POCs with valid visit event"
+    required_filters:
+      - "visit_status = valid"
+    stable_keys:
+      - "poc_id"
+      - "visit_date"
+
+  denominator:
+    name: "eligible_pocs"
+    definition: "active eligible POCs assigned to BDR"
+    required_filters:
+      - "poc_status = active"
+      - "channel in BDR-managed channels"
+    stable_keys:
+      - "poc_id"
+      - "employee_no"
+
+  allowed_dimensions:
+    - "region"
+    - "city"
+    - "bdr"
+    - "poc_tier"
+    - "channel"
+    - "calendar_month"
+
+  required_validation:
+    - "visit fact freshness"
+    - "eligible POC denominator trend"
+    - "distinct BDR count"
+    - "join cardinality from POC to BDR assignment"
+    - "dashboard or certified metric reconciliation when available"
+
+  common_mistakes:
+    - "using visit count instead of distinct visited POCs"
+    - "using all POCs instead of eligible POCs"
+    - "ignoring POC assignment changes"
+    - "joining on employee name instead of stable employee ID"
+    - "ranking by percentage change without contribution sizing"
