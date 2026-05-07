@@ -8,59 +8,35 @@ This document analyzes the current "Next Moves" behavior in
 Next Moves should help the user continue the current analytical or development
 workflow. They should infer likely intent from the latest question, response,
 project context, execution trace, and conversation history. The current
-implementation is useful as a placeholder, but it does not yet behave like an
-intelligent continuation surface.
+implementation now has a backend service with heuristic and model-based
+generation, but its quality still depends on the completeness of the final
+answer text and evidence context passed from the agent run.
 
 ## Current Implementation Facts
 
-Next Moves are currently produced in three places.
+Next Moves are currently produced by a backend service, with frontend fallback
+for compatibility.
 
 | Area | File | Current behavior |
 |------|------|------------------|
-| Backend result event | `databricks-builder-app-oai/server/routers/agent.py` | Emits `next_moves.updated` immediately after `result`, using `_next_moves_for_message(body.message)`. |
-| Backend fallback generator | `databricks-builder-app-oai/server/routers/agent.py` | Generates the same three static moves: Explain evidence, Validate result, Drill down. It only receives the original user message. |
-| Frontend fallback | `databricks-builder-app-oai/client/src/features/analysis/storyTransforms.ts` | Creates the same generic moves when a story completes without explicit moves. |
-| TodoWrite mapping | `databricks-builder-app-oai/client/src/features/analysis/storyTransforms.ts` | Converts agent todos into next moves, but todos represent execution plan steps, not user follow-up intent. |
+| Backend context builder | `databricks-builder-app-oai/server/routers/agent.py` | Accumulates final text, error state, trace summaries, evidence summaries, effective resources, project semantics, workflows, memory, recent messages, role, and release metadata. |
+| Backend generator | `databricks-builder-app-oai/server/services/next_moves.py` | Generates model-based moves through an OpenAI-compatible client with strict JSON parsing, validation, role filtering, fallback heuristics, and event metadata. |
+| Backend event | `databricks-builder-app-oai/server/routers/agent.py` | Emits `next_moves.updated` after the primary run, including generated moves plus source/model/latency/fallback metadata. |
+| Frontend fallback | `databricks-builder-app-oai/client/src/features/analysis/storyTransforms.ts` | Creates generic fallback moves only when a story completes without explicit backend moves, preserving older conversations and interrupted streams. |
 
-The current backend generator is:
+The main source-level gap is that `answer` is currently fed from `final_text`.
+If the agent only calls `submit_conclusion`, the structured
+`synthesis.appended.summary` may not be added to `final_text`, so Next Moves can
+receive incomplete answer context.
 
-```text
-Explain evidence
-Validate result
-Drill down
-```
+## Remaining Product Gap
 
-Each prompt interpolates the original user message. It does not inspect:
+The generator is now in the right place, but move relevance still depends on the
+quality of the story context. It needs durable final-answer text, structured
+evidence summaries, and source/caveat metadata.
 
-- final assistant response
-- whether the response is complete, partial, or failed
-- tool trace and evidence summaries
-- project type and run role
-- current catalog, schema, warehouse, or workspace folder
-- project semantics such as metric views, glossary, preferred tables, caveats,
-  workflows, artifacts, memory, or release state
-- prior turns in the conversation
-- whether the user is in developer mode, user-preview mode, or a read-only user
-  mode
-
-## Product Gap
-
-The current moves are generic affordances. They are not yet recommendations.
-
-For a query like:
-
-```text
-list all catalogs ending with _dev
-```
-
-The current moves are:
-
-- Explain evidence
-- Validate result
-- Drill down
-
-A more useful set would infer that the user is doing discovery and might next
-want to narrow, configure, or operationalize the result:
+For a discovery query, useful moves should infer that the user may next want to
+narrow, configure, or operationalize the result:
 
 - Inspect schemas in these catalogs
 - Find useful analytics tables
@@ -78,8 +54,9 @@ For a build-oriented project answer, a relevant set might be:
 - Generate deployment plan
 - Preview as user
 
-This difference matters because Next Moves are part of the workflow surface. If
-they remain generic, users learn to ignore them.
+This matters because Next Moves are part of the workflow surface. If they are
+based on incomplete answer/evidence context, users learn to ignore them even
+when the generation service itself is working.
 
 ## Reference Principles
 
@@ -201,25 +178,21 @@ fallback.
 
 | Failure mode | Cause | User impact |
 |--------------|-------|-------------|
-| Generic repeated buttons | Static backend and frontend fallbacks | Users ignore the feature. |
-| Moves do not reference answer content | Generator receives only the user message | Suggestions can feel disconnected. |
-| Moves do not adapt to role | No run-role or policy input | Developer and user-preview modes receive similar suggestions. |
-| Moves do not use project settings | No project context input | Suggestions miss defaults, workflows, memory, and available resources. |
-| Todo steps become Next Moves | TodoWrite mapping is treated as user-facing moves | Internal execution plan can leak into the next-action UI. |
-| Frontend/backend duplication | Both sides generate defaults | Behavior can diverge and is harder to test. |
-| No quality instrumentation | No metadata or evaluation target | Relevance cannot be measured. |
+| Empty or incomplete answer context | `final_text` does not include structured `submit_conclusion` summaries | Model-generated moves can be generic or disconnected from the answer. |
+| Weak evidence context | Evidence summaries are compact strings rather than a manifest with sources, metrics, filters, grain, caveats, and row/time bounds | Moves can suggest validation or drill-down steps without knowing what was actually proven. |
+| Generic fallback still appears after interrupted/old stories | Frontend fallback preserves compatibility | Older or failed conversations can still show low-specificity moves. |
+| Workflow-specific ranking is incomplete | Project workflows and memory are included but not deeply ranked | Moves may miss the next step expected by a curated project workflow. |
+| Feedback loop is missing | Click/dismiss feedback is not yet stored or evaluated | Relevance cannot improve from user behavior. |
 
 ## Recommended Direction
 
-Build an explicit Next Move Generator service in the backend.
+Keep the explicit backend generator and improve its inputs in v0.2:
 
-Use AI Gateway/OpenAI-compatible chat completions with the cheap auxiliary
-model, defaulting to `deepseek-v4-flash`. Give the generator a compact context
-pack and require strict JSON output. If model generation fails or produces
-invalid output, use deterministic heuristics.
-
-Keep the frontend as a renderer and compatibility fallback, not the primary
-generator.
+- persist structured conclusions into assistant messages and story metadata
+- pass the persisted conclusion into `NextMoveContext.answer`
+- replace compact evidence strings with a business-answer manifest summary
+- add workflow-aware ranking and click/dismiss feedback later
+- keep the frontend as renderer and compatibility fallback
 
 ## Non-Goals
 
@@ -242,4 +215,3 @@ The implementation is successful when:
 - model failures still produce useful deterministic moves
 - tests cover both model-output parsing and fallback behavior
 - event logs include enough context to evaluate move quality later
-

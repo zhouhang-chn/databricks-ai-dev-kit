@@ -242,6 +242,15 @@ Later behavior:
 - release readiness and publish flow
 - feedback and memory proposal queue
 
+## Current Source Alignment
+
+The current OAI source has JSON-backed project settings, resource-default
+helpers, project context rendering, user-preview role handling, and release
+snapshot support. One v0.2 correctness gap remains in the Project Management
+panel: it loads resource fields from `settings.resources`, but its save payload
+does not yet persist those resource fields. The config panel's resource-default
+save flow is separate from that gap.
+
 ## Persistence And Migration Strategy
 
 The first migration is additive. Existing projects remain valid with default

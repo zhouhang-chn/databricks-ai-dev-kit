@@ -10,10 +10,7 @@ Internal reference documentation for the AI Dev Kit monorepo. Top-level guidance
 | [`mcp/`](mcp/) | Reference for `databricks-mcp-server` — the FastMCP wrapper, middleware, manifest, and tool conventions |
 | [`skills/`](skills/) | Reference for every skill the kit installs — Databricks (this repo), MLflow (`mlflow/skills`), and APX (`databricks-solutions/apx`) — plus authoring, installation, and persona profiles |
 | [`builder-app/`](builder-app/) | Engineering reference for the Builder App - FastAPI backend, React client, agent streaming, Lakebase persistence, deployment, auth, and MCP gateway |
-| [`agents-sdk/`](agents-sdk/) | Analysis and design for `databricks-builder-app-oai`, a new Builder App based on the OpenAI Agents SDK instead of the Claude Agent SDK |
-| [`project-management/`](project-management/) | Concept, design, and action plan for making projects the durable context boundary for Builder and analyst agents |
-| [`frontend-refactor/`](frontend-refactor/) | Design and action plan for moving the OAI Builder App frontend from message list to Analysis Story canvas |
-| [`next-moves/`](next-moves/) | Analysis, design, and action plan for context-aware Next Moves in the OAI Builder App |
+| [`builder-app-oai/`](builder-app-oai/) | Engineering and progress-tracking docs for `databricks-builder-app-oai`, the OpenAI Agents SDK Builder App |
 | [`analyst-app/design.md`](analyst-app/design.md) | Design proposal for a business-oriented Databricks Analyst App for data scientists and business users |
 | [`analyst-app/system-design.md`](analyst-app/system-design.md) | Phase 0 system design decisions for the externally hosted Databricks Analyst App |
 | [`analyst-app/plan.md`](analyst-app/plan.md) | Build plan for the externally hosted Databricks Analyst App |

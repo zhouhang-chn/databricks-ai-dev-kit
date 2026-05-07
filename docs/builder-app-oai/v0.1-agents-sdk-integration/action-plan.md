@@ -43,18 +43,21 @@ implementation until the OpenAI version is complete and separately validated.
   by prompt instruction only.
 - Keep OpenAI model credentials separate from Databricks tool credentials.
 - Do not enable shell execution in MVP.
-- Use `npm` for `databricks-builder-app-oai` frontend commands and keep a
-  `package-lock.json` in that project.
+- Use `pnpm` for `databricks-builder-app-oai` frontend commands.
+- Do not introduce new npm lockfiles.
 - Before browser or frontend tests, confirm both `127.0.0.1:8000` and the
   frontend server under test are reachable.
 
 ## Progress Snapshot
 
-Last updated: 2026-05-02.
+Last updated: 2026-05-07.
+
+This v0.1 plan is retained as migration history. Business-question correctness
+work is tracked in [`../v0.2-business-analysis/`](../v0.2-business-analysis/).
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| Phase 0: Repository and Docs Setup | Complete | Canonical `docs/agents-sdk/` path exists and the misspelled path search is clean. |
+| Phase 0: Repository and Docs Setup | Complete | Canonical OAI docs now live under `docs/builder-app-oai/`; this folder tracks v0.1 migration history. |
 | Phase 1: Scaffold `databricks-builder-app-oai` | Complete | New sibling app exists with server, client, Alembic, scripts, app config, and package metadata updated. Generated/runtime directories remain ignored. |
 | Phase 2: Dependency and Configuration Cutover | Complete | `claude-agent-sdk` and `anthropic` were removed from the new app dependency set; `openai-agents` and AI Gateway/OpenAI env vars were added. |
 | Phase 3: Runtime Adapter | Implemented, live run pending | OpenAI runtime adapter, model settings, event normalization, cancellation hook, and SDK session helper are in place. A live AI Gateway run still needs credentials. |
@@ -75,8 +78,8 @@ UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run pytest tests -q
 UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run python -c "import agents; import server.app; print('openai agents and server import ok')"
 UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run ruff check server/services/agent.py server/services/agent_runtime server/services/tools server/services/title_generator.py server/routers/config.py server/routers/agent.py server/mcp_gateway.py --select F,E9
 cd client
-npm run lint --cache /tmp/npm-cache-ai-dev-kit
-npm run build:typecheck --cache /tmp/npm-cache-ai-dev-kit
+pnpm lint
+pnpm build:typecheck
 ```
 
 Known validation gaps:
@@ -95,8 +98,8 @@ Goal: make the target path and documentation structure unambiguous.
 Tasks:
 
 - Create `databricks-builder-app-oai/` as a sibling of `databricks-builder-app/`.
-- Use `docs/agents-sdk/` as the canonical OpenAI Agents SDK docs path.
-- Update all links in `docs/README.md`, `docs/agents-sdk/README.md`, and this
+- Use `docs/builder-app-oai/` as the canonical OAI app docs path.
+- Update all links in `docs/README.md`, `docs/builder-app-oai/README.md`, and this
   action plan.
 - Add a tracking issue or checklist entry for every open question in
   `design.md`.
@@ -128,7 +131,8 @@ Tasks:
   - `client/out/`
   - build caches
   - local `.env*` files containing secrets
-- Keep `client/package-lock.json` as the frontend lockfile for the new app.
+- Use `pnpm` for frontend package commands.
+- Do not add new npm lockfiles.
 - Update package metadata and app labels:
   - Python project name: `databricks-builder-app-oai`
   - FastAPI title and description
@@ -140,14 +144,13 @@ Suggested checks:
 
 ```bash
 rg -n "Claude|claude|Anthropic|anthropic|ANTHROPIC|claude_agent_sdk" databricks-builder-app-oai
-rg -n "pnpm|pnpm-lock" databricks-builder-app-oai/client databricks-builder-app-oai/scripts
 ```
 
 Acceptance gates:
 
 - `databricks-builder-app-oai/` imports as a separate app tree.
-- `databricks-builder-app-oai/client/package-lock.json` exists.
-- No `pnpm-lock.yaml` exists in `databricks-builder-app-oai/client/`.
+- Frontend commands documented for the OAI app use `pnpm`.
+- No new npm lockfile is introduced by this work.
 - Remaining Claude references are documented migration targets, not active
   runtime dependencies.
 
@@ -474,7 +477,7 @@ Tasks:
 - Add `/api/config/runtime` if the UI needs runtime metadata.
 - Update local development docs for:
   - AI Gateway OpenAI-compatible env vars
-  - npm commands
+  - frontend package-manager commands
   - backend/frontend service checks
 - Update deployment docs for `databricks-builder-app-oai`.
 - Update app examples and screenshots only after the runtime works.
@@ -483,9 +486,9 @@ Frontend checks:
 
 ```bash
 cd databricks-builder-app-oai/client
-npm install
-npm run lint
-npm run build:typecheck
+pnpm install
+pnpm lint
+pnpm build:typecheck
 ```
 
 Browser test prerequisites:
@@ -529,7 +532,7 @@ Acceptance gates:
 
 | Area | Primary files | Main risk |
 |------|---------------|-----------|
-| Scaffold/config | `databricks-builder-app-oai/pyproject.toml`, scripts, app yaml | accidentally carrying Claude or pnpm artifacts |
+| Scaffold/config | `databricks-builder-app-oai/pyproject.toml`, scripts, app yaml | accidentally carrying Claude or package-manager artifacts |
 | Runtime | `server/services/agent_runtime/*` | SDK event and session semantics |
 | File tools | `server/services/tools/project_files.py` | path escape or oversized file handling |
 | Databricks tools | `server/services/tools/databricks_openai.py` | schema parity and long-running operations |
@@ -567,11 +570,11 @@ post-MVP branch.
 - [x] `rg -n "claude_agent_sdk|anthropic|ANTHROPIC|ClaudeSDKClient" databricks-builder-app-oai`
   returns no active runtime dependency. Remaining `.claude` references are
   legacy skill-migration fallback paths only.
-- [x] `rg -n "pnpm|pnpm-lock" databricks-builder-app-oai/client databricks-builder-app-oai/scripts`
+- [x] Frontend command examples were updated to `pnpm`.
   returns no new package-management violations.
 - [x] Backend unit tests pass.
-- [x] Frontend `npm run lint` passes.
-- [x] Frontend `npm run build:typecheck` passes.
+- [x] Frontend `pnpm lint` passes.
+- [x] Frontend `pnpm build:typecheck` passes.
 - [ ] API integration tests pass.
 - [ ] Browser tests pass after confirming both backend and frontend servers are
   reachable.

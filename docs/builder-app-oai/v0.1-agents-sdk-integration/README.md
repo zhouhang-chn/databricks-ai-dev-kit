@@ -1,10 +1,12 @@
 # OpenAI Agents SDK Builder App
 
-This section captures the analysis and design for `databricks-builder-app-oai`,
-a new sibling version of `databricks-builder-app` that depends on the OpenAI
+This folder captures the v0.1 migration analysis and design for
+`databricks-builder-app-oai`: a sibling Builder App that depends on the OpenAI
 Agents SDK instead of the Claude Agent SDK.
 
-The canonical directory is `docs/agents-sdk`.
+This is a historical progress track. Current OAI app feature docs live in
+[`../`](../), and v0.2 business-question gap filling is tracked in
+[`../v0.2-business-analysis/`](../v0.2-business-analysis/).
 
 ## Contents
 
@@ -13,15 +15,14 @@ The canonical directory is `docs/agents-sdk`.
 | [analysis.md](analysis.md) | Current Builder App coupling to Claude, target `databricks-builder-app-oai` scope, OpenAI Agents SDK capability fit, migration constraints, and risks |
 | [design.md](design.md) | Proposed `databricks-builder-app-oai` runtime architecture, tool strategy, persistence, streaming, deployment, and rollout plan |
 | [action-plan.md](action-plan.md) | Implementation phases, acceptance gates, and validation checklist |
-| [data-visualization.md](data-visualization.md) | Chart rendering in analysis stories: detection, rendering, tool integration, and phased rollout |
-| [planning-orchestration.md](planning-orchestration.md) | Planning intent generation, step-by-step execution, and structured evidence tracking |
 
 ## Source References
 
 - Target app folder: `databricks-builder-app-oai`
-- Current Builder App docs: [`docs/builder-app`](../builder-app/README.md)
-- Current backend runtime: [`databricks-builder-app/server/services/agent.py`](../../databricks-builder-app/server/services/agent.py)
-- Current Databricks tool wrapper: [`databricks-builder-app/server/services/databricks_tools.py`](../../databricks-builder-app/server/services/databricks_tools.py)
+- Current OAI docs: [`docs/builder-app-oai`](../README.md)
+- Current Builder App docs: [`docs/builder-app`](../../builder-app/README.md)
+- Legacy backend runtime reference: [`databricks-builder-app/server/services/agent.py`](../../../databricks-builder-app/server/services/agent.py)
+- OAI runtime implementation: [`databricks-builder-app-oai/server/services/agent_runtime`](../../../databricks-builder-app-oai/server/services/agent_runtime/)
 - OpenAI Agents SDK docs:
   - [Intro](https://openai.github.io/openai-agents-python/)
   - [Running agents](https://openai.github.io/openai-agents-python/running_agents/)

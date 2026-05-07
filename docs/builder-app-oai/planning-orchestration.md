@@ -253,6 +253,15 @@ These were in earlier drafts and are explicitly out of scope:
 - **Discovery as a separate enforced state machine** — implicit only. Time
   before the first `update_plan(op="create")` is "discovery"; nothing more.
 
+## Current Source Alignment
+
+The structured plan and synthesis stream events are implemented in the OAI app.
+The v0.2 business-analysis track adds a durability requirement: a run that only
+emits `submit_conclusion` must still persist the summary as the assistant
+message and feed it into replay and Next Moves. Without that, the UI can show a
+conclusion during the live stream while message history and post-run
+recommendations receive incomplete answer text.
+
 ## Implementation slice
 
 The minimum viable change touches eight files and ships in one PR:

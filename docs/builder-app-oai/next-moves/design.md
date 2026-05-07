@@ -45,9 +45,9 @@ flowchart LR
   H --> I["Story card and right inspector"]
 ```
 
-## New Backend Module
+## Backend Module
 
-Add:
+The current implementation owns this boundary in:
 
 ```text
 databricks-builder-app-oai/server/services/next_moves.py
@@ -58,16 +58,15 @@ Responsibilities:
 - define input and output dataclasses
 - build compact context for generation
 - call AI Gateway/OpenAI-compatible chat completions with
-  `OPENAI_TITLE_MODEL` or `OPENAI_MODEL_MINI`, defaulting to
-  `deepseek-v4-flash`
+  `OPENAI_NEXT_MOVES_MODEL`, defaulting to `deepseek-v4-flash`
 - parse and validate JSON output
 - apply deterministic fallback heuristics
 - normalize labels, prompts, action types, and confidence scores
 
 ## Runtime Integration
 
-Current behavior emits static moves in `server/routers/agent.py` after the
-`result` event. Replace that with:
+Current behavior emits `next_moves.updated` after the primary run completes.
+The route should continue to:
 
 1. Accumulate final text, trace steps, tool summaries, error state, and result
    metadata during the run.
@@ -76,15 +75,22 @@ Current behavior emits static moves in `server/routers/agent.py` after the
 4. Emit `next_moves.updated` when moves are ready.
 5. If generation fails or times out, emit fallback moves.
 
-The final answer should not wait for an expensive process. Target timeout:
+v0.2 must ensure `NextMoveContext.answer` uses the persisted structured
+conclusion when the primary model emits `submit_conclusion` without normal text
+output.
+
+The final answer should not wait for an expensive process. Current source uses
+this retry schedule:
 
 ```text
-1.5s to 3.0s
+15s, then 30s
 ```
 
 The generator can run synchronously in the same background run coroutine because
 it happens after the primary answer is complete. If latency becomes visible, it
 can be moved into an async task that emits a late `next_moves.updated` event.
+v0.2 should measure this cost and decide whether to shorten the budget or emit
+late moves asynchronously.
 
 ## Data Model
 
@@ -231,16 +237,14 @@ Context:
 
 ## Model Choice
 
-Use the cheap auxiliary model first:
+Current source resolves the model as:
 
 ```text
-OPENAI_MODEL_MINI
-OPENAI_TITLE_MODEL
+OPENAI_NEXT_MOVES_MODEL
 deepseek-v4-flash fallback
 ```
 
-Use the same OpenAI-compatible client pattern already used by
-`server/services/title_generator.py`.
+It uses the same OpenAI-compatible client pattern as the other OAI services.
 
 Rationale:
 
@@ -408,7 +412,4 @@ Existing frontend `NextMove` types can be extended without breaking old events.
   evaluation?
 - Should users be able to dismiss a bad move and provide feedback?
 - Should project workflows explicitly seed or override generated moves?
-- Should the generator use a separate `OPENAI_NEXT_MOVES_MODEL`, or reuse
-  `OPENAI_MODEL_MINI` / `OPENAI_TITLE_MODEL`?
 - Should Next Moves include icons or tags beyond `actionType`?
-

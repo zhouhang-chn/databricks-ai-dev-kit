@@ -24,19 +24,23 @@ role-aware, project-aware recommendations while preserving the current
 
 ## Progress Snapshot
 
-Last updated: 2026-05-05.
+Last updated: 2026-05-07.
+
+The backend generator is implemented. v0.2 business-analysis work tracks the
+remaining dependency on durable final-answer text and richer evidence manifests.
 
 | Phase | Status | Notes |
 |-------|--------|-------|
 | Phase 0: Document Current State And Target | Complete | This docs set records the current static implementation and target intelligent design. |
 | Phase 1: Backend Heuristic Generator | Complete | `server/services/next_moves.py` now provides typed context, fallback heuristics, and route integration. |
 | Phase 2: Context Pack And Event Metadata | Complete | Agent runs now pass answer, error, trace summaries, evidence summaries, resources, role, semantics, workflows, memory, and generation metadata. |
-| Phase 3: Model-Based Generator | Complete | AI Gateway/OpenAI-compatible generation is implemented with timeout, strict JSON parsing, validation, and heuristic fallback. |
+| Phase 3: Model-Based Generator | Complete | AI Gateway/OpenAI-compatible generation is implemented with `OPENAI_NEXT_MOVES_MODEL`, timeout retries, strict JSON parsing, validation, and heuristic fallback. |
 | Phase 4: Frontend Contract Cleanup | Complete | Frontend `NextMove` accepts additive metadata, and TodoWrite no longer overwrites recommendations. |
 | Phase 5: Role And Policy Enforcement | Complete | Read-only roles filter write/deploy/delete-style model and heuristic moves; risky developer moves can require confirmation metadata. |
 | Phase 6: Tests And Evaluation Fixtures | Partial | Unit tests cover fallback, parsing, policy filtering, and disabled-model fallback; qualitative eval fixtures remain future work. |
 | Phase 7: Observability And Feedback | Partial | Backend logs source/model/latency/fallback reason and emits event metadata; click/dismiss feedback and MLflow spans remain future work. |
 | Phase 8: Workflow And Memory Integration | Partial | Project semantics, workflows, and memory are included in the context pack; workflow-specific ranking remains future work. |
+| v0.2 dependency: Durable Answer Context | Pending | `submit_conclusion` summaries should be persisted and passed into Next Moves when normal text output is empty. |
 
 ## Phase 0: Document Current State And Target
 
@@ -136,11 +140,9 @@ Tasks:
 - Add OpenAI-compatible client creation to `next_moves.py`.
 - Resolve model in this order:
   - `OPENAI_NEXT_MOVES_MODEL`
-  - `OPENAI_MODEL_MINI`
-  - `OPENAI_TITLE_MODEL`
   - `deepseek-v4-flash`
 - Call chat completions with strict JSON instructions.
-- Timeout after 1.5 to 3.0 seconds.
+- Retry with the current 15s, then 30s timeout schedule.
 - Validate:
   - JSON parses
   - 1 to 5 moves
@@ -306,21 +308,21 @@ Acceptance gates:
 ## Rollout Plan
 
 1. Ship heuristic generator first.
-2. Add model generator behind an environment flag:
+2. Keep model generation controlled by:
 
 ```text
 NEXT_MOVES_MODEL_ENABLED=true
 ```
 
 3. Keep frontend fallback for compatibility.
-4. Compare model and heuristic outputs in logs for a few local runs.
-5. Enable model generation by default once latency and relevance are acceptable.
+4. Compare model and heuristic outputs in logs for local and gated live runs.
+5. Tune timeout/retry settings once latency and relevance are measured.
 
 ## Risks
 
 | Risk | Mitigation |
 |------|------------|
-| Model adds latency after answer | Short timeout and heuristic fallback. |
+| Model adds latency after answer | Bounded timeout retries, latency logging, and heuristic fallback. |
 | Suggestions are unsafe for read-only users | Policy filter after generation. |
 | Suggestions are generic despite model use | Include answer, trace, project context, and recent turns. |
 | Model emits invalid JSON | Strict parser and fallback. |

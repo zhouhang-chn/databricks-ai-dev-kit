@@ -21,19 +21,23 @@ BI-style developer/user release lifecycle and richer analyst-agent behavior.
 - Do not store tokens or secrets in project settings.
 - Enforce tool access by constructing the tool list, not by prompt text only.
 - Treat releases as snapshots once user-facing analyst sessions exist.
-- Use `npm` for `databricks-builder-app-oai/client`.
+- Use `pnpm` for `databricks-builder-app-oai/client`.
 
 ## Progress Snapshot
 
-Last updated: 2026-05-03.
+Last updated: 2026-05-07.
+
+The progress snapshot below reflects source-level feature presence. v0.2 tracks
+business-answer correctness gaps that cut across these phases, including the
+current Project Management panel resource-save gap.
 
 | Phase | Status | Notes |
 |-------|--------|-------|
 | Phase 0: Document Target Model | Complete | Concept, design, and action-plan docs now define the project/conversation/release model and OAI implementation path. |
 | Phase 1: Project Metadata And Settings MVP | Complete | Project fields, JSON settings helpers, API patch support, Alembic migration, and tests are implemented. |
 | Phase 2: Project Defaults In Agent Runs | Complete | Agent routes resolve project defaults plus conversation overrides and pass a project context pack into the OpenAI runtime prompt. |
-| Phase 3: Project Settings UI Slice | Complete | Project page inherits defaults and the config panel can save current resource selections as project defaults. |
-| Phase 4: Project Home And Creation Wizard | Complete | Project management panel now edits setup fields, purpose, type/status, audience, success criteria, and readiness. |
+| Phase 3: Project Settings UI Slice | Partial | Project page inherits defaults and the config panel can save resource selections as project defaults; the Project Management panel loads resource fields but does not save them yet. |
+| Phase 4: Project Home And Creation Wizard | Partial | Project management panel edits purpose, semantic scope, releases, and readiness; resource persistence from that panel remains open. |
 | Phase 5: Resource And Semantic Registry | Complete | JSON-backed registry supports pinned resources, metric views, preferred/deprecated tables, sample queries, glossary, and caveats. |
 | Phase 6: Developer/User Roles | Complete | Settings support role lists, the UI can switch between developer and user-preview roles, and user-preview runs receive read-oriented tools. |
 | Phase 7: Releases And User Sessions | Complete | Project panel can publish settings snapshots; user-preview runs pin to the current release snapshot when present. |
@@ -285,6 +289,6 @@ cd databricks-builder-app-oai
 UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run pytest tests -q
 UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run ruff check server/project_config.py server/db/models.py server/services/agent.py server/services/agent_runtime/base.py server/services/agent_runtime/openai_runtime.py server/services/system_prompt.py server/services/tools/project_files.py server/services/tools/databricks_openai.py server/routers/projects.py server/routers/agent.py tests --select F,E9
 cd client
-npm run lint --cache /tmp/npm-cache-ai-dev-kit
-npm run build:typecheck --cache /tmp/npm-cache-ai-dev-kit
+pnpm lint
+pnpm build:typecheck
 ```

@@ -9,7 +9,7 @@ as the source architecture reference.
 
 ## Progress Snapshot
 
-Last updated: 2026-05-04.
+Last updated: 2026-05-07.
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -139,6 +139,6 @@ Acceptance gates:
 
 ```bash
 cd databricks-builder-app-oai/client
-npm run lint --cache /tmp/npm-cache-ai-dev-kit
-npm run build:typecheck --cache /tmp/npm-cache-ai-dev-kit
+pnpm lint
+pnpm build:typecheck
 ```
