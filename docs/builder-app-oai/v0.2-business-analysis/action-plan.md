@@ -27,8 +27,8 @@ Last updated: 2026-05-07.
 
 | Phase | Status | Notes |
 |---|---|---|
-| Phase 0: Docs and Baseline Alignment | In progress | v0.2 gap analysis, design, and action plan exist. Existing active docs still need occasional source-alignment updates as implementation changes. |
-| Phase 1: Critical Persistence Fixes | Pending | Persist Project Management resources and structured conclusions. |
+| Phase 0: Docs and Baseline Alignment | Complete | OAI docs root, v0.1 migration track, and v0.2 gap/design/action-plan are aligned. |
+| Phase 1: Critical Persistence Fixes | Complete | Project Management resources and structured conclusion fallback persistence are implemented with focused regression tests. |
 | Phase 2: Business Answer Manifest | Pending | Add structured sources, metrics, filters, grain, caveats, confidence, and replay metadata. |
 | Phase 3: SQL Safety and Query Bounds | Pending | Replace prefix checks with parser-based classification and bounded query policy. |
 | Phase 4: Semantic Answering Lane | Pending | Rank preferred assets and metric views before broad discovery or SQL. |

@@ -68,6 +68,21 @@ def _project_context_section(project_context: dict, key: str) -> dict:
     return section if isinstance(section, dict) else {}
 
 
+def _synthesis_summary_from_event(event: dict[str, Any]) -> str:
+    """Extract a durable answer summary from a synthesis stream event."""
+    if event.get('type') != 'synthesis.appended':
+        return ''
+    summary = event.get('summary')
+    return summary.strip() if isinstance(summary, str) else ''
+
+
+def _answer_text_for_run(final_text: str, synthesis_summary: str | None) -> str:
+    """Return the text that should back persistence and post-run metadata."""
+    if final_text.strip():
+        return final_text
+    return (synthesis_summary or '').strip()
+
+
 class InvokeAgentRequest(BaseModel):
     """Request to invoke the OpenAI agent runtime."""
 
@@ -291,6 +306,7 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
         trace_steps_by_tool_id: dict[str, NextMoveTraceStep] = {}
         tool_calls_by_id: dict[str, dict[str, Any]] = {}
         evidence_summaries: list[str] = []
+        synthesis_summary: Optional[str] = None
 
         try:
             # Stream all events from the OpenAI runtime.
@@ -432,6 +448,9 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                     'plan.revised',
                     'synthesis.appended',
                 }:
+                    synthesis = _synthesis_summary_from_event(event)
+                    if synthesis:
+                        synthesis_summary = synthesis
                     # Semantic plan/synthesis events from update_plan and
                     # submit_conclusion. The runtime already populates them with
                     # the exact field names the frontend reducer expects, so
@@ -507,6 +526,8 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
 
             emit({'type': 'error', 'error': error_message})
 
+        answer_text = _answer_text_for_run(final_text, synthesis_summary)
+
         if not stream.is_cancelled:
             try:
                 next_move_generation = await generate_next_moves(
@@ -520,7 +541,7 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                         project_status=str(project_context.get('status') or ''),
                         release_id=str(project_context.get('release_id') or ''),
                         question=body.message,
-                        answer=final_text,
+                        answer=answer_text,
                         error=error_message,
                         recent_messages=_recent_messages_for_next_moves(
                             conversation,
@@ -558,8 +579,8 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                 )
 
                 # Save assistant response (or error)
-                if final_text or error_message:
-                    content = final_text if final_text else f'Error: {error_message}'
+                if answer_text or error_message:
+                    content = answer_text if answer_text else f'Error: {error_message}'
                     is_error = bool(error_message)
                     logger.info(
                         f'Saving assistant message: {len(content)} chars, '
@@ -601,7 +622,7 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
 
                 logger.info(
                     f'Saved messages to conversation {conversation_id}: '
-                    f'text={len(final_text)} chars, error={error_message is not None}'
+                    f'text={len(answer_text)} chars, error={error_message is not None}'
                 )
 
                 # Mark project for backup (will be processed by backup worker)

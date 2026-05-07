@@ -24,10 +24,10 @@ for compatibility.
 | Backend event | `databricks-builder-app-oai/server/routers/agent.py` | Emits `next_moves.updated` after the primary run, including generated moves plus source/model/latency/fallback metadata. |
 | Frontend fallback | `databricks-builder-app-oai/client/src/features/analysis/storyTransforms.ts` | Creates generic fallback moves only when a story completes without explicit backend moves, preserving older conversations and interrupted streams. |
 
-The main source-level gap is that `answer` is currently fed from `final_text`.
-If the agent only calls `submit_conclusion`, the structured
-`synthesis.appended.summary` may not be added to `final_text`, so Next Moves can
-receive incomplete answer context.
+The route now falls back to the structured `synthesis.appended.summary` when
+normal streamed assistant text is empty. The remaining source-level gap is that
+the generator still receives compact evidence strings instead of a durable
+business-answer manifest.
 
 ## Remaining Product Gap
 
@@ -178,7 +178,6 @@ fallback.
 
 | Failure mode | Cause | User impact |
 |--------------|-------|-------------|
-| Empty or incomplete answer context | `final_text` does not include structured `submit_conclusion` summaries | Model-generated moves can be generic or disconnected from the answer. |
 | Weak evidence context | Evidence summaries are compact strings rather than a manifest with sources, metrics, filters, grain, caveats, and row/time bounds | Moves can suggest validation or drill-down steps without knowing what was actually proven. |
 | Generic fallback still appears after interrupted/old stories | Frontend fallback preserves compatibility | Older or failed conversations can still show low-specificity moves. |
 | Workflow-specific ranking is incomplete | Project workflows and memory are included but not deeply ranked | Moves may miss the next step expected by a curated project workflow. |

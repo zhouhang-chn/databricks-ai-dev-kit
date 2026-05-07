@@ -140,12 +140,10 @@ async def lifespan(app: FastAPI):
   setup_mlflow_tracing()
 
   # Initialize database if configured
-  db_initialized = False
   if is_postgres_configured():
     logger.info('Initializing database...')
     try:
       init_database()
-      db_initialized = True
 
       # Start token refresh for dynamic OAuth mode (Databricks Apps)
       if is_dynamic_token_mode():
@@ -271,7 +269,7 @@ if build_path:
 else:
   logger.warning(
     f'Build directory not found in any of: {[str(p) for p in _possible_build_paths]}. '
-    'In development, run Vite separately: cd client && npm run dev'
+    'In development, run Vite separately: cd client && pnpm dev'
   )
 
 # ---------------------------------------------------------------------------

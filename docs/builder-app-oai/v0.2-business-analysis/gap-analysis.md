@@ -73,16 +73,23 @@ What is strong:
 | `v0.1-agents-sdk-integration/*` | Explains runtime migration and most implemented runtime boundaries. | Keep as v0.1 history; update only stale paths, package-manager policy, and links to v0.2. |
 | `planning-orchestration.md` | Correctly defines `update_plan` and `submit_conclusion` as the story contract. | Add v0.2 acceptance gates for persisting and replaying structured conclusions. |
 | `data-visualization.md` | Defines `ChartSpec` and phased chart evidence design. | No current implementation path produces chart evidence. |
-| `project-management/*` | Defines durable settings, resources, semantics, releases, roles, memory, and governance. | Some progress status is stronger than verified source behavior; resource settings loaded in the Project Management panel are not saved. |
-| `next-moves/*` | Backend Next Moves service exists with model and heuristic generation. | Quality depends on durable final answer text and compact evidence context. |
+| `project-management/*` | Defines durable settings, resources, semantics, releases, roles, memory, and governance. | Remaining v0.2 work is business-answer behavior on top of project settings, not the resource save path. |
+| `next-moves/*` | Backend Next Moves service exists with model and heuristic generation. | Quality now depends on richer evidence context and future manifest summaries. |
 | `frontend-refactor/*` | Story canvas, story card, and inspector direction matches source. | Business-answer correctness now depends more on backend evidence contracts than more frontend refactoring. |
+
+## Resolved in Phase 1
+
+- Project Management resource defaults are now included in the panel save
+  payload for catalog, schema, cluster, warehouse, workspace folder, and MLflow
+  experiment.
+- Structured `submit_conclusion` summaries now provide fallback durable answer
+  text for assistant-message persistence and Next Moves when normal streamed
+  assistant text is empty.
 
 ## Correctness Gaps
 
 | Priority | Gap | Why it matters |
 |---|---|---|
-| P0 | Project resource defaults are shown in the Project Management panel but are not saved. `defaultCatalog`, `defaultSchema`, cluster, warehouse, workspace folder, and MLflow experiment state are loaded, but `handleSave` only sends `semantics` and `governance`. | Users can believe they saved the intended data scope while later runs silently fall back to conversation values or defaults. |
-| P0 | Structured conclusions are not persisted as assistant messages. The route accumulates `final_text` from text events; `synthesis.appended` is forwarded but not appended to `final_text`. | Replay, message history, and Next Moves can lose the actual answer when the model follows the prompt and only calls `submit_conclusion`. |
 | P1 | The semantic layer is too thin. Preferred tables, glossary, sample queries, and caveats are prompt text, not a queryable semantic retrieval path. | The model can choose the wrong table, grain, metric definition, or filters when several similar assets exist. |
 | P1 | SQL correctness guardrails are mostly prompt/tool conventions. There is no mandatory query plan, schema-grounding step, SQL parse/lint gate, source manifest, row-limit policy, or evidence sufficiency check before synthesis. | The agent may produce plausible conclusions from partial, unsafe, or inefficient evidence. |
 | P1 | Read-only SQL enforcement is prefix-based and treats any query starting with `WITH` as read-only. | User-preview/read-only mode can allow unsafe CTE patterns unless SQL is parsed and classified. |
@@ -114,27 +121,23 @@ What is strong:
 | Use governed metrics | Project settings support metric views. | No first-class metric-view answering path in the analyst loop. |
 | Explain evidence | Tool results become evidence blocks and inspect-panel payloads. | No required source manifest in the conclusion. |
 | Visualize analytical shape | Visualization design exists and type includes `chart`. | No implementation produces chart evidence today. |
-| Persist and replay answers | Execution events and messages are persisted after completion. | Structured `submit_conclusion` can be absent from persisted assistant text. |
-| Support user preview | Release-pinned settings and read-only mode exist. | Resource-save and SQL-prefix gaps weaken reliability. |
+| Persist and replay answers | Execution events and messages are persisted after completion; structured synthesis now backs assistant text when normal text is empty. | A durable business-answer manifest is still missing. |
+| Support user preview | Release-pinned settings and read-only mode exist. | SQL prefix safety still weakens reliability. |
 | Prove quality | Runtime and helper unit tests exist. | No business-question eval suite scores table choice, SQL correctness, evidence, caveats, usefulness, or latency. |
 
 ## Recommended v0.2 Priorities
 
-1. Persist Project Management resources and structured conclusions.
-2. Add a business-answer evidence manifest and replay contract.
-3. Replace prefix SQL safety checks with parser-based classification and
+1. Add a business-answer evidence manifest and replay contract.
+2. Replace prefix SQL safety checks with parser-based classification and
    bounded query policy.
-4. Build the semantic answering lane: candidate asset ranking, metric-view
+3. Build the semantic answering lane: candidate asset ranking, metric-view
    helpers, schema/profile cache, and glossary-aware resolution.
-5. Add offline business-question evals with quality and latency criteria.
-6. Implement chart evidence for SQL results.
-7. Narrow tools per run and move long operation state to durable storage.
+4. Add offline business-question evals with quality and latency criteria.
+5. Implement chart evidence for SQL results.
+6. Narrow tools per run and move long operation state to durable storage.
 
 ## Validation Still Needed
 
-- Unit tests for Project Management resource persistence.
-- Unit tests that a `submit_conclusion`-only run persists the answer and feeds
-  Next Moves.
 - SQL safety tests for CTE plus write statements.
 - Schema-fidelity tests for generated FastMCP tools.
 - Browser tests for plan events, synthesis cards, evidence replay,

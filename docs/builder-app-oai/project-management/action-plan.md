@@ -28,16 +28,15 @@ BI-style developer/user release lifecycle and richer analyst-agent behavior.
 Last updated: 2026-05-07.
 
 The progress snapshot below reflects source-level feature presence. v0.2 tracks
-business-answer correctness gaps that cut across these phases, including the
-current Project Management panel resource-save gap.
+business-answer correctness gaps that cut across these phases.
 
 | Phase | Status | Notes |
 |-------|--------|-------|
 | Phase 0: Document Target Model | Complete | Concept, design, and action-plan docs now define the project/conversation/release model and OAI implementation path. |
 | Phase 1: Project Metadata And Settings MVP | Complete | Project fields, JSON settings helpers, API patch support, Alembic migration, and tests are implemented. |
 | Phase 2: Project Defaults In Agent Runs | Complete | Agent routes resolve project defaults plus conversation overrides and pass a project context pack into the OpenAI runtime prompt. |
-| Phase 3: Project Settings UI Slice | Partial | Project page inherits defaults and the config panel can save resource selections as project defaults; the Project Management panel loads resource fields but does not save them yet. |
-| Phase 4: Project Home And Creation Wizard | Partial | Project management panel edits purpose, semantic scope, releases, and readiness; resource persistence from that panel remains open. |
+| Phase 3: Project Settings UI Slice | Complete | Project page inherits defaults, the config panel can save resource selections as project defaults, and the Project Management panel persists displayed resource defaults. |
+| Phase 4: Project Home And Creation Wizard | Complete | Project management panel edits purpose, resource defaults, semantic scope, releases, and readiness. |
 | Phase 5: Resource And Semantic Registry | Complete | JSON-backed registry supports pinned resources, metric views, preferred/deprecated tables, sample queries, glossary, and caveats. |
 | Phase 6: Developer/User Roles | Complete | Settings support role lists, the UI can switch between developer and user-preview roles, and user-preview runs receive read-oriented tools. |
 | Phase 7: Releases And User Sessions | Complete | Project panel can publish settings snapshots; user-preview runs pin to the current release snapshot when present. |

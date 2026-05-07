@@ -379,6 +379,14 @@ function ProjectManagementPanel({
     onSave({
       description: description || null,
       settings: {
+        resources: {
+          default_catalog: defaultCatalog.trim() || null,
+          default_schema: defaultSchema.trim() || null,
+          cluster_id: selectedClusterId || null,
+          warehouse_id: selectedWarehouseId || null,
+          workspace_folder: workspaceFolder.trim() || null,
+          mlflow_experiment_name: mlflowExperimentName.trim() || null,
+        },
         semantics: {
           preferred_tables: splitLines(preferredTables),
           glossary: parseGlossary(glossary),
@@ -801,7 +809,7 @@ export default function ProjectPage() {
       try {
         const { active, recent } = await fetchExecutions(projectId, currentConversation.id);
 
-        let reconConvId = currentConversation.id;
+        const reconConvId = currentConversation.id;
         let reconnectStory: AnalysisStory | undefined;
         let initialStories = analysisStories;
 

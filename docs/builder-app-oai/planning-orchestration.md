@@ -258,9 +258,9 @@ These were in earlier drafts and are explicitly out of scope:
 The structured plan and synthesis stream events are implemented in the OAI app.
 The v0.2 business-analysis track adds a durability requirement: a run that only
 emits `submit_conclusion` must still persist the summary as the assistant
-message and feed it into replay and Next Moves. Without that, the UI can show a
-conclusion during the live stream while message history and post-run
-recommendations receive incomplete answer text.
+message and feed it into replay and Next Moves. The current route now uses the
+structured synthesis summary as the fallback durable answer when normal streamed
+assistant text is empty.
 
 ## Implementation slice
 
