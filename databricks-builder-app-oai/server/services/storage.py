@@ -399,7 +399,7 @@ class ConversationStorage:
       # Auto-generate title from first user message
       if (
         role == 'user'
-        and conversation.title == 'New Conversation'
+        and conversation.title in ('New Conversation', 'New Chat', '')
         and len(conversation.messages) == 0
       ):
         # Use first 50 chars of message as title

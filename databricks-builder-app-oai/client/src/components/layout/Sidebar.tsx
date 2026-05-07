@@ -15,6 +15,7 @@ import type { Conversation } from '@/lib/types';
 import { useUser } from '@/contexts/UserContext';
 import { useProjects } from '@/contexts/ProjectsContext';
 import { fetchConversations, createConversation } from '@/lib/api';
+import { onConversationUpdated } from '@/lib/conversationEvents';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -89,6 +90,16 @@ export function Sidebar({
       });
     }
   }, [projects, expandedProjects, projectConversations, loadConversations]);
+
+  // Refresh a project's conversation list when its titles change elsewhere
+  // (rename from chat header, AI-generated title after first message, etc.).
+  useEffect(() => {
+    return onConversationUpdated(({ projectId }) => {
+      if (projectConversations[projectId] || expandedProjects[projectId]) {
+        loadConversations(projectId, true);
+      }
+    });
+  }, [projectConversations, expandedProjects, loadConversations]);
 
   const toggleProject = (projectId: string) => {
     setExpandedProjects(prev => {

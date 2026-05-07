@@ -131,6 +131,17 @@ export async function deleteConversation(
   });
 }
 
+export async function renameConversation(
+  projectId: string,
+  conversationId: string,
+  title: string
+): Promise<void> {
+  return request(`/projects/${projectId}/conversations/${conversationId}`, {
+    method: 'PATCH',
+    body: { title },
+  });
+}
+
 // --- Clusters & warehouses ---
 
 export async function fetchClusters(): Promise<Cluster[]> {

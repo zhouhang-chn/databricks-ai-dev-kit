@@ -191,6 +191,11 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
     conv_storage = ConversationStorage(user_email, body.project_id)
     conversation_id = body.conversation_id
 
+    # Titles assigned by the frontend/backend before the first user message —
+    # any of these should be replaced by AI-generated titles on first message.
+    PLACEHOLDER_TITLES = {'New Chat', 'New Conversation', ''}
+    should_generate_title = False
+
     if not conversation_id:
         # Create new conversation with temporary title (will be updated by AI)
         temp_title = body.message[:40].strip()
@@ -199,7 +204,23 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
         conversation = await conv_storage.create(title=temp_title)
         conversation_id = conversation.id
         logger.info(f'Created new conversation: {conversation_id}')
+        should_generate_title = True
+    else:
+        # Verify conversation exists and get session_id for resumption
+        conversation = await conv_storage.get(conversation_id)
+        if not conversation:
+            logger.error(f'Conversation not found: {conversation_id}')
+            raise HTTPException(
+                status_code=404,
+                detail=f'Conversation not found: {conversation_id}',
+            )
+        # Pre-created conversation (e.g. from Sidebar "+ New Chat") still has a
+        # placeholder title. Generate the AI title on the first user message.
+        existing_title = (conversation.title or '').strip()
+        if existing_title in PLACEHOLDER_TITLES and len(conversation.messages) == 0:
+            should_generate_title = True
 
+    if should_generate_title:
         # Generate AI title in the background (fire-and-forget).
         # Title generation uses OPENAI_* model configuration, not Databricks auth.
         asyncio.create_task(
@@ -210,15 +231,6 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                 project_id=body.project_id,
             )
         )
-    else:
-        # Verify conversation exists and get session_id for resumption
-        conversation = await conv_storage.get(conversation_id)
-        if not conversation:
-            logger.error(f'Conversation not found: {conversation_id}')
-            raise HTTPException(
-                status_code=404,
-                detail=f'Conversation not found: {conversation_id}',
-            )
 
     # Get session_id from conversation for resumption
     session_id = conversation.session_id if conversation else None

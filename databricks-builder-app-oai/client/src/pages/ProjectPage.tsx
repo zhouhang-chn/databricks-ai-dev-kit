@@ -10,6 +10,8 @@ import {
   Eye,
   FolderCog,
   Loader2,
+  MoreHorizontal,
+  Pencil,
   Save,
   ShieldCheck,
   Square,
@@ -41,9 +43,12 @@ import {
   fetchWarehouses,
   invokeAgent,
   reconnectToExecution,
+  renameConversation,
   stopExecution,
   updateProject,
 } from '@/lib/api';
+import { emitConversationUpdated } from '@/lib/conversationEvents';
+import { ChatRenameModal } from '@/components/ChatRenameModal';
 import type {
   Cluster,
   Conversation,
@@ -575,6 +580,44 @@ export default function ProjectPage() {
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [messageTools, setMessageTools] = useState<Record<string, string[]>>({});
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isChatMenuOpen, setIsChatMenuOpen] = useState(false);
+  const [isRenameOpen, setIsRenameOpen] = useState(false);
+  const chatMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close the "..." menu when clicking outside.
+  useEffect(() => {
+    if (!isChatMenuOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (chatMenuRef.current && !chatMenuRef.current.contains(event.target as Node)) {
+        setIsChatMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isChatMenuOpen]);
+
+  const handleRenameConversation = useCallback(
+    async (newTitle: string) => {
+      if (!projectId || !currentConversation?.id) return;
+      const conversationId = currentConversation.id;
+      try {
+        await renameConversation(projectId, conversationId, newTitle);
+        setCurrentConversation((prev) =>
+          prev && prev.id === conversationId ? { ...prev, title: newTitle } : prev
+        );
+        setConversations((prev) =>
+          prev.map((c) => (c.id === conversationId ? { ...c, title: newTitle } : c))
+        );
+        emitConversationUpdated({ projectId, conversationId });
+        toast.success('Chat renamed');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to rename chat';
+        toast.error(message);
+        throw error;
+      }
+    },
+    [projectId, currentConversation?.id]
+  );
 
   // Calculate default schema from user email + project name once available
   const userDefaultSchema = useMemo(() => toSchemaName(user, project?.name ?? null), [user, project?.name]);
@@ -1196,6 +1239,8 @@ export default function ProjectPage() {
               setCurrentConversation(conv);
             }
             fetchConversations(projectId).then(setConversations);
+            // Notify the Sidebar so its cached list picks up any AI-generated title.
+            emitConversationUpdated({ projectId, conversationId });
           }
         },
       });
@@ -1437,11 +1482,50 @@ export default function ProjectPage() {
       <div className="flex flex-1 flex-col h-full">
         {/* Chat Header */}
         <div className="flex h-14 items-center justify-between border-b border-[var(--color-border)]/60 px-6 bg-[var(--color-bg-secondary)]/20">
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0">
             <h2 className="font-semibold text-[15px] text-[var(--color-text-heading)] truncate">
               {currentConversation?.title || 'New Chat'}
             </h2>
+            {currentConversation && (
+              <div className="relative flex-shrink-0" ref={chatMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsChatMenuOpen((open) => !open)}
+                  className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-border)]/50 hover:text-[var(--color-text-primary)] transition-all"
+                  title="More options"
+                  aria-haspopup="menu"
+                  aria-expanded={isChatMenuOpen}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+                {isChatMenuOpen && (
+                  <div
+                    role="menu"
+                    className="absolute left-0 top-full mt-1 z-20 min-w-[160px] rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-lg overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setIsChatMenuOpen(false);
+                        setIsRenameOpen(true);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-xs text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] transition-colors"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Rename
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
+          <ChatRenameModal
+            isOpen={isRenameOpen}
+            initialTitle={currentConversation?.title || ''}
+            onClose={() => setIsRenameOpen(false)}
+            onSave={handleRenameConversation}
+          />
           <div className="flex items-center gap-2.5">
             <div className="hidden lg:flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-0.5">
               <button
