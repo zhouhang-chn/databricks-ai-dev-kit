@@ -413,6 +413,19 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                         'duration_ms': duration_ms,
                     })
 
+                elif event_type in {
+                    'plan.created',
+                    'plan.step_started',
+                    'plan.step_finished',
+                    'plan.revised',
+                    'synthesis.appended',
+                }:
+                    # Semantic plan/synthesis events from update_plan and
+                    # submit_conclusion. The runtime already populates them with
+                    # the exact field names the frontend reducer expects, so
+                    # forward as-is (the emit() helper attaches run metadata).
+                    emit(event)
+
                 elif event_type == 'result':
                     new_session_id = event.get('session_id')
                     emit({

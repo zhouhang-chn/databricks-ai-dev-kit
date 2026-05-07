@@ -298,6 +298,100 @@ def test_plan_tool_output_echo_is_suppressed():
   assert output_events == []
 
 
+def _invoke_plan_tool(tool, args_json: str, call_id: str = 'call_test'):
+  """Run a FunctionTool's underlying handler with a synthetic ToolContext."""
+  import asyncio
+
+  from agents.tool_context import ToolContext
+
+  ctx = ToolContext(
+    context=None,
+    tool_name=tool.name,
+    tool_call_id=call_id,
+    tool_arguments=args_json,
+  )
+  return asyncio.run(tool.on_invoke_tool(ctx, args_json))
+
+
+def test_update_plan_create_is_idempotent_per_run():
+  """A second update_plan(op='create') in the same run returns guidance, not ack."""
+  from server.services.tools.plan_tools import create_plan_tools
+
+  tools = create_plan_tools()
+  update_plan = next(t for t in tools if t.name == 'update_plan')
+  args = '{"op":"create","objective":"x","steps":[{"id":"step-1","title":"t"}]}'
+
+  first = _invoke_plan_tool(update_plan, args, 'call_1')
+  second = _invoke_plan_tool(update_plan, args, 'call_2')
+
+  assert first['ack'] == 'plan_created'
+  assert second['ack'] == 'plan_already_exists'
+  assert 'guidance' in second
+  # Guidance must redirect to start/revise, not encourage another create
+  assert 'op="start"' in second['guidance'] or "op='start'" in second['guidance']
+  assert 'create' not in second['guidance'] or 'do not call' in second['guidance'].lower()
+
+
+def test_submit_conclusion_is_idempotent_per_run():
+  """A second submit_conclusion in the same run returns terminal guidance."""
+  from server.services.tools.plan_tools import create_plan_tools
+
+  tools = create_plan_tools()
+  submit_conclusion = next(t for t in tools if t.name == 'submit_conclusion')
+  args = '{"summary":"done"}'
+
+  first = _invoke_plan_tool(submit_conclusion, args, 'call_1')
+  second = _invoke_plan_tool(submit_conclusion, args, 'call_2')
+
+  assert first['ack'] == 'conclusion_submitted'
+  assert second['ack'] == 'conclusion_already_submitted'
+  assert 'guidance' in second
+
+
+def test_plan_tool_state_is_isolated_between_runs():
+  """create_plan_tools() must hand each run its own closure state."""
+  from server.services.tools.plan_tools import create_plan_tools
+
+  args = '{"op":"create","objective":"x","steps":[]}'
+
+  run_a = create_plan_tools()
+  run_b = create_plan_tools()
+  update_a = next(t for t in run_a if t.name == 'update_plan')
+  update_b = next(t for t in run_b if t.name == 'update_plan')
+
+  # Exhaust run A's create
+  _invoke_plan_tool(update_a, args, 'a1')
+  duplicate_a = _invoke_plan_tool(update_a, args, 'a2')
+  assert duplicate_a['ack'] == 'plan_already_exists'
+
+  # Run B (separate concurrent agent) is unaffected
+  fresh_b = _invoke_plan_tool(update_b, args, 'b1')
+  assert fresh_b['ack'] == 'plan_created'
+
+
+def test_update_plan_revise_marks_plan_created():
+  """Calling op='revise' implies a plan exists, so subsequent create redirects."""
+  from server.services.tools.plan_tools import create_plan_tools
+
+  tools = create_plan_tools()
+  update_plan = next(t for t in tools if t.name == 'update_plan')
+
+  revise = _invoke_plan_tool(
+    update_plan,
+    '{"op":"revise","steps":[],"reason":"changed"}',
+    'r1',
+  )
+  assert revise['ack'] == 'plan_revised'
+
+  # Now a stray create should be redirected, not freshly accepted
+  follow_up = _invoke_plan_tool(
+    update_plan,
+    '{"op":"create","objective":"x","steps":[]}',
+    'r2',
+  )
+  assert follow_up['ack'] == 'plan_already_exists'
+
+
 def test_model_settings_require_ai_gateway_env(monkeypatch):
   """Missing AI Gateway env vars fail clearly."""
   monkeypatch.delenv('OPENAI_API_KEY', raising=False)

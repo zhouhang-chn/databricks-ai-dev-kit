@@ -250,7 +250,10 @@ class OpenAIAgentRuntime:
         agent,
         input=request.message,
         session=session,
-        max_turns=30,
+        # Plan-driven runs need headroom for: 1 create + N step-starts +
+        # N step-tools + N step-finishes + 1 conclusion + AGENTS.md upkeep.
+        # 60 covers ~5-step analyses comfortably while still bounding runaway.
+        max_turns=60,
         run_config=RunConfig(
           workflow_name='Databricks Builder App',
           trace_id=trace_id,
@@ -297,6 +300,15 @@ class OpenAIAgentRuntime:
       cancelled = False
       emitted_text = False
       sdk_event_count = 0
+      # Per-run UI-event dedup. The model sometimes re-emits update_plan(create)
+      # or submit_conclusion many times; the *tool* layer (plan_tools.py) returns
+      # `plan_already_exists` / `conclusion_already_submitted` to the model so
+      # it can correct course, but until it does we must not let the duplicate
+      # SEMANTIC events reach the UI — otherwise a regressed plan from the
+      # model would overwrite the original plan in the stepper. plan.revised is
+      # the intentional channel for changing the plan.
+      plan_created_emitted = False
+      conclusion_emitted = False
 
       async for sdk_event in result.stream_events():
         sdk_event_count += 1
@@ -318,7 +330,28 @@ class OpenAIAgentRuntime:
         for event in normalize_openai_event(sdk_event):
           if cancelled and event.get('type') not in {'system', 'result'}:
             continue
-          if event.get('type') in {'text', 'text_delta'}:
+          event_type = event.get('type')
+          if event_type == 'plan.created':
+            if plan_created_emitted:
+              logger.info(
+                'Suppressing duplicate plan.created (call_id=%s) — original plan preserved',
+                event.get('call_id'),
+              )
+              continue
+            plan_created_emitted = True
+          elif event_type == 'plan.revised':
+            # A revise is the legitimate way to change the plan. Reset so a
+            # subsequent regression after revise still emits once and only once.
+            plan_created_emitted = True
+          elif event_type == 'synthesis.appended':
+            if conclusion_emitted:
+              logger.info(
+                'Suppressing duplicate synthesis.appended (call_id=%s) — original conclusion preserved',
+                event.get('call_id'),
+              )
+              continue
+            conclusion_emitted = True
+          if event_type in {'text', 'text_delta'}:
             emitted_text = True
           yield _with_run_metadata(event, request, trace_id)
 

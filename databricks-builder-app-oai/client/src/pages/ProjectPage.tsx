@@ -1123,6 +1123,17 @@ export default function ProjectPage() {
             }
           } else if (type === 'next_moves.updated' || type === 'result') {
             applyStoryStreamEvent(stream, event);
+          } else if (
+            type === 'plan.created'
+            || type === 'plan.step_started'
+            || type === 'plan.step_finished'
+            || type === 'plan.revised'
+            || type === 'synthesis.appended'
+          ) {
+            // Semantic plan/synthesis events drive the stepper and synthesis card.
+            // Without this branch they silently fall through and the UI stays on
+            // "Scoping the work…" even after the agent has progressed.
+            applyStoryStreamEvent(stream, event);
           }
         },
         onError: (error) => {

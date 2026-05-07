@@ -404,19 +404,36 @@ export function reduceAnalysisEvent(
       }));
     case 'plan.created':
       return updateStory(stories, event.storyId, (story) => {
-        // If we already have a plan with steps, and the new event has no steps,
-        // it might be a redundant "final" call from the agent. Ignore it to preserve state.
         const currentSteps = story.plan?.steps || [];
         const incomingSteps = Array.isArray(event.steps) ? event.steps : [];
-        if (currentSteps.length > 0 && incomingSteps.length === 0) {
+
+        // Story-scoped dedup: once a plan exists for this story, plan.created
+        // is treated as redundant — only plan.revised may change the plan.
+        // This shields the stepper from a model that re-emits plan.created
+        // with REGRESSED content (e.g. a single "Run all analysis" step
+        // after the original 3-step plan) in response to repeated
+        // `plan_already_exists` redirects. The runtime also suppresses
+        // duplicate plan.created at the SSE layer; this is a frontend
+        // safety net so an in-flight reduce never produces a worse plan
+        // than the original.
+        // Each user message creates a fresh story (story-${execution_id}),
+        // so this never suppresses repeated manual tests with the same
+        // question/instruction — they land on a different story id.
+        if (currentSteps.length > 0) {
           return {
             ...story,
             plan: {
               ...story.plan!,
+              // Only refresh the objective if the new one is non-empty;
+              // never replace steps via plan.created.
               objective: event.objective || story.plan!.objective,
             },
             updatedAt: nowIso(),
           };
+        }
+        if (incomingSteps.length === 0) {
+          // First plan.created with no steps yet — nothing to render.
+          return story;
         }
 
         return {

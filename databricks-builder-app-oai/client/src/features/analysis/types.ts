@@ -142,6 +142,7 @@ export interface StreamStoryEvent {
   content?: unknown;
   is_error?: unknown;
   thinking?: unknown;
+  delta?: unknown;
   error?: unknown;
   todos?: unknown;
   moves?: unknown;
