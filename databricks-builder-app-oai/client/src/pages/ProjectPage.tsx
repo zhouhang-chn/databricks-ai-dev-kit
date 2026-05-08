@@ -416,8 +416,6 @@ function ProjectManagementPanel({
     setInputTables(joinLines(resources.input_tables));
     setInputMetricViews(joinLines(resources.input_metric_views));
     setInputVolumePaths(joinLines(resources.input_volume_paths));
-    setOutputSchema(resources.output_schema || '');
-    setOutputVolumeFolders(joinLines(resources.output_volume_folders));
   };
 
   const handleImportClick = () => {
