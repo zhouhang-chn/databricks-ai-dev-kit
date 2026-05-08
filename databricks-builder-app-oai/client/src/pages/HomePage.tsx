@@ -158,7 +158,7 @@ export default function HomePage() {
       const project = await createProject(newProjectName.trim());
       setNewProjectName('');
       toast.success('Project created');
-      navigate(`/projects/${project.id}`);
+      navigate(`/projects/${project.id}?settings=1`);
     } catch (error) {
       toast.error('Failed to create project');
       console.error(error);

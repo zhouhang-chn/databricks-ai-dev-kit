@@ -102,6 +102,49 @@ export interface Project {
   conversation_count: number;
 }
 
+export interface DatabricksResources {
+  databricks_host?: string | null;
+  cluster_id?: string | null;
+  warehouse_id?: string | null;
+  workspace_folders: string[];
+  workspace_files: string[];
+  workflows: string[];
+  input_schemas: string[];
+  input_tables: string[];
+  input_metric_views: string[];
+  input_volume_paths: string[];
+  output_schema?: string | null;
+  output_volume_folders: string[];
+}
+
+export interface ProjectSetting {
+  business_background: string;
+  analysis_notes: string[];
+  databricks_resources: DatabricksResources;
+}
+
+export interface ProjectSettingResponse {
+  project_id: string;
+  path: string;
+  setting: ProjectSetting;
+  project?: Project | null;
+}
+
+export interface ProjectSettingValidationCheck {
+  name: string;
+  status: 'ok' | 'warning' | 'error';
+  message: string;
+  detail: Record<string, unknown>;
+}
+
+export interface ProjectSettingValidationResult {
+  valid: boolean;
+  checked_at: string;
+  sql_execution_mode: 'warehouse' | 'cluster' | 'none';
+  summary: string;
+  checks: ProjectSettingValidationCheck[];
+}
+
 /** Conversation summary (list) or full (detail with messages) */
 export interface Conversation {
   id: string;

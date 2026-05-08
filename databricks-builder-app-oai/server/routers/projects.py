@@ -6,11 +6,22 @@ All endpoints are scoped to the current authenticated user.
 import logging
 from typing import Any
 
+from databricks_tools_core.auth import clear_databricks_auth, set_databricks_auth
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
+from ..services.backup_manager import mark_for_backup
+from ..services.project_settings import (
+  ProjectSetting,
+  ensure_project_setting_file,
+  project_update_from_setting,
+  read_project_setting,
+  validate_project_setting,
+  write_project_setting,
+)
 from ..services.storage import ProjectStorage
-from ..services.user import get_current_user
+from ..services.user import get_current_token, get_current_user, get_workspace_url
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -34,6 +45,24 @@ class UpdateProjectRequest(BaseModel):
   status: str | None = None
   current_release_id: str | None = None
   settings: dict[str, Any] | None = None
+
+
+class ProjectSettingResponse(BaseModel):
+  """Response containing the YAML-backed project setting."""
+
+  project_id: str
+  path: str
+  setting: ProjectSetting
+  project: dict[str, Any] | None = None
+
+
+async def _get_owned_project(storage: ProjectStorage, project_id: str, user_email: str):
+  """Fetch a project and raise 404 if it is not owned by the current user."""
+  project = await storage.get(project_id)
+  if not project:
+    logger.warning(f'Project not found: {project_id} for user: {user_email}')
+    raise HTTPException(status_code=404, detail=f'Project {project_id} not found')
+  return project
 
 
 @router.get('/projects')
@@ -79,9 +108,81 @@ async def create_project(request: Request, body: CreateProjectRequest):
     project_type=body.project_type,
     settings=body.settings,
   )
+  try:
+    ensure_project_setting_file(
+      project.id,
+      project,
+      user_email=user_email,
+      databricks_host=get_workspace_url(),
+    )
+    mark_for_backup(project.id)
+  except Exception as exc:
+    logger.warning(f'Failed to create project_setting.yaml for project {project.id}: {exc}')
   logger.info(f'Created project {project.id} for user: {user_email}')
 
   return project.to_dict()
+
+
+@router.get('/projects/{project_id}/project-setting')
+async def get_project_setting(request: Request, project_id: str):
+  """Get project_setting.yaml, creating it from project defaults if missing."""
+  user_email = await get_current_user(request)
+  storage = ProjectStorage(user_email)
+  project = await _get_owned_project(storage, project_id, user_email)
+
+  try:
+    setting, path = read_project_setting(
+      project_id,
+      project,
+      user_email=user_email,
+      databricks_host=get_workspace_url(),
+    )
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+  return ProjectSettingResponse(
+    project_id=project_id,
+    path=str(path),
+    setting=setting,
+    project=project.to_dict(),
+  )
+
+
+@router.put('/projects/{project_id}/project-setting')
+async def save_project_setting(request: Request, project_id: str, body: ProjectSetting):
+  """Save project_setting.yaml and sync its resource hints into project settings."""
+  user_email = await get_current_user(request)
+  storage = ProjectStorage(user_email)
+  await _get_owned_project(storage, project_id, user_email)
+
+  path = write_project_setting(project_id, body)
+  project = await storage.update(project_id, project_update_from_setting(body))
+  if not project:
+    raise HTTPException(status_code=404, detail=f'Project {project_id} not found')
+
+  mark_for_backup(project_id)
+  return ProjectSettingResponse(
+    project_id=project_id,
+    path=str(path),
+    setting=body,
+    project=project.to_dict(),
+  )
+
+
+@router.post('/projects/{project_id}/project-setting/validate')
+async def validate_project_setting_route(request: Request, project_id: str, body: ProjectSetting):
+  """Validate project_setting.yaml Databricks resources."""
+  user_email = await get_current_user(request)
+  storage = ProjectStorage(user_email)
+  await _get_owned_project(storage, project_id, user_email)
+
+  user_token = await get_current_token(request)
+  workspace_url = body.databricks_resources.databricks_host or get_workspace_url()
+  set_databricks_auth(workspace_url, user_token)
+  try:
+    return await run_in_threadpool(validate_project_setting, body)
+  finally:
+    clear_databricks_auth()
 
 
 @router.patch('/projects/{project_id}')

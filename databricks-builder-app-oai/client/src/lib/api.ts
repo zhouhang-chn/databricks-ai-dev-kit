@@ -8,6 +8,9 @@ import type {
   Conversation,
   Execution,
   Project,
+  ProjectSetting,
+  ProjectSettingResponse,
+  ProjectSettingValidationResult,
   ProjectSettings,
   UserInfo,
   Warehouse,
@@ -93,6 +96,30 @@ export async function updateProject(
   payload: UpdateProjectPayload
 ): Promise<Project> {
   return request<Project>(`/projects/${projectId}`, { method: 'PATCH', body: payload });
+}
+
+export async function fetchProjectSetting(projectId: string): Promise<ProjectSettingResponse> {
+  return request<ProjectSettingResponse>(`/projects/${projectId}/project-setting`);
+}
+
+export async function saveProjectSetting(
+  projectId: string,
+  setting: ProjectSetting
+): Promise<ProjectSettingResponse> {
+  return request<ProjectSettingResponse>(`/projects/${projectId}/project-setting`, {
+    method: 'PUT',
+    body: setting,
+  });
+}
+
+export async function validateProjectSetting(
+  projectId: string,
+  setting: ProjectSetting
+): Promise<ProjectSettingValidationResult> {
+  return request<ProjectSettingValidationResult>(`/projects/${projectId}/project-setting/validate`, {
+    method: 'POST',
+    body: setting,
+  });
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
