@@ -18,7 +18,7 @@ build target for this phase.
 ## Execution Principles
 
 - Keep existing API and SSE event shapes backward compatible where possible.
-- Treat `project_setting.yaml` as the minimal user-authored source of truth:
+- Treat `project_setting.yaml` as the minimal user-authored payload source of truth:
   natural-language business background, optional notes, and selected
   Databricks resource hints.
 - Generate downstream bundle artifacts from project settings, source-code
@@ -162,9 +162,13 @@ shape.
 
 Tasks:
 
-- Treat `project_setting.yaml` as the only user-authored source of truth.
+- Treat `project_setting.yaml` as the only user-authored payload source of truth.
 - Keep user input minimal: `business_background`, optional `analysis_notes`,
   and UI-selected `databricks_resources`.
+- Treat `AGENTS.md` as a project-local operating guide only. It may persist
+  reusable workflow, validation, escalation, and output rules, but must not
+  duplicate project settings, resource inventories, query findings, or final
+  analysis results.
 - Do not ask users to author generated artifacts, agent policy, structured
   metrics, periods, grains, validation focus, or answer rules.
 - Treat Databricks resources as hints until verified. The Builder Agent should
@@ -203,6 +207,8 @@ Acceptance gates:
 - Data and metadata assets live in `data_context.yaml`.
 - Analysis principles, policies, and golden cases live in
   `analysis_context.yaml`.
+- `AGENTS.md`, when present, is loaded as a start-of-chat mechanism snapshot
+  and is not a hard Databricks-tool gate or payload source.
 - Generated YAML files pass top-level schema checks.
 
 ## Phase 3: Builder Agent Bundle Generator

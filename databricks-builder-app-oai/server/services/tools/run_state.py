@@ -75,11 +75,6 @@ class AgentToolRunState:
     self.default_catalog = _normalize_identifier(self.default_catalog) or None
     self.default_schema = _normalize_identifier(self.default_schema) or None
 
-  @property
-  def agents_md_required(self) -> bool:
-    """Return true when this project has an AGENTS.md ledger to read."""
-    return bool(self.project_dir and (self.project_dir / 'AGENTS.md').is_file())
-
   def mark_project_file_read(self, path: Path) -> None:
     """Record that a project file was read by the model."""
     if path.name == 'AGENTS.md':
@@ -87,15 +82,6 @@ class AgentToolRunState:
 
   def databricks_gate_error(self, tool_name: str) -> dict | None:
     """Return an actionable error if a Databricks tool is not allowed yet."""
-    if self.agents_md_required and not self.agents_md_read:
-      return {
-        'error': (
-          'Read AGENTS.md before using Databricks tools for this conversation. '
-          'Call read_project_file(path="AGENTS.md") by itself, then continue.'
-        ),
-        'tool': tool_name,
-        'required_action': 'read_project_file(path="AGENTS.md")',
-      }
     if not self.active_step_id:
       return {
         'error': (

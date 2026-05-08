@@ -156,6 +156,27 @@ context for this run unless the user explicitly says otherwise.
   return section
 
 
+def _render_project_operating_guide(project_operating_guide: str) -> str:
+  """Render the AGENTS.md start-of-run snapshot."""
+  guide = project_operating_guide.strip()
+  if not guide:
+    return ''
+
+  return f"""
+## Project Operating Guide Snapshot (AGENTS.md)
+
+The runtime loaded this snapshot at the start of the chat. Treat it as
+project-local mechanism guidance, not project payload. Project payload still
+comes from `project_setting.yaml` and the Project Management Context above.
+Do not re-read AGENTS.md during this chat unless the user explicitly asks;
+mid-chat changes are for future chats.
+
+~~~markdown
+{guide}
+~~~
+"""
+
+
 def get_system_prompt(
   cluster_id: str | None = None,
   default_catalog: str | None = None,
@@ -166,6 +187,7 @@ def get_system_prompt(
   enabled_skills: list[str] | None = None,
   skill_guidance: str = '',
   project_context: dict[str, Any] | None = None,
+  project_operating_guide: str = '',
 ) -> str:
   """Generate the system prompt for the OpenAI agent runtime.
 
@@ -181,6 +203,7 @@ def get_system_prompt(
       enabled_skills: Optional list of enabled skill names. None means all skills.
       skill_guidance: Rendered Markdown guidance from selected project skills.
       project_context: Optional structured project-management context.
+      project_operating_guide: Optional AGENTS.md mechanism-guide snapshot.
 
   Returns:
       System prompt string
@@ -331,7 +354,6 @@ The user has configured default catalog/schema settings:"""
 - SQL queries: Use `{catalog}.{schema}.table_name` format
 - Creating tables/pipelines: Target this catalog/schema
 - Volumes: Use `/Volumes/{catalog}/{schema}/...` (default to raw_data for volume name for raw data)
-- When writing AGENTS.md, record these as the project's catalog/schema
 """
     if default_catalog:
       catalog_schema_section = catalog_schema_section.replace('{catalog}', default_catalog)
@@ -350,9 +372,10 @@ Use this to construct clickable links in your responses (see Resource Links sect
 """
 
   project_context_section = _render_project_context(project_context)
+  project_operating_guide_section = _render_project_operating_guide(project_operating_guide)
 
   return rf"""# Databricks AI Dev Kit
-{cluster_section}{warehouse_section}{workspace_folder_section}{catalog_schema_section}{workspace_url_section}{project_context_section}
+{cluster_section}{warehouse_section}{workspace_folder_section}{catalog_schema_section}{workspace_url_section}{project_context_section}{project_operating_guide_section}
 
 You are a Databricks development assistant with access to app-owned tools for project file editing,
 SQL queries, SQL warehouse inspection, compute inspection, and background operation status.
@@ -453,16 +476,16 @@ update the recorded plan.
    The UI shows the prior plan archived with the reason. Use this — not a
    second `op="create"` — to change the plan.
 
-5. **Record new persistent resources in AGENTS.md, before the conclusion.**
-   *Only* if the run **created or modified Databricks resources**
-   (catalogs, schemas, tables, volumes, pipelines, jobs, dashboards,
-   endpoints, etc.) update AGENTS.md inside a regular plan step (e.g. a
-   final "Record new resources" step), not after `submit_conclusion`.
-   **Do NOT write analysis results, query outputs, findings, comparisons,
-   metrics, conclusions, or narrative prose into AGENTS.md** — those
-   belong in `submit_conclusion`'s `summary`/`highlights`. Read-only or
-   analysis-only runs that did not create new resources must skip
-   AGENTS.md updates entirely (skip this step).
+5. **Persist durable project-file changes before the conclusion.**
+   Only update project files when the user asked for an artifact, approved a
+   durable rule, or the current workflow explicitly creates a persistent app
+   artifact. AGENTS.md is a project operating guide: update it only for
+   reusable workflow, validation, escalation, or output rules. Do **not** write
+   project payload, resource inventories, analysis results, query outputs,
+   findings, comparisons, metrics, conclusions, or narrative prose into
+   AGENTS.md. Those belong in the project settings, generated bundle artifacts,
+   or `submit_conclusion` as appropriate. Read-only or analysis-only runs that
+   did not create an artifact should skip file edits entirely.
 
 6. **Submit the conclusion EXACTLY ONCE — terminal action.** Instead of
    writing the final answer as text:
@@ -485,7 +508,7 @@ update the recorded plan.
    - Call `submit_conclusion` exactly **once**. Never call it again in the
      same run.
    - `submit_conclusion` is the **terminal** action. Do not call any other
-     tool afterward — finalize all work (including AGENTS.md edits) before
+     tool afterward — finalize all work (including approved file edits) before
      this call.
    - If the tool returns `ack:"conclusion_already_submitted"`, the run is
      finished — stop calling tools and wait for the next user turn.
@@ -519,48 +542,36 @@ If your sequence has **more than one `op="create"`** or **more than one
 `submit_conclusion`**, the run is malformed — fix it on the next turn by
 advancing to `op="start"` (or stopping, respectively).
 
-## Project Context
+## Project Context And Operating Guide
 
-**At the start of every conversation**, check if an `AGENTS.md` file exists in the project root.
-If it exists, read it to understand the project state (tables, pipelines, volumes created).
-This is a hard gate: call `read_project_file(path="AGENTS.md")` as a standalone
-first context action. Do **not** call Databricks tools in the same parallel batch
-as the AGENTS.md read, because data tools must wait for the project ledger.
+Project payload comes from `project_setting.yaml` and the injected Project
+Management Context. Treat those as the source of truth for business background,
+analysis notes, Databricks resources, caveats, preferred tables, time windows,
+group definitions, and current resource defaults.
 
-**Maintain an `AGENTS.md` file** to track persistent project resources
-(catalogs, schemas, tables, volumes, pipelines, jobs, dashboards,
-endpoints, etc.) so they remain discoverable across conversations.
+AGENTS.md is different: it is a project-local operating guide for reusable
+mechanism rules, not payload. Use AGENTS.md only for durable instructions about
+workflow, validation standards, evidence requirements, escalation behavior, or
+output conventions. Do not use it as a resource ledger, analysis notebook, or
+copy of project_setting.yaml.
 
-**AGENTS.md is for resource inventory ONLY.** Record:
-- Catalog and schema names
-- Table names and locations
-- Pipeline names and IDs
-- Volume paths
-- Job IDs, dashboard IDs, endpoint names
-- Any other persistent Databricks resource created by the run, with its
-  name **and** ID
+When the runtime injects a Project Operating Guide Snapshot above, treat it as
+the start-of-chat version for this run. Do not re-read AGENTS.md or adopt
+mid-chat changes unless the user explicitly asks. If no snapshot is present,
+continue from the Project Management Context and the rest of this system prompt.
 
-**Do NOT write any of the following into AGENTS.md:**
-- Analysis results, query outputs, comparisons, metrics, or numbers
-- Findings, conclusions, narrative summaries, or executive summaries
-- Per-conversation observations or "what we learned"
-- Step-by-step run logs or decision rationale
-
-Those belong in the `submit_conclusion` synthesis (its `summary` and
-`highlights` fields) — not in AGENTS.md. Polluting AGENTS.md with
-analysis prose makes it useless as a project ledger and wastes turns.
-
-**Update timing:** Edit AGENTS.md inside a regular plan step **before**
-`submit_conclusion`. If the run did not create or modify any persistent
-resource, **skip** the AGENTS.md update entirely. Never edit AGENTS.md
-after `submit_conclusion` — that call is terminal.
+Update AGENTS.md only when the user asks to change project-local operating
+behavior, or after explicitly confirming that a reusable rule should persist for
+future chats. Do not update it for ordinary `project_setting.yaml` payload
+changes, read-only analysis, one-off observations, SQL outputs, or final
+conclusions.
 
 ## Tool Usage
 
 - **Always use the provided tools** - never use CLI commands, curl, or SDK code when an app tool exists
 - Project file tools: `read_project_file`, `write_project_file`, `edit_project_file`, `list_project_files`, `grep_project_files`, `get_project_tree`
 - Databricks tools are exposed as plain function names (e.g. `execute_sql`, `manage_jobs`, `manage_pipeline`, `query_vs_index`); the available set depends on which skills are enabled for this project
-- Do not run Databricks tools until AGENTS.md has been read, a plan exists, and the current step has been started
+- Do not run Databricks tools until a visible plan exists and the current step has been started
 - For natural-language analysis over project tables, inspect schema first with `get_table_stats_and_schema` (or an explicit DESCRIBE/SHOW COLUMNS query) before the first analytical `execute_sql`; never guess column names from business terms
 - Use configured preferred tables, metric views, glossary, known caveats, and sample queries as hints, not as proof that a guessed column exists
 - Long-running Databricks operations may return `{{status: "async", operation_id: ...}}`; in that case, poll with `check_operation_status(operation_id)` until it returns `completed` or `failed` before continuing

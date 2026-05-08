@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from ..db.database import session_scope
 from ..db.models import ProjectBackup, utc_now
+from .project_operating_guide import ensure_project_operating_guide
 
 logger = logging.getLogger(__name__)
 
@@ -129,47 +130,15 @@ async def restore_backup(project_id: str) -> bool:
 
 
 def _create_default_agents_md(project_dir: Path) -> None:
-  """Create a default AGENTS.md file for a new project.
+  """Create or migrate the project-local AGENTS.md operating guide.
 
   Args:
       project_dir: Path to the project directory
   """
-  agents_md_path = project_dir / 'AGENTS.md'
-  if agents_md_path.exists():
-    return
-
-  default_content = """# Project Context
-
-This file tracks the Databricks resources created in this project.
-The AI assistant will update this file as resources are created.
-
-## Configuration
-
-- **Catalog:** (not yet configured)
-- **Schema:** (not yet configured)
-
-## Resources Created
-
-### Tables
-(none yet)
-
-### Volumes
-(none yet)
-
-### Pipelines
-(none yet)
-
-### Jobs
-(none yet)
-
-## Notes
-
-Add any project-specific notes or context here.
-"""
-
   try:
-    agents_md_path.write_text(default_content)
-    logger.info(f'Created default AGENTS.md in {project_dir}')
+    _, changed = ensure_project_operating_guide(project_dir)
+    if changed:
+      logger.info(f'Created or migrated AGENTS.md operating guide in {project_dir}')
   except Exception as e:
     logger.warning(f'Failed to create AGENTS.md: {e}')
 
@@ -180,7 +149,7 @@ def ensure_project_directory(project_id: str) -> Path:
   This is the main entry point for getting a project directory.
   If the directory doesn't exist, attempts to restore from backup.
   If no backup exists, creates an empty directory.
-  Also ensures skills are copied to the project and AGENTS.md exists.
+  Also ensures skills are copied to the project and AGENTS.md operating guide exists.
 
   Args:
       project_id: The project UUID
@@ -192,7 +161,6 @@ def ensure_project_directory(project_id: str) -> Path:
 
   project_dir = Path(PROJECTS_BASE_DIR).resolve() / project_id
   needs_skills = not project_dir.exists() or not (project_dir / '.agents' / 'skills').exists()
-  is_new_project = not project_dir.exists()
 
   if not project_dir.exists():
     # Try to restore from backup
@@ -221,9 +189,8 @@ def ensure_project_directory(project_id: str) -> Path:
   if needs_skills:
     copy_skills_to_project(project_dir)
 
-  # Create default AGENTS.md for new projects (or if it doesn't exist)
-  if is_new_project or not (project_dir / 'AGENTS.md').exists():
-    _create_default_agents_md(project_dir)
+  # Create the default operating guide or migrate the old generated placeholder.
+  _create_default_agents_md(project_dir)
 
   return project_dir
 
@@ -244,6 +211,8 @@ async def ensure_project_directory_async(project_id: str) -> Path:
     if not restored:
       project_dir.mkdir(parents=True, exist_ok=True)
       logger.debug(f'Created empty project directory: {project_dir}')
+
+  _create_default_agents_md(project_dir)
 
   return project_dir
 

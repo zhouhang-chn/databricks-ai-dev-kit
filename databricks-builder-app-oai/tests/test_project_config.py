@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from server.project_config import (
   build_project_context,
   default_project_settings,
-  get_project_settings_for_run,
   get_project_resource_defaults,
+  get_project_settings_for_run,
   merge_project_settings,
   parse_project_settings,
 )
@@ -125,3 +125,15 @@ def test_system_prompt_renders_project_context():
   assert 'Revenue Review' in prompt
   assert 'prod.finance.revenue_metrics' in prompt
   assert 'Annual recurring revenue' in prompt
+
+
+def test_system_prompt_renders_project_operating_guide_snapshot():
+  """AGENTS.md content is injected as mechanism guidance, not payload."""
+  prompt = get_system_prompt(
+    enabled_skills=[],
+    project_operating_guide='# Project Operating Guide\n\n- Validate schemas before SQL.',
+  )
+
+  assert 'Project Operating Guide Snapshot (AGENTS.md)' in prompt
+  assert 'project-local mechanism guidance, not project payload' in prompt
+  assert 'Validate schemas before SQL' in prompt

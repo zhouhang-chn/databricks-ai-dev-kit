@@ -22,7 +22,7 @@ before end-user analysis is scaled.
 - Persist project resource defaults from every settings surface that displays
   them.
 - Persist structured `submit_conclusion` output as the durable assistant answer.
-- Define `project_setting.yaml` as the minimal user-authored source of truth:
+- Define `project_setting.yaml` as the minimal user-authored payload source of truth:
   free-form business background, optional analysis notes, and selected
   Databricks resource hints.
 - Implement the Builder Agent scenario-bundle generator and refinement loop.
@@ -77,7 +77,7 @@ bundle rather than one file per lifecycle step.
 
 | Lifecycle step | Stored in | Why it matters |
 |---|---|---|
-| Project Setting | `project_setting.yaml` | Minimal user-authored source of truth for free-form business background, optional analysis notes, and selected Databricks resource hints. |
+| Project Setting | `project_setting.yaml` | Minimal user-authored payload source of truth for free-form business background, optional analysis notes, and selected Databricks resource hints. |
 | Business Context | `business_context.yaml` | Captures the business decision, owner, population, metrics, comparison design, success hypothesis, risks, and actionability requirement. |
 | Data + Metadata Context | `data_context.yaml` | Names retrieval terms, metric definitions, glossary terms, tables, joins, ownership, freshness expectations, access constraints, and runtime binding. |
 | Analysis Context | `analysis_context.yaml` | Stores method type, playbook step ids, evidence shapes, ambiguity policy, answer-shaping rules, validation policy, manual-trace requirements, and canonical golden cases. |
@@ -105,7 +105,7 @@ The source-of-truth rules are:
 
 | Artifact kind | Format | Authoring rule |
 |---|---|---|
-| Project setting | YAML | Minimal user-authored source of truth. Covers free-form business background, optional analysis notes, and selected Databricks resource hints. |
+| Project setting | YAML | Minimal user-authored payload source of truth. Covers free-form business background, optional analysis notes, and selected Databricks resource hints. |
 | Bundle README | Markdown | Generated bundle overview, status, and review notes. |
 | Business context | YAML | Structured scenario and decision context generated from `project_setting.yaml` and enriched by agents. |
 | Data context | YAML | Machine-checkable retrieval index, metric catalog, glossary, data profiles, joins, freshness expectations, and validation checks. |
@@ -160,7 +160,7 @@ remain documentation instead of a repeatable preparation workflow.
 
 The generator owns four responsibilities:
 
-- Convert the minimal project-setting source of truth into a complete scenario
+- Convert the minimal project-setting payload source of truth into a complete scenario
   bundle.
 - Enrich the bundle with source-code context and Databricks metadata when
   available.
@@ -229,7 +229,8 @@ The generator should treat each input category differently:
 
 | Input | Role | Access rule |
 |---|---|---|
-| `project_setting.yaml` | Natural-language business background, optional analysis notes, and user-selected Databricks resource hints. | Required. This is the only human-authored source of truth. |
+| `project_setting.yaml` | Natural-language business background, optional analysis notes, and user-selected Databricks resource hints. | Required. This is the only human-authored payload source of truth. |
+| `AGENTS.md` | Optional project-local operating guide for reusable workflow, validation, escalation, and output rules. | Mechanism only. Load as a start-of-chat snapshot when present; do not use it as business payload, resource inventory, or a copy of `project_setting.yaml`. |
 | Existing generated artifacts | Current bundle state and analyst-reviewed sections. | Optional. Preserve reviewed content unless contradicted by newer project settings. |
 | Source-code context | Existing app capabilities, project settings, runtime constraints, docs, and schema hints. | Read-only local inspection. Do not infer business facts from code alone. |
 | Databricks metadata | Candidate tables, schemas, columns, freshness signals, row-count scale, lineage, and ownership. | Read-only enrichment. Use metadata and bounded profiling only. |
@@ -314,6 +315,30 @@ Format handling rules:
 - For `output_volume_folders`, create missing folders only under an existing
   volume and only when the user has permission.
 
+### Project Operating Guide Contract
+
+`AGENTS.md` should describe how the Builder Agent or Analysis Agent should work
+for this project, not what the project facts are. It is useful for reusable
+mechanism rules that do not belong in the scenario payload:
+
+- workflow conventions and step ordering
+- SQL validation standards and evidence requirements
+- escalation rules for ambiguity or missing context
+- output conventions that should persist across chats
+- project-specific guardrails for when files or Databricks resources may be
+  created or modified
+
+It must not duplicate `project_setting.yaml`, generated bundle YAML, Databricks
+resource inventories, one-off query findings, conversation summaries, or final
+analysis results. The runtime may inject a bounded `AGENTS.md` snapshot at the
+start of a chat. The agent should treat that snapshot as fixed for the chat and
+should not re-read or adopt mid-chat edits unless the user explicitly asks.
+
+Updating `project_setting.yaml` does not automatically copy payload into
+`AGENTS.md`. Update `AGENTS.md` only when the user asks to change durable
+agent behavior, or after confirming that a reusable operating rule should apply
+to future chats.
+
 ### Generated Outputs
 
 The generator produces the complete compact bundle:
@@ -338,22 +363,24 @@ ambiguity, hallucinate data assets, or overwrite reviewed material.
 1. Validate `project_setting.yaml` against the minimal project-setting schema.
 2. Normalize minimal user input into resource hints, scenario facts, open
    questions, and candidate requirement types.
-3. Build a scenario fingerprint from decision owner, business decision,
+3. Load a bounded `AGENTS.md` snapshot only as operating guidance when it
+   exists; do not use it to derive scenario facts or resource defaults.
+4. Build a scenario fingerprint from decision owner, business decision,
    intervention, baseline, population, metrics, time windows, and actionability
    requirement.
-4. Generate `business_context.yaml` from business facts and decision context.
-5. Run the completeness gate and classify missing information as blocking or
+5. Generate `business_context.yaml` from business facts and decision context.
+6. Run the completeness gate and classify missing information as blocking or
    non-blocking.
-6. Generate `analysis_context.yaml` with method contract, playbook steps,
+7. Generate `analysis_context.yaml` with method contract, playbook steps,
    ambiguity policy, answer-shaping rules, validation policy, manual-trace
    requirements, and golden-case skeletons.
-7. Enrich candidate metrics, entities, joins, and validation checks from source
+8. Enrich candidate metrics, entities, joins, and validation checks from source
    context and Databricks metadata when allowed.
-8. Generate `data_context.yaml` from retrieval terms, reusable context
+9. Generate `data_context.yaml` from retrieval terms, reusable context
    assets, and data enrichment results.
-9. Generate `evals.yaml` as a benchmark projection from
+10. Generate `evals.yaml` as a benchmark projection from
    `analysis_context.yaml` golden cases.
-10. Validate YAML schemas, semantic consistency, stable ids, and review-state
+11. Validate YAML schemas, semantic consistency, stable ids, and review-state
     changes.
 
 Each stage should receive the information it needs in the prompt payload. It

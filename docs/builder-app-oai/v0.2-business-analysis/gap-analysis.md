@@ -13,7 +13,7 @@ a reviewed scenario bundle that can later support business-question answering.
 
 The expected path is:
 
-1. Accept `project_setting.yaml` as the user-authored source of truth.
+1. Accept `project_setting.yaml` as the user-authored payload source of truth.
 2. Generate the scenario bundle with the Builder Agent.
 3. Enrich the bundle with business context, source-code context, and Databricks
    data/metadata context.
@@ -127,7 +127,7 @@ and metadata into a reviewed scenario bundle.
 | v0.1 runtime migration docs | Explain the OpenAI Agents SDK migration and implemented runtime boundaries. | Keep as migration history; do not use them as the v0.2 preparation roadmap. |
 | Planning and orchestration docs | Correctly define plan and conclusion tools as the story contract. | Add acceptance gates only after bundle-generated evidence contracts are known. |
 | Data visualization docs | Define chart evidence design. | Treat chart evidence as downstream serving work after the seed bundle and evals are runnable. |
-| Project Management docs | Define durable settings, resources, semantics, releases, roles, memory, and governance. | `project_setting.yaml` should stay much smaller: free-form business background, optional notes, and selected Databricks resource hints. Builder Agent output should carry the structured project and analysis context. |
+| Project Management docs | Define durable settings, resources, semantics, releases, roles, memory, and governance. | `project_setting.yaml` should stay much smaller: free-form business background, optional notes, and selected Databricks resource hints. `AGENTS.md` should carry only reusable operating guidance. Builder Agent output should carry the structured project and analysis context. |
 | Next Moves docs | Backend Next Moves service exists with model and heuristic generation. | Quality depends on future evidence and bundle context, not on more generic prompt polish. |
 | Frontend refactor docs | Story canvas and inspector direction match source. | v0.2 correctness depends more on Builder Agent artifacts than more frontend refactoring. |
 
@@ -139,6 +139,9 @@ and metadata into a reviewed scenario bundle.
 - Structured `submit_conclusion` summaries now provide fallback durable answer
   text for assistant-message persistence and Next Moves when normal streamed
   assistant text is empty.
+- `AGENTS.md` is no longer a resource-ledger payload source or a hard
+  Databricks-tool gate. It is a project operating guide loaded as a bounded
+  start-of-chat snapshot when useful.
 
 ## Correctness Gaps
 

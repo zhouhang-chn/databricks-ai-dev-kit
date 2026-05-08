@@ -11,6 +11,7 @@ from databricks_tools_core.auth import clear_databricks_auth, set_databricks_aut
 from ..backup_manager import ensure_project_directory
 from ..logging_utils import ensure_logger_active
 from ..mlflow_setup import is_mlflow_tracing_configured
+from ..project_operating_guide import load_project_operating_guide
 from ..skills_manager import (
   filter_openai_tools_by_skills,
   get_enabled_skills_from_env,
@@ -199,6 +200,12 @@ class OpenAIAgentRuntime:
         project_dir,
         enabled_skills=enabled_skills,
       )
+      project_operating_guide = load_project_operating_guide(project_dir)
+      logger.info(
+        'Loaded project operating guide snapshot: present=%s chars=%s',
+        bool(project_operating_guide),
+        len(project_operating_guide),
+      )
       read_only_run = _is_user_preview_run(request.project_context)
       logger.info('OpenAI runtime tool policy: read_only=%s', read_only_run)
       tool_run_state = AgentToolRunState(
@@ -218,6 +225,7 @@ class OpenAIAgentRuntime:
         enabled_skills=enabled_skills,
         skill_guidance=skill_guidance,
         project_context=request.project_context,
+        project_operating_guide=project_operating_guide,
       )
 
       tools = [
@@ -284,7 +292,7 @@ class OpenAIAgentRuntime:
         input=request.message,
         session=session,
         # Plan-driven runs need headroom for: 1 create + N step-starts +
-        # N step-tools + N step-finishes + 1 conclusion + AGENTS.md upkeep.
+        # N step-tools + N step-finishes + 1 conclusion + optional file upkeep.
         # 60 covers ~5-step analyses comfortably while still bounding runaway.
         max_turns=60,
         run_config=RunConfig(

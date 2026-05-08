@@ -10,6 +10,12 @@ from server.services.agent_runtime.openai_events import normalize_openai_event
 from server.services.agent_runtime.openai_models import load_model_settings
 from server.services.agent_runtime.openai_runtime import _resolve_enabled_skills
 from server.services.logging_utils import ensure_logger_active
+from server.services.project_operating_guide import (
+  DEFAULT_PROJECT_OPERATING_GUIDE,
+  LEGACY_DEFAULT_AGENTS_MD,
+  ensure_project_operating_guide,
+  load_project_operating_guide,
+)
 from server.services.skills_manager import filter_openai_tools_by_skills
 from server.services.tools.databricks_openai import (
   _is_read_only_tool_name,
@@ -568,19 +574,36 @@ def test_user_preview_databricks_tool_filter_blocks_write_tools():
   assert _is_read_only_tool_name('delete_tracked_resource') is False
 
 
-def test_databricks_tools_require_agents_and_active_plan(tmp_path):
-  """Data tools should not run before project context and a visible step."""
+def test_databricks_tools_require_active_plan_not_agents_read(tmp_path):
+  """Data tools should not require a model-issued AGENTS.md read."""
   (tmp_path / 'AGENTS.md').write_text('# Resources\n', encoding='utf-8')
   run_state = AgentToolRunState(project_dir=tmp_path)
   tools = create_databricks_tools(run_state=run_state)
   execute_sql = next(tool for tool in tools if tool.name == 'execute_sql')
 
-  unread = json.loads(_invoke_tool(execute_sql, '{"sql_query":"SELECT 1"}'))
-  assert unread['required_action'] == 'read_project_file(path="AGENTS.md")'
-
-  run_state.agents_md_read = True
   no_plan = json.loads(_invoke_tool(execute_sql, '{"sql_query":"SELECT 1"}'))
   assert no_plan['required_action'].startswith('update_plan(')
+  assert 'AGENTS.md' not in json.dumps(no_plan)
+
+
+def test_legacy_agents_md_placeholder_is_not_loaded(tmp_path):
+  """The old resource-ledger placeholder is treated as empty guidance."""
+  (tmp_path / 'AGENTS.md').write_text(LEGACY_DEFAULT_AGENTS_MD, encoding='utf-8')
+
+  assert load_project_operating_guide(tmp_path) == ''
+
+
+def test_ensure_project_operating_guide_migrates_legacy_placeholder(tmp_path):
+  """Existing placeholder AGENTS.md files are replaced with mechanism guidance."""
+  agents_path = tmp_path / 'AGENTS.md'
+  agents_path.write_text(LEGACY_DEFAULT_AGENTS_MD, encoding='utf-8')
+
+  path, changed = ensure_project_operating_guide(tmp_path)
+
+  assert path == agents_path
+  assert changed is True
+  assert agents_path.read_text(encoding='utf-8') == DEFAULT_PROJECT_OPERATING_GUIDE
+  assert load_project_operating_guide(tmp_path).startswith('# Project Operating Guide')
 
 
 def test_execute_sql_requires_schema_for_configured_project_tables(tmp_path):
