@@ -25,7 +25,7 @@ databricks_resources:
   # Optional compute hints. Use cluster_id for notebook/workflow execution and
   # warehouse_id for SQL. Leave null if the Builder Agent should infer or ask.
   cluster_id: "1021-020841-thvbkra7"
-  warehouse_id: null
+  warehouse_id: "1af3859d87e5fce6"
 
   # Optional workspace source context. Use Databricks workspace paths, not local
   # filesystem paths. The Builder Agent may inspect these read-only.
@@ -53,12 +53,12 @@ databricks_resources:
 
   # Governed metric views the Builder Agent may inspect.
   # Preferred format: <catalog.schema.metric_view>.
-  input_metric_views:
+  input_metric_views: []
 
   # Input volume folders or files the Builder Agent may inspect.
   # Preferred format: /Volumes/<catalog>/<schema>/<volume>/<path_or_file>.
   # UI-selected volume names may also be stored if the app can resolve them.
-  input_volume_paths:
+  input_volume_paths: []
 
   # Output schema for generated tables, views, or profiles.
   # Preferred format: <catalog.schema>. The Builder Agent may create the schema
@@ -70,5 +70,5 @@ databricks_resources:
   # Preferred format: /Volumes/<catalog>/<schema>/<volume>/<folder>.
   # The Builder Agent may create missing folders under an existing volume when
   # the user has permission.
-  output_volume_folders:
+  output_volume_folders: []
     
