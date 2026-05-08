@@ -1,4 +1,4 @@
-import { FileText, GitBranch, SlidersHorizontal } from 'lucide-react';
+import { FileText, SlidersHorizontal } from 'lucide-react';
 import type { AnalysisStory } from '@/features/analysis/types';
 import { cn } from '@/lib/utils';
 import { EvidenceContent } from './EvidenceContent';
@@ -49,40 +49,10 @@ export function RightInspectPanel({
 
         {!story ? (
           <div className="rounded-lg border border-dashed border-[var(--color-border)] p-4 text-sm text-[var(--color-text-muted)]">
-            Select a story to inspect trace, evidence, context, and next moves.
+            Select a story to inspect evidence, context, and next moves.
           </div>
         ) : (
           <div className="space-y-6">
-            <section>
-              <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-[var(--color-text-muted)]">
-                <GitBranch className="h-3.5 w-3.5" />
-                Trace
-              </div>
-              <div className="space-y-2">
-                {story.trace.length === 0 ? (
-                  <p className="text-xs text-[var(--color-text-muted)]">No trace events yet.</p>
-                ) : story.trace.map((step) => (
-                  <div key={step.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3">
-                    <div className="flex items-center gap-2">
-                      <span className={cn(
-                        'h-2 w-2 rounded-full',
-                        step.status === 'running' && 'bg-[var(--color-accent-primary)]',
-                        step.status === 'done' && 'bg-[var(--color-success)]',
-                        step.status === 'error' && 'bg-[var(--color-error)]'
-                      )} />
-                      <span className="text-xs font-medium text-[var(--color-text-heading)]">
-                        {step.label}
-                      </span>
-                    </div>
-                    {step.detail && (
-                      <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-[11px] leading-5 text-[var(--color-text-muted)]">
-                        {step.detail}
-                      </pre>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
 
             <section>
               <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-[var(--color-text-muted)]">
