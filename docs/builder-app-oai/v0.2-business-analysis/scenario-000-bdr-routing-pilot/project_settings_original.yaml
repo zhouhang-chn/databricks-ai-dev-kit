@@ -1,0 +1,32 @@
+business_background: >-
+  The BDR routing pilot is designed to evaluate whether a machine-learning-generated routing and visit plan can outperform BDRs’ traditional self-planned routes. The pilot assigns ML-generated monthly visit plans to test-group BDRs while comparable control-group BDRs continue normal planning. The business objective is to determine whether the ML plan improves visit effectiveness, frequency adherence, daily productivity, and travel efficiency enough to justify BU or national rollout.
+
+  The analysis focuses on six core metrics: visit base coverage, visit frequency adherence, visit time, travel / commute time, travel distance, and valid visits per working day per BDR. The evaluation requires two complementary comparisons: first, test-group BDR performance in the ML pilot month versus their own previous non-ML month; second, test-group performance versus control-group performance across both previous month and pilot month, including the difference in month-over-month deltas.
+
+  The rollout decision should be based on whether the test group shows stronger improvement than the control group, especially on coverage and frequency adherence, while also reducing travel burden or increasing daily visit productivity. Results must be validated at BDR, BDR-day, and BDR-POC-month levels, with checks for visit-base correctness, valid visit definitions, date-window alignment, join correctness, data freshness, outliers, and control-group comparability.
+    
+databricks_resources: 
+  - databricks-host:
+    - https://dbc-68f93c80-55e9.cloud.databricks.com/
+  - databricks-cluster-id:
+    - c-7d68e944-b17c
+  - workflows: 
+    - "build-your-own-agent/llm_rag_agents/sql/bdr_routing_pilot_notebook_sequence_template.py"
+  - workspace folders: 
+    - "build-your-own-agent/llm_rag_agents/sql" 
+  - workspace file: "bdr_visit_plan_faq.md"
+  - input tables: 
+    - "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base" 
+  - input volumes: 
+    - "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
+  - input metric views: 
+    - "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
+  - output catalog schema: "bdr_performance_dashboard"
+  - output volumes: "bdr_pilot_performance_dashboard.performance_metrics" 
+
+analysis_notes: 
+  - "The ML pilot month for test-group BDRs is January 2025."
+  - "The previous non-ML month for test-group BDRs is December 2024."
+  - "The control group is selected from the remaining BDRs, excluding the test group and any BDRs with data quality or assignment issues."
+  
+
