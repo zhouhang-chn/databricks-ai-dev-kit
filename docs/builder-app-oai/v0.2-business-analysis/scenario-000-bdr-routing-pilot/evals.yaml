@@ -1,10 +1,13 @@
 golden_eval_suite:
   metadata:
     id: "ml_routing_pilot_eval_suite"
+    artifact_type: "eval_projection"
     scenario_bundle: "scenario-000-bdr-routing-pilot"
     scenario_id: "ml_based_bdr_routing_pilot"
     version: "0.2.0-draft"
     status: "draft_pending_manual_trace_results"
+    canonical_source: "analysis_context.golden_cases"
+    generated_from: "analysis_context.yaml"
     valid_from: null
     supersedes: null
     generated_by: "agent"

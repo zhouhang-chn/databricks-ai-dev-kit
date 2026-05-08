@@ -15,7 +15,7 @@ progress tracking.
 | `next-moves/` | Current backend Next Moves service design and action plan. |
 | `frontend-refactor/` | Story canvas and inspect-panel frontend architecture notes. |
 | `v0.1-agents-sdk-integration/` | Historical migration track for replacing the Claude runtime with the OpenAI Agents SDK. |
-| `v0.2-business-analysis/` | Current gap-filling track for preparing business scenarios, runtime context assets, golden evals, and agent benchmark work. |
+| `v0.2-business-analysis/` | Current Builder Agent track for generating scenario bundles from project settings, enriching context assets, and constructing golden evals. |
 
 ## Versioned Progress Tracks
 
@@ -27,17 +27,25 @@ Each `vX.Y-*` folder should contain:
 - `action-plan.md`: implementation phases, acceptance gates, and validation.
 
 When a phase introduces progress-tracking artifacts, keep them under the
-versioned folder. For v0.2, scenario bundles are the canonical layout. A bundle
-contains the scenario input, generated markdown context, YAML assets, and YAML
-evals for one business scenario.
+versioned folder. For v0.2, scenario bundles are the canonical layout and the
+Builder Agent is the primary product surface. A bundle contains the project
+setting source of truth, generated structured context YAML, and a generated
+eval projection for one business scenario.
 
 Within v0.2 scenario bundles:
 
-- `User_Input.md` is the only human-authored seed input.
-- Markdown is used for descriptive analyst context, primarily
-  `Business_Scenario.md`.
-- YAML is used for runtime-readable context and evals:
-  `Context_Assets.yaml` and `evals.yaml`.
+- `project_setting.yaml` is the minimal structured user-authored source of
+  truth. It covers project settings, resource scope, semantic hints, workflow
+  hints, and the seed business context.
+- `business_context.yaml` is the structured business scenario and decision
+  context generated from project settings.
+- `data_context.yaml` is the structured data and metadata context generated
+  from source-code and Databricks enrichment.
+- `analysis_context.yaml` is the structured analysis context. It contains
+  analysis principles that can be fed to the Analysis Agent on every run and
+  golden cases that can be retrieved on demand.
+- `evals.yaml` is a generated eval projection from canonical golden cases in
+  `analysis_context.yaml`.
 - A future `_shared/` folder may hold reusable cross-scenario assets once reuse
   is proven.
 

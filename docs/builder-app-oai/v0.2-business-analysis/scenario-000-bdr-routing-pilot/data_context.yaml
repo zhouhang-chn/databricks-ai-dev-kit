@@ -1,6 +1,7 @@
-context_assets:
+data_context:
   metadata:
-    id: "ml_routing_pilot_context_assets"
+    id: "ml_routing_pilot_data_context"
+    artifact_type: "data_context"
     scenario_bundle: "scenario-000-bdr-routing-pilot"
     scenario_id: "ml_based_bdr_routing_pilot"
     version: "0.2.0-draft"
@@ -10,7 +11,7 @@ context_assets:
     generated_by: "agent"
     last_reviewed_by: null
 
-  # Section 1: retrieval context for matching this scenario bundle.
+  # Section 1: data and semantic retrieval context for matching this bundle.
   retrieval_index:
     scenario_name: "ML-Based BDR Routing Optimization Pilot"
     question_patterns:
@@ -33,10 +34,10 @@ context_assets:
     match_policy:
       matched: "retrieve this bundle before plan construction"
       low_confidence: "ask whether the user means the ML BDR routing pilot"
-      no_match: "use generic safe discovery only for low-risk metric lookup, or request new user-authored scenario input for decision-support questions"
+      no_match: "use generic safe discovery only for low-risk metric lookup, or request a new project_setting.yaml for decision-support questions"
 
-  # Section 2: reusable business context assets. Promote to shared assets when
-  # the same metrics or glossary terms are reused across multiple bundles.
+  # Section 2: reusable metric and semantic assets. Promote to shared assets
+  # when the same metrics or glossary terms are reused across multiple bundles.
   metric_catalog:
     grain_requirements:
       - "BDR-month"
@@ -109,11 +110,15 @@ context_assets:
   # Section 3: data assets, approved joins, and validation checks.
   data_assets:
     runtime_binding:
-      target_environment: "pending_real_or_synthetic_databricks_workspace"
+      source_of_truth: "project_setting.yaml"
+      target_environment: "databricks_workspace"
+      databricks_host: "https://dbc-68f93c80-55e9.cloud.databricks.com/"
+      cluster_id: "c-7d68e944-b17c"
       catalog: null
-      schema: null
+      schema: "POC_BDR_Pilot_Plan_and_Visit_Data"
       warehouse_id: null
-      data_profile_status: "not_bound"
+      workspace_folder: "build-your-own-agent/llm_rag_agents/sql"
+      data_profile_status: "source_hints_provided_not_profiled"
       synthetic_dataset_status: "not_created"
     glossary:
       BDR: "Business Development Representative"
@@ -135,7 +140,7 @@ context_assets:
           - { name: "pilot_month", type: "date_or_month", nullable: false, pii: false }
           - { name: "previous_month", type: "date_or_month", nullable: false, pii: false }
       - asset_id: "bdr_visit_base_monthly"
-        physical_name: null
+        physical_name: "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
         asset_type: "monthly_bridge"
         grain: "one row per BDR-POC-month"
         refresh_cadence: "monthly_with_possible_in_month_updates"

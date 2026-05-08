@@ -1,101 +1,112 @@
-# v0.2 Business Analysis Gap Analysis
+# v0.2 Builder Agent Gap Analysis
 
-Date: 2026-05-07
+Date: 2026-05-08
 
 Scope: local source and docs under `databricks-builder-app-oai/` and
 `docs/builder-app-oai/`. This review does not include live AI Gateway,
 Databricks workspace, browser, or load testing.
 
-## Business-Question Target
+## Builder Agent Target
 
-For business-question answering, the app should reliably turn a user question
-into:
+For v0.2, the app should reliably turn minimal structured project settings into
+a reviewed scenario bundle that can later support business-question answering.
 
-1. The right business context: metric definitions, table choices, filters,
-   grain, caveats, permissions, and release/user role.
-2. Efficient evidence collection: bounded SQL and metadata inspection against
-   the correct warehouse, catalog, schema, and preferred tables.
-3. A defensible answer: plan, evidence, assumptions, caveats, source links, and
-   next moves that survive refresh/replay.
-4. A usable analyst surface: structured progress, evidence drilldown, visual
-   summaries where useful, and no raw tool noise in the primary story.
+The expected path is:
 
-The OAI app has the foundation for this, but it is still closer to a general
-Databricks builder/coding agent than a high-confidence business analyst.
+1. Accept `project_setting.yaml` as the user-authored source of truth.
+2. Generate the scenario bundle with the Builder Agent.
+3. Enrich the bundle with business context, source-code context, and Databricks
+   data/metadata context.
+4. Run completeness checks and clarification loops before claiming readiness.
+5. Review and manually execute representative cases with a senior analyst.
+6. Convert manual execution into golden evals.
+7. Let a lightweight Analysis Agent consume reviewed bundles as read-only
+   context and return missing-context feedback.
 
-## Lifecycle Gap
+The OAI app has the runtime foundation for this, but it is still closer to a
+general Databricks builder/coding agent than a repeatable scenario-bundle
+preparation system.
 
-The next gap is not primarily an agent implementation gap. The larger gap is
-that the docs and source do not yet model the full lifecycle of business
-analysis:
+## Refactored Lifecycle Gap
+
+The next gap is not primarily an answer-runtime gap. The larger gap is that the
+product does not yet implement the preparation lifecycle that creates the
+business, data, and evaluation assets an Analysis Agent should depend on:
 
 ```text
-Business Scenario
-→ Business Analysis Requirement
-→ Data + Context Asset Preparation
-→ Analysis Strategy / Method Selection
-→ Manual Senior Analyst Execution
-→ Golden Eval Construction
-→ Agent Benchmark + Orchestration Design
+Project Setting
+-> Builder Agent Bundle Generation
+-> Business Context Preparation
+-> Data and Metadata Context Preparation
+-> Analysis Principles and Validation Policy
+-> Manual Senior Analyst Execution
+-> Golden Eval Construction
+-> Lightweight Analysis Agent Consumption
+-> Missing-Context Feedback
 ```
 
-Without this lifecycle, the agent roadmap can over-optimize prompts, tools, SQL
-safety, or visualization before the team has agreed on what good human analysis
-looks like for real business scenarios.
+Without this lifecycle, the team can over-optimize prompts, SQL safety,
+visualization, or answer wording before it has a reviewed and runnable bundle
+that defines what correct analysis means.
 
 The first seed scenario is the ML-based BDR routing pilot. It covers a Sales
 Ops / Regional Sales Director / BU leadership decision on whether an
 ML-generated monthly routing and visit plan outperforms traditional BDR
 self-planning enough to justify BU or national rollout.
 
-The first drafted lifecycle fixtures are:
+The first draft bundle artifacts are:
 
-- `User_Input.md`
-- `Business_Scenario.md`
-- `Context_Assets.yaml`
+- `project_setting.yaml`
+- `README.md`
+- `business_context.yaml`
+- `data_context.yaml`
+- `analysis_context.yaml`
 - `evals.yaml`
 
 These are intentionally draft artifacts. They make the missing work concrete:
-implement the bundle generator that creates and updates them from user input,
-confirm source-specific data definitions with humans, run the senior analyst
-case manually, convert the trace into calibrated stage-level evals, and only
-then benchmark the agent.
+implement the Builder Agent generator that creates and updates them, confirm
+source-specific data definitions with humans, run the senior analyst case
+manually, convert the trace into calibrated evals, and then smoke-test
+read-only consumption.
 
 ## Documentation Strategy
 
-`docs/builder-app-oai/` is the documentation root for the OAI app. The root
-feature docs should stay aligned with source code and product goals.
+`docs/builder-app-oai/` is the documentation root for the OAI app. Root feature
+docs should stay aligned with source code and product goals.
 
 Versioned folders track phase progress:
 
 - `v0.1-agents-sdk-integration/`: historical runtime migration from Claude SDK
   to OpenAI Agents SDK.
-- `v0.2-business-analysis/`: current gap-filling phase for reliable business
-  question answering.
+- `v0.2-business-analysis/`: current gap-filling phase for Builder Agent
+  scenario-bundle preparation.
 
-The v0.1 docs should remain as migration history with small errata and links to
-v0.2. They should not become the business-answering roadmap.
+The v0.1 docs should remain as migration history with small errata. They should
+not become the Builder Agent or business-answering roadmap.
 
 ## High-Level Architecture
 
 ```mermaid
 flowchart TD
-  User["Browser analysis UI"] --> API["POST /api/invoke_agent"]
-  API --> Stream["ActiveStreamManager"]
-  Stream --> Runtime["OpenAIAgentRuntime"]
-  Runtime --> Agent["OpenAI Agents SDK Agent + Runner.run_streamed"]
-  Agent --> PlanTools["update_plan / submit_conclusion"]
-  Agent --> FileTools["project file tools"]
-  Agent --> DbxTools["Databricks typed + FastMCP-derived tools"]
-  Agent --> OpTools["operation polling tools"]
-  DbxTools --> Databricks["Databricks workspace / SQL warehouse"]
-  FileTools --> ProjectFS["projects/<project_id>/"]
-  Stream --> SSE["SSE /stream_progress windows"]
-  Stream --> DB["Lakebase execution events + messages"]
-  SSE --> Story["Analysis story stepper, evidence, next moves"]
+  Setting["project_setting.yaml"] --> Generator["Builder Agent Bundle Generator"]
+  Source["Source-code context"] --> Generator
+  DbxMeta["Databricks metadata"] --> Generator
+  Review["Analyst / developer review"] --> Generator
+  Generator --> Bundle["Scenario Bundle"]
+  Bundle --> Scenario["business_context.yaml"]
+  Bundle --> Data["data_context.yaml"]
+  Bundle --> Analysis["analysis_context.yaml"]
+  Bundle --> Evals["evals.yaml"]
+  Scenario --> Manual["Manual Senior Analyst Execution"]
+  Data --> Manual
+  Analysis --> Manual
+  Manual --> Evals
+  Bundle --> Consumer["Lightweight Analysis Agent Consumer"]
+  Consumer --> Feedback["Missing-context feedback"]
+  Feedback --> Generator
 ```
 
-What is strong:
+What is strong in the current foundation:
 
 - Runtime boundary is clear: routers and storage use a runtime-neutral facade.
 - Tool allowlisting happens by construction through the OpenAI tool list.
@@ -103,17 +114,22 @@ What is strong:
 - Plan and synthesis events are structured tool events, not markdown parsing.
 - Project context can include resources, semantics, release state, policy, and
   user-preview role.
+- Phase 1 fixed the persistence gap for project resources and structured
+  conclusion fallback text.
+
+What is still missing is the Builder Agent layer that converts project settings
+and metadata into a reviewed scenario bundle.
 
 ## Comparison Against Current Docs
 
 | Document set | Current state | Gap to track |
 |---|---|---|
-| `v0.1-agents-sdk-integration/*` | Explains runtime migration and most implemented runtime boundaries. | Keep as v0.1 history; update only stale paths, package-manager policy, and links to v0.2. |
-| `planning-orchestration.md` | Correctly defines `update_plan` and `submit_conclusion` as the story contract. | Add v0.2 acceptance gates for persisting and replaying structured conclusions. |
-| `data-visualization.md` | Defines `ChartSpec` and phased chart evidence design. | No current implementation path produces chart evidence. |
-| `project-management/*` | Defines durable settings, resources, semantics, releases, roles, memory, and governance. | Remaining v0.2 work is business-answer behavior on top of project settings, not the resource save path. |
-| `next-moves/*` | Backend Next Moves service exists with model and heuristic generation. | Quality now depends on richer evidence context and future manifest summaries. |
-| `frontend-refactor/*` | Story canvas, story card, and inspector direction matches source. | Business-answer correctness now depends more on backend evidence contracts than more frontend refactoring. |
+| v0.1 runtime migration docs | Explain the OpenAI Agents SDK migration and implemented runtime boundaries. | Keep as migration history; do not use them as the v0.2 preparation roadmap. |
+| Planning and orchestration docs | Correctly define plan and conclusion tools as the story contract. | Add acceptance gates only after bundle-generated evidence contracts are known. |
+| Data visualization docs | Define chart evidence design. | Treat chart evidence as downstream serving work after the seed bundle and evals are runnable. |
+| Project Management docs | Define durable settings, resources, semantics, releases, roles, memory, and governance. | `project_setting.yaml` should mirror the minimum project-setting subset needed by the Builder Agent. |
+| Next Moves docs | Backend Next Moves service exists with model and heuristic generation. | Quality depends on future evidence and bundle context, not on more generic prompt polish. |
+| Frontend refactor docs | Story canvas and inspector direction match source. | v0.2 correctness depends more on Builder Agent artifacts than more frontend refactoring. |
 
 ## Resolved in Phase 1
 
@@ -128,95 +144,105 @@ What is strong:
 
 | Priority | Gap | Why it matters |
 |---|---|---|
-| P0 | Lifecycle artifacts are only draft fixtures. The ML-based BDR routing seed now has `Business_Scenario.md`, `Context_Assets.yaml`, and `evals.yaml`, but no completed manual analyst execution. | Agent quality cannot be judged reliably until the human analytical process is captured and converted into calibrated evals. |
-| P0 | The bundle generator contract is documented but not implemented. It must create and update `README.md`, `Business_Scenario.md`, `Context_Assets.yaml`, and `evals.yaml` from `User_Input.md`, source-code context, Databricks metadata, and analyst review. | This is the gate that turns ad-hoc business input into a structured, runtime-retrievable analysis lifecycle. Without it, simplification only reduces file count; it does not create a repeatable preparation workflow. |
-| P0 | No runtime `get_scenario_context(question, project)` retrieval contract is implemented yet. | The agent can ignore the scenario bundle unless the runtime has a deterministic path to retrieve it before planning. |
-| P0 | No agreed requirement taxonomy is implemented in product or eval code. | A metric lookup, variance diagnosis, causal question, and optimization question require different data, method, validation, and answer style. |
-| P0 | Context assets are not yet operational. Metric definitions, data profiles, join maps, pitfalls, canonical SQL, and validation checklists are scenario-bundle fixtures rather than retrievable runtime assets. | The agent can still behave like a generic SQL chatbot instead of using senior analyst context. |
-| P0 | Golden evals have first scoring anchors but are not calibrated against completed manual execution results. | Final-answer-only or uncalibrated scoring cannot reliably isolate whether a failure came from scoping, discovery, planning, SQL execution, validation, or synthesis. |
-| P0 | No real or synthetic Databricks dataset is bound to the seed `Context_Assets.yaml`. | Phase 5 manual execution and CI-repeatable evals are blocked until the data contract is runnable. |
-| P1 | The semantic layer is too thin. Preferred tables, glossary, sample queries, and caveats are prompt text, not a queryable semantic retrieval path. | The model can choose the wrong table, grain, metric definition, or filters when several similar assets exist. |
-| P1 | SQL correctness guardrails are mostly prompt/tool conventions. There is no mandatory query plan, schema-grounding step, SQL parse/lint gate, source manifest, row-limit policy, or evidence sufficiency check before synthesis. | The agent may produce plausible conclusions from partial, unsafe, or inefficient evidence. |
+| P0 | The Builder Agent bundle generator is documented but not implemented. | This is the gate that turns minimal project settings into the scenario, context, and eval assets needed for reliable business analysis. |
+| P0 | `project_setting.yaml` is not yet backed by a schema validator or update workflow. | The generator cannot safely distinguish required settings, optional hints, malformed fields, and changed paths without a validated input contract. |
+| P0 | The completeness and clarification loop is not implemented. | Missing intervention, baseline, population, time window, metric meaning, or success threshold should produce targeted questions rather than confident-looking generated artifacts. |
+| P0 | Review-state preservation and partial regeneration are not implemented. | Analyst-reviewed sections can drift or be overwritten when the user edits a small project-setting field. |
+| P0 | Source-code and Databricks metadata enrichment are not implemented as bounded read-only Builder Agent steps. | `data_context.yaml` can remain generic or speculative instead of being bound to real candidate assets, owners, fields, freshness, and joins. |
+| P0 | The compact bundle is draft-only. The ML-based BDR routing seed has generated-style artifacts, but no completed manual analyst execution. | Agent quality cannot be judged reliably until the human analytical process is captured and converted into calibrated evals. |
+| P0 | Golden evals are not calibrated against manual execution or generator behavior. | Final-answer-only or uncalibrated scoring cannot isolate failures in generation, scoping, discovery, planning, execution, validation, or synthesis. |
+| P0 | No real or synthetic Databricks dataset is bound to the seed context assets. | Manual execution and CI-repeatable evals are blocked until the data contract is runnable. |
+| P0 | The Builder Agent and Analysis Agent boundary is not implemented in runtime behavior. | Builder runs should mutate draft bundles; Analysis Agent runs should consume reviewed bundles as read-only context and return missing-context feedback. |
+| P0 | No deterministic scenario-bundle retrieval path is implemented for consumer runs. | Even excellent artifacts can be ignored unless the runtime can retrieve them before planning. |
+| P1 | Requirement taxonomy is documented but not implemented in generator or eval code. | The Builder Agent needs deterministic classification to select method, answer policy, eval structure, and context requirements. |
+| P1 | Context assets are not yet operational. | Metric definitions, data profiles, join maps, pitfalls, canonical SQL, and validation checklists are fixtures rather than validated runtime assets. |
+| P1 | SQL correctness guardrails remain mostly prompt/tool conventions. | This matters for later Analysis Agent serving, but it should be prioritized after bundle generation and evals define required evidence. |
 | P1 | Read-only SQL enforcement is prefix-based and treats any query starting with `WITH` as read-only. | User-preview/read-only mode can allow unsafe CTE patterns unless SQL is parsed and classified. |
-| P1 | Generated FastMCP schemas are used broadly even though schema fidelity is a known risk. `_normalize_schema` is shallow and malformed JSON args can become `{}`. | Bad arguments can cause failed calls, accidental defaults, and retry churn. |
-| P1 | Chart evidence is designed but not implemented. `EvidenceType` includes `chart`, but there is no chart spec, detection, or renderer path. | Trend, ranking, composition, and anomaly questions remain harder to inspect and easier to misread. |
-| P2 | Skill guidance injects root `SKILL.md` only. Referenced skill files are visible in the Skills Explorer but not agent-browsable at runtime. | Specialized Databricks guidance can be truncated to summaries. |
-| P2 | Project custom skill precedence can overwrite project-local skill content during sync. | Project-specific business rules should be the hardest rules to lose. |
-| P2 | Direct OpenAI fallback in docs diverges from runtime expectations where agent runs require `OPENAI_BASE_URL`. | Setup and debugging become less predictable. |
-| P2 | Several progress snapshots overstate product readiness. | "Complete" sometimes means schema/UI exists, not end-to-end business-answer behavior is verified. |
-| P2 | There is no single business-answer definition of done across docs. | Cross-cutting failures fall between planning, project, visualization, and next-moves docs. |
+| P1 | Generated FastMCP schemas are broad and schema fidelity is a known risk. | Bad tool arguments can cause failed calls, accidental defaults, and retry churn. |
+| P2 | Chart evidence is designed but not implemented. | Trend, ranking, composition, and anomaly questions remain harder to inspect, but chart work should follow evidence contracts from manual analysis. |
+| P2 | Skill guidance injects root `SKILL.md` only. | Specialized Databricks guidance can be truncated to summaries. |
+| P2 | Several progress snapshots overstate product readiness. | "Complete" sometimes means schema/UI exists, not end-to-end bundle generation, review, eval, and consumption are verified. |
 
 ## Efficiency Gaps
 
 | Priority | Gap | Efficiency impact |
 |---|---|---|
+| P0 | No partial-regeneration engine. | Small project-setting edits can force full artifact regeneration, increase review burden, and introduce drift. |
+| P0 | No metadata-enrichment boundary or cache. | Builder runs may either avoid useful metadata or fall into repeated broad discovery. |
+| P1 | No scenario-bundle retrieval index. | Consumer runs may rediscover context from scratch instead of using reviewed bundles. |
 | P1 | Tool surface can be very large when all skills are enabled. | More tool schemas increase prompt/tool-selection overhead and make broad lifecycle tools easier to select accidentally. |
-| P1 | Plan-driven execution has fixed turn cost. | Simple questions pay create/start/finish/conclusion tool-call overhead before useful SQL. |
-| P1 | Long-running generated tools use in-memory operation state and per-call executors. | Concurrent slow Databricks calls create thread pressure and lose continuity across process restart. |
+| P1 | Plan-driven execution has fixed turn cost. | Simple consumer smoke tests can pay create/start/finish/conclusion tool-call overhead before useful evidence. |
 | P2 | Execution events are stored as a growing JSON array in one row. | Long runs become increasingly expensive to append, replay, and query. |
-| P2 | Next Moves add a post-run model call by default. | Tail latency and cost increase, and incomplete `final_text` weakens relevance. |
-| P2 | Latency/tool-call budgets are documented by tier but not measured. | Correctness scaffolding can make common analyst questions too slow if budget telemetry is not enforced. |
+| P2 | Next Moves add a post-run model call by default. | Tail latency and cost increase, and incomplete evidence context weakens relevance. |
+| P2 | Builder and consumer budget telemetry is not measured. | Correctness scaffolding can make common workflows too slow if generation and consumption budgets are not tracked separately. |
 
-## Fit Against Business-Question Goal
+## Fit Against Builder-Agent Goal
 
 | Requirement | Current state | Gap |
 |---|---|---|
-| Find relevant data | Project settings can list preferred tables and defaults; tools can inspect catalogs/schemas/tables. | No semantic index, schema profile cache, metric registry, or table-ranking flow. |
-| Ask efficient SQL | `execute_sql` uses default catalog/schema/warehouse and timeout. | No enforced limits, freshness checks, explain/cost gate, or query template selection. |
-| Use governed metrics | Project settings support metric views. | No first-class metric-view answering path in the analyst loop. |
-| Explain evidence | Tool results become evidence blocks and inspect-panel payloads. | No required source manifest in the conclusion. |
-| Visualize analytical shape | Visualization design exists and type includes `chart`. | No implementation produces chart evidence today. |
-| Persist and replay answers | Execution events and messages are persisted after completion; structured synthesis now backs assistant text when normal text is empty. | A durable business-answer manifest is still missing. |
-| Support user preview | Release-pinned settings and read-only mode exist. | SQL prefix safety still weakens reliability. |
-| Prove quality | Runtime and helper unit tests exist. | No business-question eval suite scores table choice, SQL correctness, evidence, caveats, usefulness, or latency. |
+| Capture minimal project settings | `project_setting.yaml` exists for the seed scenario. | Needs schema validation, UI/update path, changed-path tracking, and review policy. |
+| Generate scenario bundle | Draft artifacts exist. | No implemented Builder Agent create/update generator, staged prompts, validation gates, or idempotency checks. |
+| Prepare business context | `business_context.yaml` contains structured scenario and decision context. | Needs generator enforcement, completeness checks, reviewer state, and partial regeneration. |
+| Prepare data/metadata context | `data_context.yaml` contains drafted metric and data context. | Needs bounded source-code and Databricks metadata enrichment, binding confidence, owners, freshness, and runnable validation queries. |
+| Prepare analysis context | `analysis_context.yaml` contains analysis principles, method contract, playbook, policies, and canonical golden cases. | Needs manual-trace calibration, reviewer confirmation, and consumer feed validation. |
+| Capture manual analyst execution | Manual execution is planned. | Needs real or synthetic data and a completed trace with evidence shapes, rejected paths, caveats, and context gaps. |
+| Construct golden evals | Golden cases now belong in `analysis_context.yaml`; `evals.yaml` is a generated projection. | Needs Builder Agent generation evals, anchored scoring, manual-trace calibration, adversarial cases, and validation tests. |
+| Validate bundle consumption | Runtime foundation exists. | Needs deterministic bundle retrieval, read-only consumption behavior, and missing-context feedback routing. |
 
 ## Recommended v0.2 Priorities
 
-1. Treat v0.2 as business-analysis preparation: scenario, context assets,
-   manual execution, and golden evals first.
-2. Implement the bundle generator create/update contract, staged prompt
-   strategy, completeness gate, clarification loop, Databricks metadata
-   enrichment boundary, and partial-regeneration rules.
-3. Run the generator on the BDR routing pilot input and preserve draft status
-   until blocking business or data-context gaps are resolved.
-4. Prototype `get_scenario_context(question, project)` in Phase 3 so artifacts
-   are reachable by the runtime before broader orchestration work.
-5. Finish the BDR routing pilot requirement by confirming the intervention,
-   test/control scope, six metric definitions, date-window rules,
-   control-group matching logic, and rollout decision thresholds.
-6. Complete `Context_Assets.yaml` with governed table/view names, approved
-   joins, freshness checks, canonical SQL, owners, and known pitfalls.
-7. Bind `Context_Assets.yaml` to a real Databricks catalog/schema or create a
-   synthetic dataset so the lifecycle is runnable.
-8. Run the first manual senior analyst execution and record SQL, validation,
-   rejected paths, caveats, and final narrative.
-9. Calibrate stage-level golden evals from manual execution results.
-10. Benchmark the current agent against the golden evals.
-11. Use measured failures to prioritize evidence manifests, SQL safety, semantic
-   retrieval, chart evidence, tool narrowing, and durable operation state.
-12. Expand from the seed scenario into a scenario-to-eval matrix covering ML BDR
-   routing rollout, visit coverage drop, sales volume decline, campaign
-   performance, territory overload, customer churn, inventory shortage, price
-   impact, and metric lookup.
+1. Treat v0.2 as the Builder Agent phase: project setting to reviewed scenario
+   bundle.
+2. Implement `project_setting.yaml` schema validation, changed-path detection,
+   and source-of-truth update workflow.
+3. Implement the Builder Agent bundle generator create/update contract,
+   staged prompt strategy, completeness gate, clarification loop, review-state
+   preservation, and partial regeneration.
+4. Add bounded source-code and Databricks metadata enrichment for
+   `data_context.yaml`.
+5. Run the generator on the BDR routing pilot project setting and preserve
+   draft status until blocking business or data-context gaps are resolved.
+6. Bind the BDR context assets to a real Databricks catalog/schema or create a
+   synthetic dataset so manual execution and CI-repeatable evals are possible.
+7. Complete `analysis_context.yaml` with analysis principles, playbook steps,
+   ambiguity policy, validation policy, and canonical golden cases.
+8. Complete the manual senior analyst execution and record evidence shapes,
+   SQL, validation, rejected paths, caveats, and context gaps.
+9. Calibrate Builder Agent generation evals and business-analysis stage evals
+   from manual execution results.
+10. Prototype deterministic scenario-bundle retrieval so reviewed bundles are
+   reachable by the lightweight Analysis Agent consumer.
+11. Run consumer smoke tests and route missing-context feedback back into
+   Builder Agent refinement.
+12. Defer broader Analysis Agent orchestration, SQL parser hardening, chart
+   evidence, durable answer manifests, and UI polish until eval failures show
+   they are the next bottleneck.
+13. Expand from the seed scenario into a scenario-to-eval matrix after the
+   first bundle is generated, reviewed, evaluated, and consumed end to end.
 
 ## Validation Still Needed
 
-- Scenario bundle validation for `Business_Scenario.md`,
-  `Context_Assets.yaml`, and `evals.yaml`.
-- Bundle generator validation for create runs, update runs, clarification
-  status, partial regeneration, review-state invalidation, idempotency, and
-  read-only Databricks metadata enrichment.
-- Retrieval validation for `get_scenario_context`.
-- Real or synthetic data binding for the BDR routing pilot `Context_Assets.yaml`.
+- `project_setting.yaml` schema validation and changed-path detection.
+- Builder Agent generator validation for create runs, update runs,
+  clarification status, blocked status, partial regeneration, review-state
+  invalidation, idempotency, and artifact consistency.
+- Scenario bundle validation for `business_context.yaml`,
+  `data_context.yaml`, `analysis_context.yaml`, and generated `evals.yaml`.
+- Read-only bounded source-code and Databricks metadata enrichment validation.
+- Real or synthetic data binding for the BDR routing pilot context assets.
 - Senior analyst review of ML routing pilot metric definitions, test/control
   scope, visit-base denominator, join keys, exclusions, rollout thresholds, and
   required caveats.
-- Stage-level eval validation for scoping, discovery, planning, execution,
-  validation, and answer writing.
-- SQL safety tests for CTE plus write statements.
-- Schema-fidelity tests for generated FastMCP tools.
-- Browser tests for plan events, synthesis cards, evidence replay,
-  cancellation, and reload.
-- Live smoke tests with AI Gateway and a safe Databricks SQL warehouse.
-- Business-question evals for table choice, SQL correctness, evidence
-  sufficiency, caveat handling, answer usefulness, and latency.
+- Manual execution validation for SQL, intermediate evidence shape, rejected
+  paths, caveats, and context gaps.
+- Builder Agent generation evals for schema handling, scenario completeness,
+  context enrichment, ambiguity handling, artifact consistency, idempotency,
+  and partial regeneration.
+- Stage-level business-analysis evals for scoping, discovery, planning,
+  execution, validation, and answer writing.
+- Scenario-bundle retrieval validation for lightweight Analysis Agent consumer
+  runs.
+- Read-only consumer validation: reviewed bundles are not mutated, missing
+  context is returned as feedback, and bundle method rules are followed.
+- Later serving validation for SQL parser safety, chart evidence, evidence
+  manifests, browser replay, and live Databricks warehouse smoke tests.

@@ -1,0 +1,108 @@
+project_setting:
+  version: 1
+  source_of_truth: true
+  metadata:
+    id: "ml_based_bdr_routing_pilot"
+    scenario_bundle: "scenario-000-bdr-routing-pilot"
+    status: "draft"
+    generated_artifacts:
+      - "README.md"
+      - "business_context.yaml"
+      - "data_context.yaml"
+      - "analysis_context.yaml"
+      - "evals.yaml"
+
+  project:
+    name: "ML-Based BDR Routing Optimization Pilot"
+    project_type: "business_analysis"
+    status: "draft"
+    audience: "developer"
+    decision_owner: "Sales Ops / Regional Sales Director"
+    description: >-
+      Evaluate whether a machine-learning-generated routing and visit plan can
+      outperform BDRs' traditional self-planned routes and justify BU or
+      national rollout.
+
+  settings:
+    resources:
+      databricks_host: "https://dbc-68f93c80-55e9.cloud.databricks.com/"
+      cluster_id: "c-7d68e944-b17c"
+      warehouse_id: null
+      default_catalog: null
+      default_schema: "POC_BDR_Pilot_Plan_and_Visit_Data"
+      workspace_folder: "build-your-own-agent/llm_rag_agents/sql"
+      mlflow_experiment_name: null
+      output_schema: "bdr_performance_dashboard"
+      output_volume: "bdr_pilot_performance_dashboard.performance_metrics"
+    semantics:
+      preferred_tables:
+        - "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
+      metric_views:
+        - "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
+      preferred_volumes:
+        - "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
+      glossary:
+        BDR: "Business Development Representative"
+        POC: "Point of consumption / outlet / customer location"
+        visit_base: "set of POCs a BDR is expected to visit in a month"
+      known_caveats:
+        - "Control BDRs must exclude the test group and BDRs with data quality or assignment issues."
+    workflows:
+      enabled:
+        - id: "bdr_routing_pilot_notebook_sequence"
+          path: "build-your-own-agent/llm_rag_agents/sql/bdr_routing_pilot_notebook_sequence_template.py"
+      workspace_files:
+        - "bdr_visit_plan_faq.md"
+    agent_policy:
+      mode: "business_analysis_preparation"
+      role: "developer"
+      write_policy: "approval_required"
+      builder_agent:
+        purpose: "prepare and refine scenario bundles with developers and analysts"
+        allowed_outputs:
+          - "business_context.yaml"
+          - "data_context.yaml"
+          - "analysis_context.yaml"
+          - "evals.yaml"
+        requires_human_review: true
+      analysis_agent:
+        purpose: "serve end-user analysis from reviewed scenario bundles"
+        bundle_access: "read_only"
+        write_policy: "no_bundle_mutation"
+
+  business_context:
+    scenario_statement: >-
+      The BDR routing pilot is designed to evaluate whether a
+      machine-learning-generated routing and visit plan can outperform BDRs'
+      traditional self-planned routes. The pilot assigns ML-generated monthly
+      visit plans to test-group BDRs while comparable control-group BDRs
+      continue normal planning. The business objective is to determine whether
+      the ML plan improves visit effectiveness, frequency adherence, daily
+      productivity, and travel efficiency enough to justify BU or national
+      rollout.
+    core_metrics:
+      - "visit_base_coverage_rate"
+      - "visit_frequency_adherence_rate"
+      - "visit_time"
+      - "travel_commute_time"
+      - "travel_distance"
+      - "avg_valid_visits_per_working_day"
+    comparison_design:
+      test_pre_post: "test-group pilot month vs same BDRs' previous non-ML month"
+      test_control_delta: "test group month-over-month delta vs control group month-over-month delta"
+      primary_rollout_evidence: "test-control delta difference"
+    periods:
+      pilot_month: "2025-01"
+      previous_month: "2024-12"
+    analysis_units:
+      - "BDR-month"
+      - "BDR-day"
+      - "BDR-POC-month"
+    validation_focus:
+      - "visit-base correctness"
+      - "valid visit definitions"
+      - "date-window alignment"
+      - "join correctness"
+      - "data freshness"
+      - "outliers"
+      - "control-group comparability"

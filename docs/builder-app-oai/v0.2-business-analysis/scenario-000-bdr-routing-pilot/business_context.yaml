@@ -1,0 +1,182 @@
+business_context:
+  metadata:
+    artifact_type: "business_context"
+    scenario_bundle: "scenario-000-bdr-routing-pilot"
+    scenario_id: "ml_based_bdr_routing_pilot"
+    version: "0.2.0-draft"
+    status: "generated_from_project_setting"
+    source_of_truth: "project_setting.yaml"
+    generated_by: "agent"
+    last_reviewed_by: null
+    valid_from: null
+    supersedes: null
+    decision_reversibility: "medium_to_low"
+
+  scenario:
+    name: "ML-Based BDR Routing Optimization Pilot"
+    decision_owner: "Sales Ops / Regional Sales Director"
+    decision_frequency: "pilot review / rollout decision"
+    business_decision: "Decide whether the ML-generated BDR routing plan is strong enough for BU-level or national rollout."
+    business_impact:
+      - "sales productivity"
+      - "outlet coverage"
+      - "visit-frequency adherence"
+      - "travel efficiency"
+      - "operational feasibility of rollout"
+    required_confidence: "medium_to_high"
+    actionability_requirement: "must identify group, BDR, day, POC segment, and metric tradeoffs that support or block rollout"
+
+  background:
+    current_state:
+      - "BDRs visit assigned POCs in a monthly visit base."
+      - "Each POC has an expected visit frequency based on business priority and sales execution rules."
+      - "Many BDRs currently rely on self-planned routes."
+    problem:
+      - "Self-planned routes may lead to incomplete coverage."
+      - "Self-planned routes may lead to poor visit-frequency adherence."
+      - "Self-planned routes may create inefficient travel, uneven daily workload, or inconsistent execution quality."
+    pilot_change:
+      - "An ML-generated monthly routing and visit-plan program assigns optimized plans to selected test-group BDRs."
+      - "Comparable control-group BDRs continue normal self-planning."
+
+  goal:
+    primary_question: "Does the ML-generated routing plan improve BDR visit effectiveness and efficiency compared with BDRs' own non-ML planning?"
+    rollout_goal: "Determine whether the ML-based routing plan is strong enough to support BU-level or national rollout."
+    strongest_business_claim: "ML routing helps BDRs cover the right POCs with better frequency adherence while reducing travel burden and improving daily visit productivity."
+
+  intervention:
+    test_group_intervention: "ML-generated monthly routing / visit plan for test-group BDRs."
+    baseline: "BDR self-planned / non-ML routing plan."
+    comparison_groups:
+      test_group: "BDRs using the ML-generated routing plan in the pilot month."
+      control_group: "Comparable BDRs continuing with normal non-ML planning."
+
+  population:
+    poc_scope: "POCs in each BDR's valid visit base."
+    main_analysis_units:
+      - "BDR-month"
+      - "BDR-day"
+      - "BDR-POC-month"
+    exclusions_to_confirm:
+      - "inactive BDRs"
+      - "BDRs with territory changes"
+      - "POCs outside valid visit base"
+      - "test accounts or invalid POCs"
+
+  core_metrics:
+    - name: "visit_base_coverage_rate"
+      business_meaning: "Measures whether POCs in the BDR's visit base were visited during the month."
+      formula: "visited POCs in visit base / total POCs in visit base"
+      poc_level_rule: "vb_adhere = 1 if monthly POC visit count > 0"
+      business_priority: "highest_priority"
+    - name: "visit_frequency_adherence_rate"
+      business_meaning: "Measures whether actual visit count matches the required visit frequency in the visit base."
+      formula: "POCs whose actual visit count equals required visit frequency / total POCs in visit base"
+      poc_level_rule: "vf_adhere = 1 if actual monthly visit count = required visit frequency"
+      business_priority: "highest_priority"
+    - name: "visit_time"
+      business_meaning: "Measures how long BDRs stay at POCs for business activity."
+      typical_measures:
+        - "total visit time"
+        - "average visit time per visit"
+        - "visit time per working day"
+      business_priority: "guardrail"
+    - name: "travel_commute_time"
+      business_meaning: "Measures how long BDRs spend moving between POCs."
+      typical_measures:
+        - "total travel time"
+        - "travel time per working day"
+        - "travel time per visit"
+      business_priority: "guardrail"
+    - name: "travel_distance"
+      business_meaning: "Supports travel-time analysis using GPS distance between visited POCs."
+      typical_measures:
+        - "total travel distance"
+        - "travel distance per working day"
+        - "travel distance per visit"
+      business_priority: "guardrail"
+    - name: "avg_valid_visits_per_working_day"
+      business_meaning: "Measures daily execution productivity."
+      formula: "total valid visits / valid working days"
+      working_day_definition: "A BDR-day is counted as a working day if the BDR has at least one valid visit on that day."
+      business_priority: "guardrail"
+
+  comparison_design:
+    test_pre_post:
+      definition: "test-group BDRs in pilot month with ML plan vs same test-group BDRs in previous month without ML plan"
+      purpose: "Measure whether pilot BDRs improved after using the ML plan."
+      limitation: "Cannot fully separate ML impact from seasonality, holidays, market changes, or management attention."
+    test_control_delta:
+      test_delta: "test pilot month KPI - test previous month KPI"
+      control_delta: "control pilot month KPI - control previous month KPI"
+      estimated_ml_impact: "test group delta - control group delta"
+      purpose: "Evaluate whether the test group improved more than comparable non-ML BDRs."
+      evidence_strength: "primary_rollout_evidence"
+
+  success_hypothesis:
+    summary: "The ML-based routing plan is successful if test-group BDRs show stronger improvement than the control group on key effectiveness and efficiency metrics."
+    expected_pattern:
+      - "visit base coverage improves or at least does not decline"
+      - "visit frequency adherence improves"
+      - "visit time remains stable or improves"
+      - "travel time decreases"
+      - "travel distance decreases"
+      - "valid visits per working day increases"
+
+  required_business_views:
+    - view: "overall_pilot_summary"
+      required_fields:
+        - "test previous month"
+        - "test pilot month"
+        - "test delta"
+        - "control previous month"
+        - "control pilot month"
+        - "control delta"
+        - "test-control delta difference"
+    - view: "bdr_level_distribution"
+      required_fields:
+        - "average"
+        - "median"
+        - "p25"
+        - "p75"
+        - "number and percentage of improved BDRs"
+        - "outlier BDRs"
+    - view: "poc_level_adherence"
+      required_fields:
+        - "required visit frequency"
+        - "actual visit count"
+        - "visited or not"
+        - "frequency adhered or not"
+    - view: "bdr_day_productivity"
+      required_fields:
+        - "valid visits"
+        - "visit time"
+        - "travel time"
+        - "travel distance"
+        - "working day count"
+    - view: "segment_decomposition"
+      required_fields:
+        - "region / city"
+        - "BDR"
+        - "POC tier"
+        - "channel"
+        - "visit frequency group"
+        - "territory density"
+
+  business_risks_and_caveats:
+    - "Pre-post improvement may be caused by seasonality, holidays, campaigns, or management attention."
+    - "Test-control comparison is stronger but depends on whether the control group is comparable."
+    - "More visits per day is not always better if visit quality or high-priority POC coverage declines."
+    - "Travel time may be noisy because timestamp gaps can include breaks, waiting time, or admin work."
+    - "Visit frequency adherence depends on whether the business wants exact-match adherence or minimum-frequency compliance."
+
+  completeness_gate:
+    required_for_ready_status:
+      - "scenario name, decision owner, business decision, and rollout objective are explicit"
+      - "intervention and non-intervention baseline are explicit"
+      - "test group, control group, POC scope, and analysis grains are explicit"
+      - "six core metrics are defined at business level"
+      - "test pre/post and test-control delta comparisons are both specified"
+      - "required business views are listed"
+      - "business risks and caveats are listed"
+    current_status: "draft_complete_pending_source_and_analyst_confirmation"

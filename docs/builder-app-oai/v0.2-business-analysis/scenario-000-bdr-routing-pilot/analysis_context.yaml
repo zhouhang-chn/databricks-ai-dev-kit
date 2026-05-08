@@ -1,0 +1,291 @@
+analysis_context:
+  metadata:
+    artifact_type: "analysis_context"
+    id: "ml_routing_pilot_analysis_context"
+    scenario_bundle: "scenario-000-bdr-routing-pilot"
+    scenario_id: "ml_based_bdr_routing_pilot"
+    version: "0.2.0-draft"
+    status: "draft_pending_manual_trace_results"
+    valid_from: null
+    supersedes: null
+    generated_by: "agent"
+    last_reviewed_by: null
+
+  feed_policy:
+    feed_every_analysis_run:
+      - "requirement_classification"
+      - "analysis_principles"
+      - "method_contract"
+      - "playbook_steps"
+      - "answer_rules"
+      - "ambiguity_policy"
+      - "validation_policy"
+    feed_on_demand:
+      - "golden_cases"
+      - "adversarial_cases"
+      - "manual_trace_requirements"
+    eval_source:
+      canonical_source: "analysis_context.golden_cases"
+      generated_eval_projection: "evals.yaml"
+
+  requirement_classification:
+    primary_requirement_type: "causal_experiment_analysis"
+    secondary_requirement_types:
+      - "monitoring_variance"
+      - "segment_discovery"
+      - "driver_analysis"
+      - "recommendation_optimization"
+    budget_tier: "impact_evaluation"
+    required_analysis_units:
+      - "BDR-month"
+      - "BDR-day"
+      - "BDR-POC-month"
+
+  analysis_principles:
+    - id: "start_from_decision"
+      principle: "Start from the rollout decision and required confidence, not from table availability."
+    - id: "separate_effectiveness_and_efficiency"
+      principle: "Interpret coverage and frequency adherence as effectiveness metrics; interpret travel and daily visits as efficiency or guardrail metrics."
+    - id: "prefer_delta_difference"
+      principle: "Use test-control delta difference as primary rollout evidence; use test pre/post as supporting evidence."
+    - id: "validate_before_recommending"
+      principle: "Do not recommend rollout until scope, date windows, visit base, valid visits, joins, freshness, outliers, and control comparability are checked."
+    - id: "rank_business_contribution"
+      principle: "For decomposition, rank contribution to business movement rather than only percentage change."
+    - id: "avoid_overclaiming_causality"
+      principle: "Use causal language only when control comparability and validation gates hold."
+    - id: "surface_context_gaps"
+      principle: "When required context is missing, return missing-context feedback for Builder Agent refinement instead of inventing assumptions."
+
+  method_contract:
+    method: "impact_evaluation_with_rollout_recommendation"
+    primary_rollout_evidence: "test-control delta difference"
+    supporting_evidence:
+      - "test-group pre/post movement"
+      - "control-group pre/post movement"
+      - "BDR-level distribution"
+      - "BDR-day productivity"
+      - "BDR-POC-month adherence"
+      - "segment decomposition"
+    stop_conditions:
+      - "test/control BDR scope cannot be verified"
+      - "pilot and previous month windows cannot be aligned"
+      - "visit-base denominator cannot be verified"
+      - "valid visit definition is missing or conflicting"
+      - "join cardinality shows material duplication"
+      - "control group is not comparable and no sensitivity analysis is available"
+
+  playbook_steps:
+    - id: "scope_intervention"
+      required: true
+      evidence_shape: "test/control BDR counts and period definitions"
+    - id: "validate_visit_base"
+      required: true
+      evidence_shape: "BDR-POC-month denominator checks"
+    - id: "build_grain_tables"
+      required: true
+      evidence_shape: "BDR-month, BDR-day, and BDR-POC-month tables"
+    - id: "calculate_core_metrics"
+      required: true
+      evidence_shape: "group-month metric table"
+    - id: "compare_test_pre_post"
+      required: true
+      evidence_shape: "test previous, test pilot, test delta"
+    - id: "compare_test_control_delta"
+      required: true
+      evidence_shape: "control delta and test-control delta difference"
+    - id: "distribution_and_segments"
+      required: "conditional"
+      condition: "required when the result is mixed, any core metric deteriorates, or rollout is recommended"
+      evidence_shape: "BDR distribution and segment contribution tables"
+    - id: "validate_comparability_and_outliers"
+      required: true
+      evidence_shape: "baseline balance and outlier checks"
+    - id: "write_rollout_decision"
+      required: true
+      evidence_shape: "recommendation, confidence, caveats, and next actions"
+
+  answer_rules:
+    highest_priority_metrics:
+      - "visit_base_coverage_rate"
+      - "visit_frequency_adherence_rate"
+    guardrail_metrics:
+      - "travel_commute_time"
+      - "travel_distance"
+      - "avg_valid_visits_per_working_day"
+      - "visit_time"
+    rules:
+      - id: "priority_before_productivity"
+        rule: "Coverage and frequency adherence take priority over pure productivity gains."
+      - id: "travel_is_conditional_win"
+        rule: "Travel-time or travel-distance reduction is positive only if coverage and frequency adherence do not materially deteriorate."
+      - id: "productivity_is_conditional_win"
+        rule: "Higher valid visits per working day is positive only if visit effectiveness does not deteriorate."
+      - id: "causality_requires_validation"
+        rule: "Do not call the result causal unless control-group comparability, date-window alignment, and core data-quality checks hold."
+      - id: "use_cautious_language_when_needed"
+        rule: "If comparability is not validated, use cautious language such as estimated impact or consistent with improvement."
+      - id: "rollout_positive_requires_priority_metrics"
+        rule: "A rollout-positive answer requires improvement or no deterioration on the highest-priority metrics plus no material guardrail regression."
+      - id: "mixed_metrics_limit_rollout"
+        rule: "If priority metrics and guardrail metrics disagree, recommend limited rollout, further validation, or targeted follow-up rather than broad rollout."
+      - id: "state_frequency_semantics"
+        rule: "If frequency-adherence semantics are unresolved, state whether exact-match or minimum-frequency compliance was used."
+
+  ambiguity_policy:
+    - ambiguity: "frequency_adherence"
+      default: "use exact-match adherence"
+      escalate_when: "business wording or source metric conflicts with exact-match rule"
+    - ambiguity: "valid_visit_definition"
+      default: "use certified valid-visit flag from the source asset"
+      escalate_when: "no certified valid-visit flag exists or multiple rules conflict"
+    - ambiguity: "date_window_alignment"
+      default: "use complete business month if available, otherwise complete calendar month"
+      escalate_when: "pilot month is partial or business calendar boundary is unknown"
+    - ambiguity: "control_group_comparability"
+      default: "require baseline balance checks before rollout recommendation"
+      escalate_when: "control source, matching logic, or baseline balance is missing"
+    - ambiguity: "inactive_bdr_or_territory_change"
+      default: "exclude from primary estimate and report sensitivity if material"
+      escalate_when: "exclusion removes too much sample or business wants intent-to-treat analysis"
+    - ambiguity: "travel_outliers"
+      default: "apply the source outlier rule and report raw sensitivity"
+      escalate_when: "outlier rule is missing or materially changes the conclusion"
+
+  validation_policy:
+    required_checks:
+      - "correct test and control BDR scope"
+      - "correct pilot month and previous month windows"
+      - "correct visit-base definition"
+      - "correct valid-visit filter"
+      - "correct BDR-POC assignment"
+      - "stable BDR and POC IDs, not names"
+      - "no join explosion"
+      - "no duplicate visit inflation"
+      - "visit timestamp quality"
+      - "travel-time outlier handling"
+      - "data freshness"
+      - "control group comparability"
+    rollout_gating:
+      broad_rollout_allowed_when:
+        - "priority metrics improve or do not materially decline"
+        - "guardrail metrics do not materially regress"
+        - "test-control delta difference supports improvement"
+        - "control comparability passes"
+        - "core data-quality checks pass"
+      otherwise_recommend:
+        - "limited rollout"
+        - "targeted follow-up"
+        - "additional validation"
+
+  manual_trace_requirements:
+    status: "pending"
+    required_trace_sections:
+      - "interpreted question"
+      - "assumptions"
+      - "data assets used"
+      - "context assets used"
+      - "analysis plan"
+      - "sql steps with output shape"
+      - "validation steps"
+      - "rejected paths with reasoning"
+      - "unexpected findings"
+      - "context gaps discovered"
+      - "final answer and confidence"
+
+  golden_cases:
+    - id: "ml_routing_pilot_001"
+      user_question: "Did the ML routing pilot perform well enough to roll out?"
+      expected_scoping:
+        intervention: "ML-generated monthly routing / visit plan"
+        baseline: "BDR self-planned / non-ML routing plan"
+        groups: ["test group", "control group"]
+        periods: ["previous month", "pilot month"]
+        primary_comparison: "test-control delta difference"
+        analysis_units: ["BDR-month", "BDR-day", "BDR-POC-month"]
+        scope_appropriateness:
+          - "selects impact-evaluation playbook rather than generic metric lookup"
+          - "does not treat test pre/post as sufficient rollout evidence"
+      expected_context_discovery:
+        required_metrics:
+          - "visit_base_coverage_rate"
+          - "visit_frequency_adherence_rate"
+          - "visit_time"
+          - "travel_commute_time"
+          - "travel_distance"
+          - "avg_valid_visits_per_working_day"
+        required_assets:
+          - "pilot_bdr_assignment"
+          - "bdr_visit_base_monthly"
+          - "visit_info_daily_fact"
+          - "travel_leg_fact"
+          - "calendar_dimension"
+          - "bdr_dimension"
+          - "poc_dimension"
+        required_rules:
+          - "valid visit filter"
+          - "BDR-POC-month visit base"
+          - "working day definition"
+          - "stable BDR and POC IDs"
+          - "month-aligned test/control design"
+      expected_plan:
+        required_playbook_step_ids:
+          - "scope_intervention"
+          - "validate_visit_base"
+          - "build_grain_tables"
+          - "calculate_core_metrics"
+          - "compare_test_pre_post"
+          - "compare_test_control_delta"
+          - "validate_comparability_and_outliers"
+          - "write_rollout_decision"
+        conditional_playbook_step_ids:
+          - "distribution_and_segments"
+      expected_validation:
+        - "test/control BDR scope"
+        - "pilot and previous month windows"
+        - "visit-base correctness"
+        - "valid-visit definition"
+        - "BDR-POC assignment join cardinality"
+        - "duplicate visit inflation"
+        - "timestamp quality"
+        - "travel outliers"
+        - "data freshness"
+        - "control-group comparability"
+      expected_answer:
+        headline_pattern: "ML routing should / should not be rolled out because..."
+        must_include:
+          - "rollout recommendation"
+          - "six core metrics"
+          - "test previous, test pilot, test delta"
+          - "control previous, control pilot, control delta"
+          - "test-control delta difference"
+          - "coverage and frequency adherence interpretation"
+          - "travel burden and daily productivity interpretation"
+          - "priority-metric interpretation before productivity or travel wins"
+          - "travel reduction treated as positive only if coverage and frequency adherence do not deteriorate"
+          - "causality language conditioned on control-group comparability"
+          - "validation status"
+          - "confidence and caveats"
+      scoring_anchors:
+        scoping.correct_intervention_and_baseline:
+          zero: "Does not identify ML route plan as intervention or self-planning as baseline."
+          partial: "Identifies intervention or baseline but not both, or confuses test/control with before/after."
+          full: "Correctly names ML route plan intervention and BDR self-planning baseline."
+        planning.comparison_design_quality:
+          zero: "Uses only pilot-month values or only test pre/post."
+          partial: "Computes test and control movement but misses delta difference or treats pre/post as primary."
+          full: "Uses test-control delta difference as primary evidence and pre/post as supporting evidence."
+        answer.metric_tradeoff_analysis:
+          zero: "Rewards productivity or travel improvement while ignoring deterioration in coverage or frequency adherence."
+          partial: "Mentions metric tradeoffs but does not clearly prioritize coverage and frequency adherence."
+          full: "Prioritizes coverage and frequency adherence, then interprets travel and productivity as guardrails."
+
+  adversarial_cases:
+    - id: "ml_routing_pilot_control_imbalance_001"
+      input: "The test group is mostly from one BU, but the control group is balanced across BUs. Did ML routing work?"
+      expected_behavior:
+        - "flags control-group comparability risk before rollout recommendation"
+        - "does not treat raw delta difference as sufficient"
+        - "asks for matching, stratification, or sensitivity analysis if BU mix affects metrics"
+      expected_failed_behavior:
+        - "computes deltas and recommends rollout without comparability caveat"
