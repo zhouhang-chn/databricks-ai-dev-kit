@@ -23,6 +23,7 @@ from ..tools.databricks_openai import create_databricks_tools
 from ..tools.operation_tools import create_operation_tools
 from ..tools.plan_tools import create_plan_tools
 from ..tools.project_files import create_project_file_tools
+from ..tools.run_state import AgentToolRunState
 from .base import AgentRunRequest
 from .openai_events import normalize_openai_event
 from .openai_models import build_agent_model, load_model_settings
@@ -89,6 +90,26 @@ def _is_user_preview_run(project_context: dict[str, Any] | None) -> bool:
   policy = (project_context.get('settings') or {}).get('agent_policy') or {}
   write_policy = str(policy.get('write_policy') or '').lower() if isinstance(policy, dict) else ''
   return role in {'user', 'user_preview', 'viewer'} or write_policy == 'read_only'
+
+
+def _schema_required_tables_from_context(project_context: dict[str, Any] | None) -> set[str]:
+  """Return project-configured tables that require schema inspection before SQL."""
+  if not project_context:
+    return set()
+  settings = project_context.get('settings') or {}
+  if not isinstance(settings, dict):
+    return set()
+  semantics = settings.get('semantics') or {}
+  if not isinstance(semantics, dict):
+    return set()
+
+  tables: set[str] = set()
+  for key in ('preferred_tables', 'metric_views'):
+    values = semantics.get(key)
+    if not isinstance(values, list):
+      continue
+    tables.update(str(value) for value in values if value)
+  return tables
 
 
 class OpenAIAgentRuntime:
@@ -180,6 +201,12 @@ class OpenAIAgentRuntime:
       )
       read_only_run = _is_user_preview_run(request.project_context)
       logger.info('OpenAI runtime tool policy: read_only=%s', read_only_run)
+      tool_run_state = AgentToolRunState(
+        project_dir=project_dir,
+        schema_required_tables=_schema_required_tables_from_context(request.project_context),
+        default_catalog=request.default_catalog,
+        default_schema=request.default_schema,
+      )
 
       instructions = get_system_prompt(
         cluster_id=request.cluster_id,
@@ -194,13 +221,19 @@ class OpenAIAgentRuntime:
       )
 
       tools = [
-        *create_plan_tools(),
-        *create_project_file_tools(project_dir, read_only=read_only_run),
+        *create_plan_tools(run_state=tool_run_state),
+        *create_project_file_tools(
+          project_dir,
+          read_only=read_only_run,
+          run_state=tool_run_state,
+        ),
         *create_databricks_tools(
           default_catalog=request.default_catalog,
           default_schema=request.default_schema,
+          default_cluster_id=request.cluster_id,
           default_warehouse_id=request.warehouse_id,
           read_only=read_only_run,
+          run_state=tool_run_state,
         ),
         *create_operation_tools(),
       ]
@@ -346,7 +379,8 @@ class OpenAIAgentRuntime:
           elif event_type == 'synthesis.appended':
             if conclusion_emitted:
               logger.info(
-                'Suppressing duplicate synthesis.appended (call_id=%s) — original conclusion preserved',
+                'Suppressing duplicate synthesis.appended (call_id=%s) - '
+                'original conclusion preserved',
                 event.get('call_id'),
               )
               continue

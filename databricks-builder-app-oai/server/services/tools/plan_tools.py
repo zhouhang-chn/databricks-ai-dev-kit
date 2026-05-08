@@ -22,10 +22,12 @@ sometimes violates (causing turn-budget runaway):
 
 from typing import Literal
 
+from .run_state import AgentToolRunState
+
 PLAN_TOOL_NAMES = frozenset({'update_plan', 'submit_conclusion'})
 
 
-def create_plan_tools() -> list:
+def create_plan_tools(run_state: AgentToolRunState | None = None) -> list:
   """Build a fresh `update_plan` + `submit_conclusion` pair for one run.
 
   The closure state is per-call, so each agent run gets independent
@@ -72,6 +74,8 @@ def create_plan_tools() -> list:
           ),
         }
       state['plan_created'] = True
+      if run_state:
+        run_state.plan_created = True
       return {
         'op': 'create',
         'objective': objective or '',
@@ -79,6 +83,8 @@ def create_plan_tools() -> list:
         'ack': 'plan_created',
       }
     if op == 'start':
+      if run_state:
+        run_state.active_step_id = step_id or ''
       return {
         'op': 'start',
         'step_id': step_id or '',
@@ -86,6 +92,8 @@ def create_plan_tools() -> list:
         'ack': 'step_started',
       }
     if op == 'finish':
+      if run_state:
+        run_state.active_step_id = None
       return {
         'op': 'finish',
         'step_id': step_id or '',
@@ -97,6 +105,9 @@ def create_plan_tools() -> list:
       # A revise implies a plan exists; mark plan_created so subsequent
       # creates also redirect.
       state['plan_created'] = True
+      if run_state:
+        run_state.plan_created = True
+        run_state.active_step_id = None
       return {
         'op': 'revise',
         'steps': steps or [],

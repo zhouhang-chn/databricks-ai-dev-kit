@@ -1,5 +1,6 @@
 """Unit tests for the OpenAI runtime support modules."""
 
+import json
 import logging
 from dataclasses import dataclass
 
@@ -10,13 +11,17 @@ from server.services.agent_runtime.openai_models import load_model_settings
 from server.services.agent_runtime.openai_runtime import _resolve_enabled_skills
 from server.services.logging_utils import ensure_logger_active
 from server.services.skills_manager import filter_openai_tools_by_skills
-from server.services.tools.databricks_openai import _is_read_only_tool_name
+from server.services.tools.databricks_openai import (
+  _is_read_only_tool_name,
+  create_databricks_tools,
+)
 from server.services.tools.project_files import (
   MAX_READ_BYTES,
   ProjectFileError,
   _resolve_project_path,
   create_project_file_tools,
 )
+from server.services.tools.run_state import AgentToolRunState
 
 
 @dataclass
@@ -205,7 +210,10 @@ def test_update_plan_start_finish_emit_step_events():
         raw_item={
           'call_id': 'call_start',
           'name': 'update_plan',
-          'arguments': '{"op": "start", "step_id": "step-1", "narrative": "Looking at sales grain"}',
+          'arguments': (
+            '{"op": "start", "step_id": "step-1", '
+            '"narrative": "Looking at sales grain"}'
+          ),
         },
       ),
     )
@@ -311,6 +319,11 @@ def _invoke_plan_tool(tool, args_json: str, call_id: str = 'call_test'):
     tool_arguments=args_json,
   )
   return asyncio.run(tool.on_invoke_tool(ctx, args_json))
+
+
+def _invoke_tool(tool, args_json: str, call_id: str = 'call_test'):
+  """Run a FunctionTool's handler and return its raw result."""
+  return _invoke_plan_tool(tool, args_json, call_id)
 
 
 def test_update_plan_create_is_idempotent_per_run():
@@ -507,6 +520,135 @@ def test_user_preview_databricks_tool_filter_blocks_write_tools():
   assert _is_read_only_tool_name('query_vs_index') is True
   assert _is_read_only_tool_name('manage_jobs') is False
   assert _is_read_only_tool_name('delete_tracked_resource') is False
+
+
+def test_databricks_tools_require_agents_and_active_plan(tmp_path):
+  """Data tools should not run before project context and a visible step."""
+  (tmp_path / 'AGENTS.md').write_text('# Resources\n', encoding='utf-8')
+  run_state = AgentToolRunState(project_dir=tmp_path)
+  tools = create_databricks_tools(run_state=run_state)
+  execute_sql = next(tool for tool in tools if tool.name == 'execute_sql')
+
+  unread = json.loads(_invoke_tool(execute_sql, '{"sql_query":"SELECT 1"}'))
+  assert unread['required_action'] == 'read_project_file(path="AGENTS.md")'
+
+  run_state.agents_md_read = True
+  no_plan = json.loads(_invoke_tool(execute_sql, '{"sql_query":"SELECT 1"}'))
+  assert no_plan['required_action'].startswith('update_plan(')
+
+
+def test_execute_sql_requires_schema_for_configured_project_tables(tmp_path):
+  """The first analytical SQL over a configured table must inspect schema."""
+  run_state = AgentToolRunState(
+    project_dir=tmp_path,
+    schema_required_tables={'cat.sch.pilot_bdr_visit_record_seg'},
+  )
+  run_state.active_step_id = 'step-1'
+  tools = create_databricks_tools(run_state=run_state)
+  execute_sql = next(tool for tool in tools if tool.name == 'execute_sql')
+
+  blocked = json.loads(_invoke_tool(
+    execute_sql,
+    '{"sql_query":"SELECT COUNT(DISTINCT bdr_id) FROM cat.sch.pilot_bdr_visit_record_seg"}',
+  ))
+
+  assert blocked['missing_schema_for_tables'] == ['cat.sch.pilot_bdr_visit_record_seg']
+  assert 'Do not guess column names' in blocked['error']
+
+
+def test_execute_sql_uses_configured_cluster_when_warehouse_missing(monkeypatch, tmp_path):
+  """A configured cluster is used for SQL when no warehouse is configured."""
+  from databricks_tools_core.compute import ExecutionResult
+
+  calls = []
+
+  def fake_execute_databricks_command(**kwargs):
+    calls.append(kwargs)
+    return ExecutionResult(
+      success=True,
+      output='answer\n1',
+      cluster_id=kwargs['cluster_id'],
+      context_id='ctx-1',
+      context_destroyed=True,
+    )
+
+  def fail_warehouse_sql(**_kwargs):
+    raise AssertionError('SQL warehouse execution should not be used')
+
+  monkeypatch.setattr(
+    'databricks_tools_core.compute.execute_databricks_command',
+    fake_execute_databricks_command,
+  )
+  monkeypatch.setattr('databricks_tools_core.sql.sql.execute_sql', fail_warehouse_sql)
+
+  run_state = AgentToolRunState(project_dir=tmp_path)
+  run_state.active_step_id = 'step-1'
+  tools = create_databricks_tools(default_cluster_id='cluster-1', run_state=run_state)
+  execute_sql = next(tool for tool in tools if tool.name == 'execute_sql')
+  execute_sql_multi = next(tool for tool in tools if tool.name == 'execute_sql_multi')
+
+  result = json.loads(_invoke_tool(execute_sql, '{"sql_query":"SELECT 1"}'))
+  multi_result = json.loads(_invoke_tool(execute_sql_multi, '{"sql_content":"SELECT 2"}'))
+
+  assert [call['cluster_id'] for call in calls] == ['cluster-1', 'cluster-1']
+  assert [call['language'] for call in calls] == ['sql', 'sql']
+  assert all(call['destroy_context_on_completion'] is True for call in calls)
+  assert result['compute'] == 'cluster'
+  assert result['cluster_id'] == 'cluster-1'
+  assert multi_result['compute'] == 'cluster'
+  assert multi_result['cluster_id'] == 'cluster-1'
+
+
+def test_table_stats_marks_schema_inspected_before_sql(monkeypatch, tmp_path):
+  """Schema inspection unlocks later SQL against configured project tables."""
+  run_state = AgentToolRunState(
+    project_dir=tmp_path,
+    schema_required_tables={'cat.sch.pilot_bdr_visit_record_seg'},
+  )
+  run_state.active_step_id = 'step-1'
+
+  def fake_table_stats(**_kwargs):
+    return {
+      'catalog': 'cat',
+      'schema_name': 'sch',
+      'tables': [{
+        'name': 'pilot_bdr_visit_record_seg',
+        'column_details': {'employee_no': {'name': 'employee_no', 'data_type': 'string'}},
+      }],
+    }
+
+  def fake_execute_sql(**_kwargs):
+    return [{'total_bdrs': 43}]
+
+  monkeypatch.setattr(
+    'databricks_tools_core.sql.table_stats.get_table_stats_and_schema',
+    fake_table_stats,
+  )
+  monkeypatch.setattr('databricks_tools_core.sql.sql.execute_sql', fake_execute_sql)
+
+  tools = create_databricks_tools(
+    default_warehouse_id='warehouse-1',
+    run_state=run_state,
+  )
+  stats = next(tool for tool in tools if tool.name == 'get_table_stats_and_schema')
+  execute_sql = next(tool for tool in tools if tool.name == 'execute_sql')
+
+  _invoke_tool(
+    stats,
+    (
+      '{"catalog":"cat","schema":"sch",'
+      '"table_names":["pilot_bdr_visit_record_seg"],"table_stat_level":"NONE"}'
+    ),
+  )
+  result = json.loads(_invoke_tool(
+    execute_sql,
+    (
+      '{"sql_query":"SELECT COUNT(DISTINCT employee_no) AS total_bdrs '
+      'FROM cat.sch.pilot_bdr_visit_record_seg"}'
+    ),
+  ))
+
+  assert result == [{'total_bdrs': 43}]
 
 
 def test_agent_logger_guard_writes_to_configured_file(tmp_path, monkeypatch):

@@ -281,6 +281,17 @@ You have a Databricks SQL warehouse selected for SQL queries:
 
 When using `execute_sql` or other SQL tools, use this warehouse_id by default.
 """
+  elif cluster_id and cluster_id not in {'serverless', '__serverless__'}:
+    warehouse_section = f"""
+## SQL Compute Fallback
+
+No SQL warehouse is configured for this project. Use the configured cluster
+for SQL execution:
+- **Cluster ID:** `{cluster_id}`
+
+When using `execute_sql` or table inspection tools, they will run through the
+configured cluster fallback. Do not auto-select an unrelated SQL warehouse.
+"""
 
   workspace_folder_section = ''
   if workspace_folder:
@@ -506,6 +517,9 @@ advancing to `op="start"` (or stopping, respectively).
 
 **At the start of every conversation**, check if an `AGENTS.md` file exists in the project root.
 If it exists, read it to understand the project state (tables, pipelines, volumes created).
+This is a hard gate: call `read_project_file(path="AGENTS.md")` as a standalone
+first context action. Do **not** call Databricks tools in the same parallel batch
+as the AGENTS.md read, because data tools must wait for the project ledger.
 
 **Maintain an `AGENTS.md` file** to track persistent project resources
 (catalogs, schemas, tables, volumes, pipelines, jobs, dashboards,
@@ -540,6 +554,9 @@ after `submit_conclusion` — that call is terminal.
 - **Always use the provided tools** - never use CLI commands, curl, or SDK code when an app tool exists
 - Project file tools: `read_project_file`, `write_project_file`, `edit_project_file`, `list_project_files`, `grep_project_files`, `get_project_tree`
 - Databricks tools are exposed as plain function names (e.g. `execute_sql`, `manage_jobs`, `manage_pipeline`, `query_vs_index`); the available set depends on which skills are enabled for this project
+- Do not run Databricks tools until AGENTS.md has been read, a plan exists, and the current step has been started
+- For natural-language analysis over project tables, inspect schema first with `get_table_stats_and_schema` (or an explicit DESCRIBE/SHOW COLUMNS query) before the first analytical `execute_sql`; never guess column names from business terms
+- Use configured preferred tables, metric views, glossary, known caveats, and sample queries as hints, not as proof that a guessed column exists
 - Long-running Databricks operations may return `{{status: "async", operation_id: ...}}`; in that case, poll with `check_operation_status(operation_id)` until it returns `completed` or `failed` before continuing
 - Do not claim to upload workspace files, run notebooks, execute Python code, create pipelines, or create jobs unless a matching tool is present in the run
 - **Do NOT use the AskUserQuestion tool.** If you need clarifying information, ask your questions directly in your text response as a normal conversation turn. The user will reply naturally.

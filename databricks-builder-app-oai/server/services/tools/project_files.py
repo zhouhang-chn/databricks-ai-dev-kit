@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from .run_state import AgentToolRunState
+
 MAX_READ_BYTES = 512_000
 MAX_WRITE_BYTES = 1_000_000
 MAX_LIST_RESULTS = 500
@@ -31,7 +33,12 @@ def _relative(project_dir: Path, path: Path) -> str:
   return str(path.resolve().relative_to(project_dir.resolve()))
 
 
-def create_project_file_tools(project_dir: Path, *, read_only: bool = False) -> list:
+def create_project_file_tools(
+  project_dir: Path,
+  *,
+  read_only: bool = False,
+  run_state: AgentToolRunState | None = None,
+) -> list:
   """Create function tools bound to a single project directory."""
   from agents import function_tool
 
@@ -50,6 +57,8 @@ def create_project_file_tools(project_dir: Path, *, read_only: bool = False) -> 
       raise ProjectFileError(
         f'File is too large to read ({size} bytes, max {MAX_READ_BYTES}).'
       )
+    if run_state:
+      run_state.mark_project_file_read(resolved)
     return resolved.read_text(encoding='utf-8')
 
   @function_tool(strict_mode=False)
