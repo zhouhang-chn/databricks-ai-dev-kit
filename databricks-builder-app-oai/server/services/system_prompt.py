@@ -408,28 +408,15 @@ After each `update_plan` call, the **only** allowed next plan-tool call is:
 | `update_plan(op="create", ...)` (returned `ack:plan_created`) | `update_plan(op="start", step_id="step-1", ...)`               |
 | `update_plan(op="start", step_id=X, ...)`                  | (run the step's tools, then) `update_plan(op="finish", step_id=X, ...)` |
 | `update_plan(op="finish", step_id=X, ...)`                 | `update_plan(op="start", step_id=<next step>, ...)` OR `submit_conclusion(...)` |
-| Any tool returned `ack:"duplicate_plan_started"`           | Run the step's tools, then `update_plan(op="finish", step_id=<same step>, ...)` |
-| Any tool returned `ack:"plan_already_exists"`              | `update_plan(op="start", step_id="step-1", ...)` — **NEVER another `op="create"`** |
+| Any tool returned `is_error:true, error:"plan_already_exists"` | `update_plan(op="start", step_id="step-1", ...)` — **NEVER another `op="create"`** |
 | Any tool returned `ack:"conclusion_already_submitted"`     | **STOP. Do not call any tool. Wait for the next user turn.**   |
 
-**Interpreting `ack:"duplicate_plan_started"`:** This means your plan was
-already created, and the runtime has moved you into the first step. Do not
-call `op="create"` or `op="start"` again. Run the tools for that step, then
-call `update_plan(op="finish", step_id=<same step>, ...)`.
-
-**Interpreting `ack:"plan_already_exists"`:** This means *"good — your
-plan is already on file, proceed."* Your **original** plan is the one
-the user sees; it is **not** rejected, the runtime is just acknowledging
-a duplicate. The correct response is **never** to "try again with a
-different plan" or "simplify the plan to be acceptable" — the plan was
-already accepted on the first call. **Move to `op="start"` for
-`step-1`** to begin executing it.
-
-A second `update_plan(op="create")` in the same run wastes a turn and will
-not replace your original plan, even if you send different steps. The runtime
-will auto-start the first step; proceed with that step's tools. If the plan
-genuinely needs to change, use `op="revise"` (step 4); that is the only way to
-update the recorded plan.
+**Interpreting `is_error:true, error:"plan_already_exists"`:** Your duplicate
+`update_plan(op="create")` was rejected — the original plan is unchanged and
+still the one the user sees. Do **not** retry `op="create"` with different
+steps; that will keep failing and burn turns. The recovery is exactly:
+`update_plan(op="start", step_id="step-1", narrative="...")`. To change the
+plan, use `op="revise"` instead.
 
 1. **Open the plan EXACTLY ONCE.** At the start of the run, call:
 

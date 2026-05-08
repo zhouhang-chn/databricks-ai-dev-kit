@@ -8,7 +8,6 @@ from ..tools.plan_tools import PLAN_TOOL_NAMES
 # Track call_id -> tool_name for plan tools per-request would be better, but for now
 # we'll at least ensure we don't leak forever.
 _PLAN_CALL_IDS: set[str] = set()
-_PLAN_CALL_INPUTS: dict[str, Any] = {}
 
 
 def _get(obj: Any, name: str, default: Any = None) -> Any:
@@ -120,28 +119,6 @@ def _plan_events_from_call(call_id: str, tool_name: str, tool_input: Any) -> lis
   return []
 
 
-def _plan_events_from_output(call_id: str, original_input: Any, output: Any) -> list[dict]:
-  """Translate special plan-tool output acks that change runtime state."""
-  parsed_output = _parse_tool_arguments(output)
-  if not isinstance(parsed_output, dict):
-    return []
-  if parsed_output.get('ack') != 'duplicate_plan_started':
-    return []
-
-  step_id = str(parsed_output.get('step_id') or '')
-  narrative = str(parsed_output.get('narrative') or 'Continuing with the existing plan.')
-  if not step_id and isinstance(original_input, dict):
-    steps = original_input.get('steps')
-    if isinstance(steps, list) and steps and isinstance(steps[0], dict):
-      step_id = str(steps[0].get('id') or steps[0].get('step_id') or '')
-  return [{
-    'type': 'plan.step_started',
-    'call_id': call_id,
-    'step_id': step_id or 'step-1',
-    'narrative': narrative,
-  }]
-
-
 def _is_error_output(raw_item: Any, output: Any) -> bool:
   """Best-effort error flag for tool output items."""
   status = str(_get(raw_item, 'status', '') or '').lower()
@@ -193,14 +170,12 @@ def normalize_openai_event(event: Any) -> list[dict]:
         or ''
       )
       output = _get(item, 'output') or _get(raw_item, 'output')
-      # Plan tool outputs are usually pure echoes of the call; the call already
-      # produced the semantic event. Suppress them so the UI never sees a
-      # generic tool_result. One exception is a duplicate create that the tool
-      # layer converts into a step start, since its call looked like `create`.
+      # Plan tool outputs are pure echoes of the call; the call side already
+      # produced the semantic UI event. Suppress them so the UI never sees a
+      # generic tool_result for plan tools.
       if call_id and call_id in _PLAN_CALL_IDS:
         _PLAN_CALL_IDS.discard(call_id)
-        original_input = _PLAN_CALL_INPUTS.pop(call_id, {})
-        return _plan_events_from_output(call_id, original_input, output)
+        return []
       return [{
         'type': 'tool_result',
         'tool_use_id': call_id,
@@ -225,7 +200,6 @@ def normalize_openai_event(event: Any) -> list[dict]:
       if tool_name in PLAN_TOOL_NAMES:
         if tool_id:
           _PLAN_CALL_IDS.add(tool_id)
-          _PLAN_CALL_INPUTS[tool_id] = tool_input
         return _plan_events_from_call(tool_id, tool_name, tool_input)
       return [{
         'type': 'tool_use',

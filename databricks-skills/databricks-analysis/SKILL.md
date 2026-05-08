@@ -12,7 +12,7 @@ description: >-
 
 Read-only data analysis on Databricks: **discover → profile → query → enrich → report**.
 
-This skill is intended to be the only skill enabled for an analysis agent. It assumes the always-available MCP tools (`execute_sql`, `execute_sql_multi`, `execute_code`, `get_table_stats_and_schema`, `list_compute`, `manage_workspace`) but does **not** assume access to skill-gated tools such as `manage_uc_objects`, `manage_dashboard`, `manage_pipeline`, `manage_jobs`, etc. Do data discovery via SQL (`SHOW`, `DESCRIBE`, `system.information_schema.*`).
+This skill is intended to be the only skill enabled for an analysis agent. It assumes a small read-only tool surface: `execute_sql`, `execute_sql_multi`, `get_table_stats_and_schema`, `list_compute`, and identity/warehouse discovery helpers when available. It does **not** assume access to skill-gated tools such as `manage_uc_objects`, `manage_dashboard`, `manage_pipeline`, `manage_jobs`, `execute_code`, or write-capable project-file tools. Do data discovery via SQL (`SHOW`, `DESCRIBE`, `system.information_schema.*`).
 
 ## Workflow
 
@@ -44,11 +44,10 @@ If a write is essential to answer the question, surface that in the conclusion a
 | `execute_sql` | Primary tool. Run a single SQL statement on a SQL warehouse. |
 | `execute_sql_multi` | Multiple statements in one call (e.g. inspect + query). |
 | `get_table_stats_and_schema` | Schema + row count + column statistics. Use `table_stat_level="DETAILED"` for cardinality, min/max, histograms. |
-| `execute_code` | Fallback for advanced statistics, ML, plotting, or iterative logic that SQL can't express cleanly. Specify `compute_type="serverless"` when possible. |
 | `list_compute` | Discover available SQL warehouses and clusters; pick the running one. |
-| `manage_workspace` (action="status") | Confirm the active workspace/profile when a result looks unexpected. |
+| `get_current_user` | Confirm the active workspace identity when a result looks unexpected. |
 
-**Compute selection.** Always prefer **Serverless SQL warehouses** — required for materialized views, `http_request`, and most 2025 perf optimizations (Predictive Query Execution, Photon Vectorized Shuffle). If a warehouse is not configured but a cluster is, fall back to the cluster via `execute_code` for SQL via `spark.sql(...)`. Never start or resize compute — ask the user instead.
+**Compute selection.** Prefer a configured SQL warehouse when one exists. In the Builder App runtime, `execute_sql` and `get_table_stats_and_schema` can fall back to the configured cluster when no warehouse is configured. Never start, resize, or create compute — ask the user instead.
 
 ## Discovery Without `manage_uc_objects`
 
@@ -230,27 +229,6 @@ LIMIT 100;
 ```
 
 `read_files` requires no ingestion plan — perfect for ad-hoc exploration of new data drops in volumes. `remote_query` lets you cross-check Databricks data against an OLTP source without copying it.
-
-## Fallback: Python / Scala via `execute_code`
-
-When SQL falls short (advanced statistics, ML, plotting, iterative logic):
-
-```python
-execute_code(
-  code="""
-import pandas as pd
-df = spark.sql('''
-  SELECT * FROM main.sales.fact_orders
-  WHERE order_date >= date_sub(current_date(), 30)
-''').toPandas()
-print(df.describe(percentiles=[.5, .9, .99]).to_string())
-print(df.corr(numeric_only=True).round(3).to_string())
-""",
-  compute_type="serverless",   # or "cluster" with cluster_id from list_compute
-)
-```
-
-For multi-call workflows on the same context (interactive cluster), reuse `context_id` from the previous result. Never call `manage_cluster` to start/create/resize compute — ask the user.
 
 ## Reporting Conventions
 

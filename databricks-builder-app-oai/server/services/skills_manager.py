@@ -12,12 +12,29 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Skill → MCP tool mapping
-# Maps skill names to their exclusive Databricks MCP tool function names.
-# Tools NOT listed here (sql, compute, file, operation tracking) are always
-# available regardless of which skills are enabled.
+# Skill → tool allowlist mapping.
+# Tool names are plain runtime tool names. ``get_allowed_mcp_tools`` also
+# accepts MCP gateway names like ``mcp__databricks__execute_sql`` and compares
+# their plain suffixes.
 # ---------------------------------------------------------------------------
+BASE_TOOL_NAMES = frozenset({
+  'update_plan',
+  'submit_conclusion',
+  'read_project_file',
+  'execute_sql',
+  'execute_sql_multi',
+  'get_table_stats_and_schema',
+  'check_operation_status',
+  'list_operations',
+})
+
 SKILL_TOOL_MAPPING: dict[str, list[str]] = {
+  'databricks-analysis': [
+    'list_sql_warehouses',
+    'get_best_sql_warehouse',
+    'list_compute',
+    'get_current_user',
+  ],
   'databricks-agent-bricks': ['manage_ka', 'manage_mas'],
   'databricks-aibi-dashboards': ['manage_dashboard'],
   'databricks-genie': ['manage_genie', 'ask_genie'],
@@ -56,14 +73,16 @@ def get_allowed_mcp_tools(
   all_tool_names: list[str],
   enabled_skills: list[str] | None = None,
 ) -> list[str]:
-  """Filter MCP tool names based on enabled skills.
+  """Return tools allowed by the enabled-skill whitelist.
 
-  Tools mapped to disabled skills are removed. Tools not mapped to any skill
-  (e.g. execute_sql, compute tools) are always kept.
+  When ``enabled_skills`` is unset, all tools are allowed for backwards
+  compatibility. When a project provides an explicit enabled-skill list, only
+  the base tools plus tools claimed by those skills are exposed.
 
   Args:
       all_tool_names: Full list of MCP tool names (mcp__databricks__xxx format)
-      enabled_skills: List of enabled skill names, or None for all skills.
+          or plain OpenAI function-tool names.
+      enabled_skills: List of enabled skill names, or None for all tools.
 
   Returns:
       Filtered list of allowed MCP tool names.
@@ -71,31 +90,21 @@ def get_allowed_mcp_tools(
   if enabled_skills is None:
     return all_tool_names
 
-  # Collect tool names that belong to DISABLED skills
-  enabled_set = set(enabled_skills)
-  blocked_tools: set[str] = set()
-  for skill_name, tool_names in SKILL_TOOL_MAPPING.items():
-    if skill_name not in enabled_set:
-      blocked_tools.update(tool_names)
-
-  # Don't block a tool if it's also claimed by an ENABLED skill
+  allowed_plain_names = set(BASE_TOOL_NAMES)
   for skill_name in enabled_skills:
-    for tool_name in SKILL_TOOL_MAPPING.get(skill_name, []):
-      blocked_tools.discard(tool_name)
+    allowed_plain_names.update(SKILL_TOOL_MAPPING.get(skill_name, []))
 
-  # Filter: tool name format is mcp__databricks__{name}. Runtime-neutral
-  # OpenAI function tools may use plain names such as manage_jobs.
   prefix = 'mcp__databricks__'
   allowed = []
   for tool_name in all_tool_names:
     plain_name = tool_name[len(prefix):] if tool_name.startswith(prefix) else tool_name
-    if plain_name not in blocked_tools:
+    if plain_name in allowed_plain_names:
       allowed.append(tool_name)
   return allowed
 
 
 def filter_openai_tools_by_skills(tools: list, enabled_skills: list[str] | None = None) -> list:
-  """Filter OpenAI function tools using the skill allowlist mapping."""
+  """Filter OpenAI function tools using the enabled-skill whitelist."""
   if enabled_skills is None:
     return tools
   names = [getattr(tool, 'name', '') for tool in tools]
@@ -128,7 +137,10 @@ def _non_empty_dir(p: Path) -> bool:
 # Build an ordered list of source directories.  The first directory that
 # contains a given skill wins, so put the most-complete source first.
 _SKILLS_SOURCE_DIRS: list[Path] = []
-if _non_empty_dir(_DEPLOYED_SKILLS_DIR) and _DEPLOYED_SKILLS_DIR.resolve() != APP_SKILLS_DIR.resolve():
+if (
+  _non_empty_dir(_DEPLOYED_SKILLS_DIR)
+  and _DEPLOYED_SKILLS_DIR.resolve() != APP_SKILLS_DIR.resolve()
+):
   _SKILLS_SOURCE_DIRS.append(_DEPLOYED_SKILLS_DIR)
 if _non_empty_dir(_DEV_SKILLS_DIR):
   _SKILLS_SOURCE_DIRS.append(_DEV_SKILLS_DIR)

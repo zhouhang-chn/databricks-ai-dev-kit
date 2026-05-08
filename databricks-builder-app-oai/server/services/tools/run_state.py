@@ -81,18 +81,36 @@ class AgentToolRunState:
       self.agents_md_read = True
 
   def databricks_gate_error(self, tool_name: str) -> dict | None:
-    """Return an actionable error if a Databricks tool is not allowed yet."""
-    if not self.active_step_id:
+    """Return an actionable error if a Databricks tool is not allowed yet.
+
+    The wording adapts to current run state so the model never sees an
+    instruction for an op it has already completed — mentioning op="create"
+    after the plan was already created anchors reasoning models into a
+    duplicate-create loop.
+    """
+    if self.active_step_id:
+      return None
+    if not self.plan_created:
       return {
         'error': (
-          'Start a visible plan step before using Databricks tools. '
-          'Call update_plan(op="create", ...) once if no plan exists, then '
-          'update_plan(op="start", step_id="step-1", ...).'
+          'No plan yet. Call update_plan(op="create", objective=..., steps=[...]) '
+          'to open the plan, then update_plan(op="start", step_id="step-1", ...).'
         ),
         'tool': tool_name,
-        'required_action': 'update_plan(op="start", step_id="step-1", narrative="...")',
+        'required_action': (
+          'update_plan(op="create", objective="...", '
+          'steps=[{"id": "step-1", "title": "..."}, ...])'
+        ),
       }
-    return None
+    return {
+      'error': (
+        'Plan is already created. Do NOT call update_plan(op="create") again. '
+        'Call update_plan(op="start", step_id="step-1", narrative="...") to '
+        'begin the first step, then run this tool.'
+      ),
+      'tool': tool_name,
+      'required_action': 'update_plan(op="start", step_id="step-1", narrative="...")',
+    }
 
   def normalize_table_name(self, table_name: str | None) -> str | None:
     """Normalize a table reference to catalog.schema.table when possible."""

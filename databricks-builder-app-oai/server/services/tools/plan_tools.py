@@ -78,20 +78,20 @@ def create_plan_tools(run_state: AgentToolRunState | None = None) -> list:
     """
     if op == 'create':
       if state['plan_created']:
-        step_to_start = str(state.get('first_step_id') or _first_step_id(steps))
-        if run_state:
-          run_state.plan_created = True
-          run_state.active_step_id = step_to_start
+        first_step_id = str(state.get('first_step_id') or _first_step_id(steps))
         return {
-          'op': 'start',
-          'step_id': step_to_start,
-          'narrative': narrative or 'Continuing with the existing plan.',
-          'ack': 'duplicate_plan_started',
-          'guidance': (
-            'A plan was already created for this run. This duplicate create '
-            f'was treated as update_plan(op="start", step_id="{step_to_start}"). '
-            'Run the step tools now, then call update_plan(op="finish") for '
-            'this same step. To change the plan later, call op="revise".'
+          'is_error': True,
+          'error': 'plan_already_exists',
+          'message': (
+            'A plan was already created in this run. Do NOT call '
+            'update_plan(op="create") again — duplicate creates are rejected '
+            'and waste a turn from the run budget. To begin executing the '
+            f'plan, call update_plan(op="start", step_id="{first_step_id}", '
+            'narrative="..."). To change the plan, call '
+            'update_plan(op="revise", steps=[...], reason="...").'
+          ),
+          'next_action_required': (
+            f'update_plan(op="start", step_id="{first_step_id}", narrative="...")'
           ),
         }
       state['plan_created'] = True

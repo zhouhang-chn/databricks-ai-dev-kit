@@ -44,15 +44,28 @@ def _load_live_mcp_tool_names() -> set[str]:
 
 
 def test_skill_tool_mapping_matches_registered_mcp_tools():
-  """Every tool name in SKILL_TOOL_MAPPING must exist in the MCP server.
+  """Every mapped tool must be provided by MCP or the app runtime.
 
-  Without this guard, the MCP server can rename/consolidate a tool while
-  SKILL_TOOL_MAPPING keeps referring to the dead name. ``get_allowed_mcp_tools``
-  then silently lets the new (unmapped) tool through even when the owning skill
-  is disabled — the per-skill filter becomes a no-op.
+  Without this guard, the MCP server can rename/consolidate a tool while the
+  allowlist keeps referring to the dead name. The tool then never becomes
+  available even when the owning skill is enabled.
   """
   sm = _load_skills_manager()
-  live = _load_live_mcp_tool_names()
+  local_runtime_tools = {
+    'update_plan',
+    'submit_conclusion',
+    'read_project_file',
+    'write_project_file',
+    'edit_project_file',
+    'list_project_files',
+    'grep_project_files',
+    'get_project_tree',
+    'list_sql_warehouses',
+    'get_best_sql_warehouse',
+    'check_operation_status',
+    'list_operations',
+  }
+  live = _load_live_mcp_tool_names() | local_runtime_tools
   stale: dict[str, list[str]] = {}
   for skill, names in sm.SKILL_TOOL_MAPPING.items():
     missing = [n for n in names if n not in live]
@@ -65,20 +78,15 @@ def test_skill_tool_mapping_matches_registered_mcp_tools():
   )
 
 
-def test_get_allowed_mcp_tools_blocks_disabled_skill():
-  """Disabling a skill must actually remove its mapped tools from the allowed set.
-
-  Regression test for the drift bug: when SKILL_TOOL_MAPPING referred to legacy
-  tool names (``list_jobs``, ``create_or_update_dashboard``, …) that no longer
-  existed, this filter became a no-op because the real ``manage_*`` tools were
-  never listed.
-  """
+def test_get_allowed_mcp_tools_uses_enabled_skill_whitelist():
+  """Enabling one skill should expose only base tools plus that skill's tools."""
   sm = _load_skills_manager()
   all_tools = [
     'mcp__databricks__manage_jobs',
     'mcp__databricks__manage_job_runs',
     'mcp__databricks__manage_dashboard',
-    'mcp__databricks__execute_sql',  # not mapped to any skill — always allowed
+    'mcp__databricks__execute_sql',
+    'mcp__databricks__check_operation_status',
   ]
 
   allowed = sm.get_allowed_mcp_tools(all_tools, enabled_skills=['databricks-aibi-dashboards'])
@@ -87,3 +95,41 @@ def test_get_allowed_mcp_tools_blocks_disabled_skill():
   assert 'mcp__databricks__manage_job_runs' not in allowed
   assert 'mcp__databricks__manage_dashboard' in allowed
   assert 'mcp__databricks__execute_sql' in allowed
+  assert 'mcp__databricks__check_operation_status' in allowed
+
+
+def test_databricks_analysis_gets_minimal_read_only_tools():
+  """The analysis skill should not inherit unrelated write or lifecycle tools."""
+  sm = _load_skills_manager()
+  all_tools = [
+    'update_plan',
+    'submit_conclusion',
+    'read_project_file',
+    'write_project_file',
+    'edit_project_file',
+    'execute_sql',
+    'execute_sql_multi',
+    'get_table_stats_and_schema',
+    'list_compute',
+    'get_current_user',
+    'manage_cluster',
+    'manage_sql_warehouse',
+    'generate_and_upload_pdf',
+    'delete_tracked_resource',
+    'mcp__databricks__execute_sql',
+    'mcp__databricks__manage_cluster',
+  ]
+
+  allowed = sm.get_allowed_mcp_tools(all_tools, enabled_skills=['databricks-analysis'])
+
+  assert allowed == [
+    'update_plan',
+    'submit_conclusion',
+    'read_project_file',
+    'execute_sql',
+    'execute_sql_multi',
+    'get_table_stats_and_schema',
+    'list_compute',
+    'get_current_user',
+    'mcp__databricks__execute_sql',
+  ]
