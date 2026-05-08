@@ -3,7 +3,7 @@
 ## Purpose
 
 v0.2 focuses on the Builder Agent as the preparation system for business
-analysis. The Builder Agent accepts minimal structured project input from
+analysis. The Builder Agent accepts minimal, user-friendly input from
 `project_setting.yaml`, collaborates with users, developers, analysts, source
 code, and Databricks metadata, and generates a reviewed scenario bundle.
 
@@ -22,9 +22,9 @@ before end-user analysis is scaled.
 - Persist project resource defaults from every settings surface that displays
   them.
 - Persist structured `submit_conclusion` output as the durable assistant answer.
-- Define `project_setting.yaml` as the minimal structured source of truth for
-  project settings, resource scope, semantic hints, workflow hints, and seed
-  business context.
+- Define `project_setting.yaml` as the minimal user-authored source of truth:
+  free-form business background, optional analysis notes, and selected
+  Databricks resource hints.
 - Implement the Builder Agent scenario-bundle generator and refinement loop.
 - Generate and validate business context, data/metadata context, analysis
   principles, and golden eval artifacts.
@@ -77,7 +77,7 @@ bundle rather than one file per lifecycle step.
 
 | Lifecycle step | Stored in | Why it matters |
 |---|---|---|
-| Project Setting | `project_setting.yaml` | Minimal user-authored source of truth for project settings, resource scope, semantic hints, workflow hints, and seed business context. |
+| Project Setting | `project_setting.yaml` | Minimal user-authored source of truth for free-form business background, optional analysis notes, and selected Databricks resource hints. |
 | Business Context | `business_context.yaml` | Captures the business decision, owner, population, metrics, comparison design, success hypothesis, risks, and actionability requirement. |
 | Data + Metadata Context | `data_context.yaml` | Names retrieval terms, metric definitions, glossary terms, tables, joins, ownership, freshness expectations, access constraints, and runtime binding. |
 | Analysis Context | `analysis_context.yaml` | Stores method type, playbook step ids, evidence shapes, ambiguity policy, answer-shaping rules, validation policy, manual-trace requirements, and canonical golden cases. |
@@ -105,7 +105,7 @@ The source-of-truth rules are:
 
 | Artifact kind | Format | Authoring rule |
 |---|---|---|
-| Project setting | YAML | Minimal structured user-authored source of truth. Covers project settings, Databricks resource scope, semantic hints, workflow hints, and seed business context. |
+| Project setting | YAML | Minimal user-authored source of truth. Covers free-form business background, optional analysis notes, and selected Databricks resource hints. |
 | Bundle README | Markdown | Generated bundle overview, status, and review notes. |
 | Business context | YAML | Structured scenario and decision context generated from `project_setting.yaml` and enriched by agents. |
 | Data context | YAML | Machine-checkable retrieval index, metric catalog, glossary, data profiles, joins, freshness expectations, and validation checks. |
@@ -229,7 +229,7 @@ The generator should treat each input category differently:
 
 | Input | Role | Access rule |
 |---|---|---|
-| `project_setting.yaml` | Project identity, resource defaults, semantic hints, workflow hints, business intent, scenario facts, decision context, and minimal user assumptions. | Required. This is the only human-authored source of truth. |
+| `project_setting.yaml` | Natural-language business background, optional analysis notes, and user-selected Databricks resource hints. | Required. This is the only human-authored source of truth. |
 | Existing generated artifacts | Current bundle state and analyst-reviewed sections. | Optional. Preserve reviewed content unless contradicted by newer project settings. |
 | Source-code context | Existing app capabilities, project settings, runtime constraints, docs, and schema hints. | Read-only local inspection. Do not infer business facts from code alone. |
 | Databricks metadata | Candidate tables, schemas, columns, freshness signals, row-count scale, lineage, and ownership. | Read-only enrichment. Use metadata and bounded profiling only. |
@@ -237,51 +237,82 @@ The generator should treat each input category differently:
 
 ### Minimal Project Setting Schema
 
-`project_setting.yaml` should mirror the Project Management settings shape
-where possible, while staying smaller than the generated scenario and context
-artifacts. The seed input should be enough to initialize a project, scope
-Databricks resources, and state the business problem; it should not duplicate
-the full generated scenario specification.
+`project_setting.yaml` should be minimal and user-friendly. It should not mirror
+the generated context artifacts or ask users to structure metrics, periods,
+analysis units, answer rules, generated artifacts, or agent policy. The user
+should provide two natural-language fields and select Databricks resources
+where available. Builder Agent extraction turns this into structured business,
+data, and analysis context.
 
 ```yaml
-project_setting:
-  version: 1
-  source_of_truth: true
-  project:
-    name: string
-    project_type: business_analysis
-    status: draft
-    audience: developer | reviewer | user
-    decision_owner: string
-    description: string
-  settings:
-    resources:
-      databricks_host: string | null
-      cluster_id: string | null
-      warehouse_id: string | null
-      default_catalog: string | null
-      default_schema: string | null
-      workspace_folder: string | null
-      mlflow_experiment_name: string | null
-    semantics:
-      preferred_tables: string[]
-      metric_views: string[]
-      glossary: object
-      known_caveats: string[]
-    workflows:
-      enabled: object[]
-    agent_policy:
-      mode: string
-      role: string
-      write_policy: string
-  business_context:
-    scenario_statement: string
-    core_metrics: string[]
-    comparison_design: object
-    periods: object
-    analysis_units: string[]
-    validation_focus: string[]
+business_background: >-
+  Natural-language scenario, objective, decision context, key questions, and
+  expected outcome. This can be incomplete or informal.
+
+analysis_notes:
+  # Optional free-form notes, assumptions, known dates, caveats, or business
+  # rules. These do not need to be complete or normalized.
+  - string
+
+databricks_resources:
+  # Databricks workspace URL. Usually selected by the app or current profile.
+  databricks_host: string | null
+
+  # Optional compute hints. Use cluster_id for notebook/workflow execution and
+  # warehouse_id for SQL. Leave null if the Builder Agent should infer or ask.
+  cluster_id: string | null
+  warehouse_id: string | null
+
+  # Optional workspace source context. Use Databricks workspace paths.
+  workspace_folders: string[]
+  workspace_files: string[]
+  workflows: string[]
+
+  # Input schemas the Builder Agent may inspect.
+  # Preferred format: <catalog.schema>.
+  input_schemas: string[]
+
+  # Input tables or views the Builder Agent may inspect.
+  # Preferred format: <catalog.schema.table>.
+  # If a legacy <schema.table> value is supplied, the Builder Agent must resolve
+  # the missing catalog from workspace context or ask for clarification.
+  input_tables: string[]
+
+  # Governed metric views the Builder Agent may inspect.
+  # Preferred format: <catalog.schema.metric_view>.
+  input_metric_views: string[]
+
+  # Input volume folders or files the Builder Agent may inspect.
+  # Preferred format: /Volumes/<catalog>/<schema>/<volume>/<path_or_file>.
+  input_volume_paths: string[]
+
+  # Output schema for generated tables, views, or profiles.
+  # Preferred format: <catalog.schema>. The Builder Agent may create the schema
+  # if it does not exist and the user has permission.
+  output_schema: string | null
+
+  # Output folders on existing volumes for generated artifacts, profiles,
+  # reports, or eval assets.
+  # Preferred format: /Volumes/<catalog>/<schema>/<volume>/<folder>.
+  # The Builder Agent may create missing folders under an existing volume when
+  # the user has permission.
+  output_volume_folders: string[]
 ```
+
+Format handling rules:
+
+- Treat all user-provided resources as hints until verified.
+- Accept partial or legacy resource names only as draft hints; resolve them
+  from selected workspace context or ask a clarification question.
+- For `input_schemas`, inspect metadata inside the schema before selecting
+  relevant tables.
+- For `input_tables`, inspect schema, comments, ownership, freshness, and
+  simple profiles before treating a table as trusted.
+- For `input_volume_paths`, list only the selected folders or files.
+- For `output_schema`, create the schema only when it is missing, the format is
+  confirmed, and the user has permission.
+- For `output_volume_folders`, create missing folders only under an existing
+  volume and only when the user has permission.
 
 ### Generated Outputs
 
@@ -305,8 +336,8 @@ Generation should be staged. A single large prompt is too likely to hide
 ambiguity, hallucinate data assets, or overwrite reviewed material.
 
 1. Validate `project_setting.yaml` against the minimal project-setting schema.
-2. Normalize project settings into resource defaults, semantic hints, workflow
-   hints, scenario facts, open questions, and candidate requirement types.
+2. Normalize minimal user input into resource hints, scenario facts, open
+   questions, and candidate requirement types.
 3. Build a scenario fingerprint from decision owner, business decision,
    intervention, baseline, population, metrics, time windows, and actionability
    requirement.

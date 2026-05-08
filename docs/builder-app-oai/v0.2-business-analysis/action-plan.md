@@ -6,7 +6,7 @@ This plan turns the v0.2 gap analysis and design intent into an implementation
 sequence for the Builder Agent in `databricks-builder-app-oai`.
 
 The v0.1 OpenAI Agents SDK runtime remains the baseline. v0.2 focuses on the
-preparation workflow: accept minimal structured project settings, generate and
+preparation workflow: accept minimal user-friendly project input, generate and
 refine a scenario bundle, enrich it with business and data context, capture
 manual analyst execution, construct golden evals, and only then validate a
 lightweight Analysis Agent consumer.
@@ -18,8 +18,9 @@ build target for this phase.
 ## Execution Principles
 
 - Keep existing API and SSE event shapes backward compatible where possible.
-- Treat `project_setting.yaml` as the minimal structured user-authored source
-  of truth.
+- Treat `project_setting.yaml` as the minimal user-authored source of truth:
+  natural-language business background, optional notes, and selected
+  Databricks resource hints.
 - Generate downstream bundle artifacts from project settings, source-code
   context, Databricks metadata, and analyst review.
 - Make the Builder Agent responsible for preparation and draft bundle mutation.
@@ -43,7 +44,7 @@ Last updated: 2026-05-08.
 |---|---|---|
 | Phase 0: Docs and Baseline Alignment | Complete | OAI docs root, v0.1 migration track, and v0.2 gap/design/action-plan are aligned. |
 | Phase 1: Critical Persistence Fixes | Complete | Project Management resources and structured conclusion fallback persistence are implemented with focused regression tests. |
-| Phase 2: Project Setting and Bundle Contract | In progress | `project_setting.yaml` has replaced free-form user input as the source of truth; bundle schemas and review metadata still need implementation validation. |
+| Phase 2: Project Setting and Bundle Contract | In progress | `project_setting.yaml` is now a low-burden user input with free-form business background, optional notes, and Databricks resource hints; schema validation and review metadata still need implementation validation. |
 | Phase 3: Builder Agent Bundle Generator | Pending | Implement create/update generation, staged prompt strategy, completeness gate, clarification loop, idempotency, and partial regeneration. |
 | Phase 4: Business, Data, and Analysis Context Enrichment | In progress | `business_context.yaml`, `data_context.yaml`, and `analysis_context.yaml` are drafted; source-code and Databricks metadata enrichment remain implementation work. |
 | Phase 5: Manual Analyst Review and Execution | Pending | Human analyst execution must validate the BDR pilot bundle and feed discovered gaps back into the generated artifacts. |
@@ -162,10 +163,20 @@ shape.
 Tasks:
 
 - Treat `project_setting.yaml` as the only user-authored source of truth.
-- Align project settings with Project Management concepts: identity,
-  resources, semantics, workflows, agent policy, and seed business context.
-- Keep user input minimal; generated artifacts should expand and structure the
-  scenario, not ask users to author every detail manually.
+- Keep user input minimal: `business_background`, optional `analysis_notes`,
+  and UI-selected `databricks_resources`.
+- Do not ask users to author generated artifacts, agent policy, structured
+  metrics, periods, grains, validation focus, or answer rules.
+- Treat Databricks resources as hints until verified. The Builder Agent should
+  resolve selected resources, inspect metadata read-only, and ask for
+  clarification when a name or path is partial, malformed, or inaccessible.
+- Require clear resource format comments in the seed file:
+  - `input_schemas`: preferred `<catalog.schema>`
+  - `input_tables`: preferred `<catalog.schema.table>`
+  - `input_metric_views`: preferred `<catalog.schema.metric_view>`
+  - `input_volume_paths`: preferred `/Volumes/<catalog>/<schema>/<volume>/<path_or_file>`
+  - `output_schema`: preferred `<catalog.schema>`; create only with permission
+  - `output_volume_folders`: preferred `/Volumes/<catalog>/<schema>/<volume>/<folder>`; create missing folders only under an existing volume with permission
 - Define generated artifact responsibilities:
   - `README.md`: bundle overview, status, review notes, and blocked items.
   - `business_context.yaml`: structured business scenario, decision context,
@@ -183,8 +194,9 @@ Tasks:
 
 Acceptance gates:
 
-- `project_setting.yaml` parses and contains the minimum project, settings, and
-  business context fields required for generation.
+- `project_setting.yaml` parses and contains `business_background`; optional
+  notes and resource hints may be incomplete but must be explicit enough to
+  drive Builder Agent clarification or enrichment.
 - Each generated artifact has a clear role and can be understood without
   another document being loaded first.
 - Scenario-specific business facts live in `business_context.yaml`.

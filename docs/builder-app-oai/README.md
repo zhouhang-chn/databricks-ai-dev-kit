@@ -34,9 +34,9 @@ eval projection for one business scenario.
 
 Within v0.2 scenario bundles:
 
-- `project_setting.yaml` is the minimal structured user-authored source of
-  truth. It covers project settings, resource scope, semantic hints, workflow
-  hints, and the seed business context.
+- `project_setting.yaml` is the minimal user-authored source of truth. It
+  contains free-form business background, optional analysis notes, and
+  Databricks resource hints selected by the user or UI.
 - `business_context.yaml` is the structured business scenario and decision
   context generated from project settings.
 - `data_context.yaml` is the structured data and metadata context generated

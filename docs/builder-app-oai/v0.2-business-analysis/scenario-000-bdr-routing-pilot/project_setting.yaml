@@ -1,108 +1,73 @@
-project_setting:
-  version: 1
-  source_of_truth: true
-  metadata:
-    id: "ml_based_bdr_routing_pilot"
-    scenario_bundle: "scenario-000-bdr-routing-pilot"
-    status: "draft"
-    generated_artifacts:
-      - "README.md"
-      - "business_context.yaml"
-      - "data_context.yaml"
-      - "analysis_context.yaml"
-      - "evals.yaml"
+# Minimal user-authored project setting.
+# Users should be able to describe the business problem in natural language and
+# select Databricks resources from the UI. The Builder Agent is responsible for
+# converting this input into structured business, data, and analysis context.
 
-  project:
-    name: "ML-Based BDR Routing Optimization Pilot"
-    project_type: "business_analysis"
-    status: "draft"
-    audience: "developer"
-    decision_owner: "Sales Ops / Regional Sales Director"
-    description: >-
-      Evaluate whether a machine-learning-generated routing and visit plan can
-      outperform BDRs' traditional self-planned routes and justify BU or
-      national rollout.
+business_background: >-
+  The BDR routing pilot is designed to evaluate whether a machine-learning-generated routing and visit plan can outperform BDRs’ traditional self-planned routes. The pilot assigns ML-generated monthly visit plans to test-group BDRs while comparable control-group BDRs continue normal planning. The business objective is to determine whether the ML plan improves visit effectiveness, frequency adherence, daily productivity, and travel efficiency enough to justify BU or national rollout.
 
-  settings:
-    resources:
-      databricks_host: "https://dbc-68f93c80-55e9.cloud.databricks.com/"
-      cluster_id: "c-7d68e944-b17c"
-      warehouse_id: null
-      default_catalog: null
-      default_schema: "POC_BDR_Pilot_Plan_and_Visit_Data"
-      workspace_folder: "build-your-own-agent/llm_rag_agents/sql"
-      mlflow_experiment_name: null
-      output_schema: "bdr_performance_dashboard"
-      output_volume: "bdr_pilot_performance_dashboard.performance_metrics"
-    semantics:
-      preferred_tables:
-        - "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
-      metric_views:
-        - "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
-      preferred_volumes:
-        - "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
-      glossary:
-        BDR: "Business Development Representative"
-        POC: "Point of consumption / outlet / customer location"
-        visit_base: "set of POCs a BDR is expected to visit in a month"
-      known_caveats:
-        - "Control BDRs must exclude the test group and BDRs with data quality or assignment issues."
-    workflows:
-      enabled:
-        - id: "bdr_routing_pilot_notebook_sequence"
-          path: "build-your-own-agent/llm_rag_agents/sql/bdr_routing_pilot_notebook_sequence_template.py"
-      workspace_files:
-        - "bdr_visit_plan_faq.md"
-    agent_policy:
-      mode: "business_analysis_preparation"
-      role: "developer"
-      write_policy: "approval_required"
-      builder_agent:
-        purpose: "prepare and refine scenario bundles with developers and analysts"
-        allowed_outputs:
-          - "business_context.yaml"
-          - "data_context.yaml"
-          - "analysis_context.yaml"
-          - "evals.yaml"
-        requires_human_review: true
-      analysis_agent:
-        purpose: "serve end-user analysis from reviewed scenario bundles"
-        bundle_access: "read_only"
-        write_policy: "no_bundle_mutation"
+  The analysis focuses on six core metrics: visit base coverage, visit frequency adherence, visit time, travel / commute time, travel distance, and valid visits per working day per BDR. The evaluation requires two complementary comparisons: first, test-group BDR performance in the ML pilot month versus their own previous non-ML month; second, test-group performance versus control-group performance across both previous month and pilot month, including the difference in month-over-month deltas.
 
-  business_context:
-    scenario_statement: >-
-      The BDR routing pilot is designed to evaluate whether a
-      machine-learning-generated routing and visit plan can outperform BDRs'
-      traditional self-planned routes. The pilot assigns ML-generated monthly
-      visit plans to test-group BDRs while comparable control-group BDRs
-      continue normal planning. The business objective is to determine whether
-      the ML plan improves visit effectiveness, frequency adherence, daily
-      productivity, and travel efficiency enough to justify BU or national
-      rollout.
-    core_metrics:
-      - "visit_base_coverage_rate"
-      - "visit_frequency_adherence_rate"
-      - "visit_time"
-      - "travel_commute_time"
-      - "travel_distance"
-      - "avg_valid_visits_per_working_day"
-    comparison_design:
-      test_pre_post: "test-group pilot month vs same BDRs' previous non-ML month"
-      test_control_delta: "test group month-over-month delta vs control group month-over-month delta"
-      primary_rollout_evidence: "test-control delta difference"
-    periods:
-      pilot_month: "2025-01"
-      previous_month: "2024-12"
-    analysis_units:
-      - "BDR-month"
-      - "BDR-day"
-      - "BDR-POC-month"
-    validation_focus:
-      - "visit-base correctness"
-      - "valid visit definitions"
-      - "date-window alignment"
-      - "join correctness"
-      - "data freshness"
-      - "outliers"
-      - "control-group comparability"
+  The rollout decision should be based on whether the test group shows stronger improvement than the control group, especially on coverage and frequency adherence, while also reducing travel burden or increasing daily visit productivity. Results must be validated at BDR, BDR-day, and BDR-POC-month levels, with checks for visit-base correctness, valid visit definitions, date-window alignment, join correctness, data freshness, outliers, and control-group comparability.
+
+analysis_notes:
+  # Optional free-form notes, assumptions, known dates, caveats, or business
+  # rules. These do not need to be complete or normalized.
+  - "The ML pilot month for test-group BDRs is January 2025."
+  - "The previous non-ML month for test-group BDRs is December 2024."
+  - "The control group is selected from the remaining BDRs, excluding the test group and any BDRs with data quality or assignment issues."
+
+databricks_resources:
+  # Databricks workspace URL. Usually selected by the app or current profile.
+  databricks_host: "https://dbc-68f93c80-55e9.cloud.databricks.com/"
+
+  # Optional compute hints. Use cluster_id for notebook/workflow execution and
+  # warehouse_id for SQL. Leave null if the Builder Agent should infer or ask.
+  cluster_id: "c-7d68e944-b17c"
+  warehouse_id: null
+
+  # Optional workspace source context. Use Databricks workspace paths, not local
+  # filesystem paths. The Builder Agent may inspect these read-only.
+  workspace_folders:
+    - "build-your-own-agent/llm_rag_agents/sql"
+  workspace_files:
+    - "bdr_visit_plan_faq.md"
+  workflows:
+    - "build-your-own-agent/llm_rag_agents/sql/bdr_routing_pilot_notebook_sequence_template.py"
+
+  # Input schemas the Builder Agent may inspect.
+  # Preferred format: <catalog.schema>.
+  # If a legacy/default-catalog scoped name is supplied, the Builder Agent must
+  # resolve it from workspace context or ask for clarification.
+  input_schemas: []
+
+  # Input tables or views the Builder Agent may inspect.
+  # Preferred format: <catalog.schema.table>.
+  # If a legacy <schema.table> value is supplied, the Builder Agent must resolve
+  # the missing catalog from workspace context or ask for clarification.
+  input_tables:
+    - "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
+
+  # Governed metric views the Builder Agent may inspect.
+  # Preferred format: <catalog.schema.metric_view>.
+  input_metric_views:
+    - "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
+
+  # Input volume folders or files the Builder Agent may inspect.
+  # Preferred format: /Volumes/<catalog>/<schema>/<volume>/<path_or_file>.
+  # UI-selected volume names may also be stored if the app can resolve them.
+  input_volume_paths:
+    - "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
+
+  # Output schema for generated tables, views, or profiles.
+  # Preferred format: <catalog.schema>. The Builder Agent may create the schema
+  # if it does not exist and the user has permission.
+  output_schema: "bdr_performance_dashboard"
+
+  # Output folders on existing volumes for generated artifacts, profiles,
+  # reports, or eval assets.
+  # Preferred format: /Volumes/<catalog>/<schema>/<volume>/<folder>.
+  # The Builder Agent may create missing folders under an existing volume when
+  # the user has permission.
+  output_volume_folders:
+    - "bdr_pilot_performance_dashboard.performance_metrics"
