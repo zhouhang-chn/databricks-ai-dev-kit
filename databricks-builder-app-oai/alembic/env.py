@@ -21,9 +21,9 @@ from server.db.database import _resolve_hostname
 # this is the Alembic Config object
 config = context.config
 
-# Setup logging from alembic.ini
-if config.config_file_name is not None:
-  fileConfig(config.config_file_name)
+# Setup logging from alembic.ini (disabled to prevent overriding application logging)
+# if config.config_file_name is not None:
+#   fileConfig(config.config_file_name)
 
 # Target metadata for autogenerate
 target_metadata = Base.metadata
