@@ -60,6 +60,20 @@ function asRowTable(value: unknown): RowOriented | null {
         return { rows, columns };
       }
     }
+    const output = obj.output;
+    if (typeof output === 'string' && output.startsWith('[[')) {
+      try {
+        const jsonStr = output.replace(/'/g, '"');
+        const rows = JSON.parse(jsonStr) as unknown[][];
+        if (Array.isArray(rows) && rows.length > 0) {
+          const columns = rows[0].map((_, i) => `Col ${i + 1}`);
+          const normalizedRows = rows.map((row) =>
+            Object.fromEntries(columns.map((c, i) => [c, row[i]]))
+          );
+          return { rows: normalizedRows, columns };
+        }
+      } catch { /* fall through */ }
+    }
   }
   return null;
 }
