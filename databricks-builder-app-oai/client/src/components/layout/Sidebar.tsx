@@ -184,7 +184,7 @@ export function Sidebar({
             </svg>
           </div>
           {!isCollapsed && (
-            <span className="text-sm font-semibold text-[var(--color-text-heading)]">AI Dev Kit</span>
+            <span className="text-sm font-semibold text-[var(--color-text-heading)]">AI Analysis</span>
           )}
         </Link>
       </div>
