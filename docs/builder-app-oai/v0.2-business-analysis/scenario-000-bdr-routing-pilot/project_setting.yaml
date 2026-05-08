@@ -13,56 +13,57 @@ business_background: >-
 analysis_notes:
   # Optional free-form notes, assumptions, known dates, caveats, or business
   # rules. These do not need to be complete or normalized.
-  - "The ML pilot month for test-group BDRs is January 2025."
-  - "The previous non-ML month for test-group BDRs is December 2024."
-  - "The control group is selected from the remaining BDRs, excluding the test group and any BDRs with data quality or assignment issues."
+  - "The pilot started from 2026-04-13"
+  - "We'll take 2026-03 as the base month for both test and control group, and 2026-04 as the pilot month for test group and control group as well."
+  - "The test group include ['28007662','28028876','28040879','28040880','28040900','28040905','28040908','28046266','28046308','28046331','28047616','28047793','28062128','28062736','28069477','28073771','28078530','28080392','28081157','28081164'], the others are in control group. Note that there is one BDR '28062128' whose base and pilot visit frequency are both 3, so he won't be included in the analysis."
+  - "Use ds_uc_china_dev.bdr_routing_workdb.pilot_bdr_visit_record_seg as the preferred data source"
 
 databricks_resources:
   # Databricks workspace URL. Usually selected by the app or current profile.
-  databricks_host: "https://dbc-68f93c80-55e9.cloud.databricks.com/"
+  databricks_host: "https://adb-960767945362324.0.databricks.azure.cn/"
 
   # Optional compute hints. Use cluster_id for notebook/workflow execution and
   # warehouse_id for SQL. Leave null if the Builder Agent should infer or ask.
-  cluster_id: "c-7d68e944-b17c"
+  cluster_id: "1021-020841-thvbkra7"
   warehouse_id: null
 
   # Optional workspace source context. Use Databricks workspace paths, not local
   # filesystem paths. The Builder Agent may inspect these read-only.
   workspace_folders:
-    - "build-your-own-agent/llm_rag_agents/sql"
+    - "/Workspace/Users/hang.zhou1@budweiserapac.com/bees_bdr_territory"
   workspace_files:
-    - "bdr_visit_plan_faq.md"
+    # analysis code entrypoint
+    - "/Workspace/Users/hang.zhou1@budweiserapac.com/bees_bdr_territory/routing_2026/notebooks/pilot_visit_plan_exec_analysis"
   workflows:
-    - "build-your-own-agent/llm_rag_agents/sql/bdr_routing_pilot_notebook_sequence_template.py"
+    - "pilot_visit_plan_exec_analysis"
 
   # Input schemas the Builder Agent may inspect.
   # Preferred format: <catalog.schema>.
   # If a legacy/default-catalog scoped name is supplied, the Builder Agent must
   # resolve it from workspace context or ask for clarification.
-  input_schemas: []
+  input_schemas: 
+    - "ds_uc_china_dev.bdr_routing_workdb"
 
   # Input tables or views the Builder Agent may inspect.
   # Preferred format: <catalog.schema.table>.
   # If a legacy <schema.table> value is supplied, the Builder Agent must resolve
   # the missing catalog from workspace context or ask for clarification.
   input_tables:
-    - "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
+    - "ds_uc_china_dev.bdr_routing_workdb.pilot_bdr_visit_record_seg"
 
   # Governed metric views the Builder Agent may inspect.
   # Preferred format: <catalog.schema.metric_view>.
   input_metric_views:
-    - "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
 
   # Input volume folders or files the Builder Agent may inspect.
   # Preferred format: /Volumes/<catalog>/<schema>/<volume>/<path_or_file>.
   # UI-selected volume names may also be stored if the app can resolve them.
   input_volume_paths:
-    - "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
 
   # Output schema for generated tables, views, or profiles.
   # Preferred format: <catalog.schema>. The Builder Agent may create the schema
   # if it does not exist and the user has permission.
-  output_schema: "bdr_performance_dashboard"
+  output_schema: "ai_dev_kit.hang_zhou1_bdr_routing_pilot"
 
   # Output folders on existing volumes for generated artifacts, profiles,
   # reports, or eval assets.
@@ -70,4 +71,4 @@ databricks_resources:
   # The Builder Agent may create missing folders under an existing volume when
   # the user has permission.
   output_volume_folders:
-    - "bdr_pilot_performance_dashboard.performance_metrics"
+    
