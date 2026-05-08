@@ -152,17 +152,39 @@ def create_databricks_tools(
       'Executing SQL through configured cluster fallback: cluster_id=%s',
       default_cluster_id,
     )
+    python_code = f"""
+import json
+import datetime
+
+def serialize(v):
+    if isinstance(v, (datetime.datetime, datetime.date)):
+        return v.isoformat()
+    return v
+
+df = spark.sql({repr(sql_query)})
+columns = df.columns
+rows = [[serialize(cell) for cell in row] for row in df.limit(1000).collect()]
+print(json.dumps({{"columns": columns, "rows": rows}}))
+"""
     result = await _to_thread_with_context(
       execute_databricks_command,
-      code=sql_query,
+      code=python_code,
       cluster_id=default_cluster_id,
-      language='sql',
+      language='python',
       timeout=timeout,
       destroy_context_on_completion=True,
     )
     if run_state and getattr(result, 'success', False):
       run_state.mark_sql_schema_inspection(sql_query)
     payload = _jsonable(result)
+    if isinstance(payload, dict) and getattr(result, 'success', False):
+      output_str = payload.get('output', '')
+      try:
+        parsed_output = json.loads(output_str)
+        payload['rows'] = parsed_output.get('rows')
+        payload['columns'] = parsed_output.get('columns')
+      except Exception:
+        pass
     if isinstance(payload, dict):
       payload.setdefault('compute', 'cluster')
       payload.setdefault('cluster_id', default_cluster_id)

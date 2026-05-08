@@ -312,8 +312,8 @@ def test_plan_tool_output_echo_is_suppressed():
   assert output_events == []
 
 
-def test_duplicate_plan_create_output_emits_step_start():
-  """A duplicate create auto-starts the first step from the plan-tool output."""
+def test_duplicate_plan_create_output_is_suppressed_from_ui():
+  """A duplicate create's output is a hard error to the model; the UI sees nothing."""
   normalize_openai_event(
     Event(
       type='run_item_stream_event',
@@ -338,21 +338,16 @@ def test_duplicate_plan_create_output_emits_step_start():
         type='tool_call_output_item',
         raw_item={'call_id': 'call_duplicate_create'},
         output={
-          'op': 'start',
-          'ack': 'duplicate_plan_started',
-          'step_id': 'step-1',
-          'narrative': 'Continuing with the existing plan.',
+          'is_error': True,
+          'error': 'plan_already_exists',
+          'message': 'A plan was already created in this run...',
+          'next_action_required': 'update_plan(op="start", step_id="step-1", ...)',
         },
       ),
     )
   )
 
-  assert output_events == [{
-    'type': 'plan.step_started',
-    'call_id': 'call_duplicate_create',
-    'step_id': 'step-1',
-    'narrative': 'Continuing with the existing plan.',
-  }]
+  assert output_events == []
 
 
 def _invoke_plan_tool(tool, args_json: str, call_id: str = 'call_test'):
@@ -375,8 +370,8 @@ def _invoke_tool(tool, args_json: str, call_id: str = 'call_test'):
   return _invoke_plan_tool(tool, args_json, call_id)
 
 
-def test_update_plan_duplicate_create_auto_starts_first_step():
-  """A second update_plan(op='create') in the same run starts the first step."""
+def test_update_plan_duplicate_create_returns_hard_error():
+  """A second update_plan(op='create') in the same run is rejected with is_error."""
   from server.services.tools.plan_tools import create_plan_tools
 
   run_state = AgentToolRunState(project_dir=None)
@@ -388,12 +383,13 @@ def test_update_plan_duplicate_create_auto_starts_first_step():
   second = _invoke_plan_tool(update_plan, args, 'call_2')
 
   assert first['ack'] == 'plan_created'
-  assert second['ack'] == 'duplicate_plan_started'
-  assert second['op'] == 'start'
-  assert second['step_id'] == 'step-1'
-  assert run_state.active_step_id == 'step-1'
-  assert 'guidance' in second
-  assert 'Run the step tools now' in second['guidance']
+  assert second['is_error'] is True
+  assert second['error'] == 'plan_already_exists'
+  assert 'op="start"' in second['next_action_required']
+  assert 'step-1' in second['next_action_required']
+  # The duplicate must NOT auto-mutate run state — the model must call op="start"
+  # explicitly so the gate opens through the documented path.
+  assert run_state.active_step_id is None
 
 
 def test_submit_conclusion_is_idempotent_per_run():
@@ -426,7 +422,8 @@ def test_plan_tool_state_is_isolated_between_runs():
   # Exhaust run A's create
   _invoke_plan_tool(update_a, args, 'a1')
   duplicate_a = _invoke_plan_tool(update_a, args, 'a2')
-  assert duplicate_a['ack'] == 'duplicate_plan_started'
+  assert duplicate_a['is_error'] is True
+  assert duplicate_a['error'] == 'plan_already_exists'
 
   # Run B (separate concurrent agent) is unaffected
   fresh_b = _invoke_plan_tool(update_b, args, 'b1')
@@ -447,14 +444,15 @@ def test_update_plan_revise_marks_plan_created():
   )
   assert revise['ack'] == 'plan_revised'
 
-  # Now a stray create should be redirected, not freshly accepted
+  # Now a stray create should be rejected as a duplicate, not freshly accepted
   follow_up = _invoke_plan_tool(
     update_plan,
     '{"op":"create","objective":"x","steps":[]}',
     'r2',
   )
-  assert follow_up['ack'] == 'duplicate_plan_started'
-  assert follow_up['step_id'] == 'step-1'
+  assert follow_up['is_error'] is True
+  assert follow_up['error'] == 'plan_already_exists'
+  assert 'step-1' in follow_up['next_action_required']
 
 
 def test_model_settings_require_ai_gateway_env(monkeypatch):
@@ -550,20 +548,65 @@ def test_project_file_read_size_cap_constant_is_bounded():
 
 
 def test_openai_tool_filter_blocks_disabled_skill_tools():
-  """Skill allowlist filtering also works for plain OpenAI tool names."""
+  """Skill whitelist filtering also works for plain OpenAI tool names."""
 
   @dataclass
   class Tool:
     name: str
 
-  tools = [Tool('manage_jobs'), Tool('manage_dashboard'), Tool('execute_sql')]
+  tools = [
+    Tool('manage_jobs'),
+    Tool('manage_dashboard'),
+    Tool('execute_sql'),
+    Tool('check_operation_status'),
+  ]
 
   allowed = filter_openai_tools_by_skills(
     tools,
     enabled_skills=['databricks-aibi-dashboards'],
   )
 
-  assert [tool.name for tool in allowed] == ['manage_dashboard', 'execute_sql']
+  assert [tool.name for tool in allowed] == [
+    'manage_dashboard',
+    'execute_sql',
+    'check_operation_status',
+  ]
+
+
+def test_analysis_skill_openai_filter_exposes_minimal_tools():
+  """The analysis skill should expose only base read tools and analysis helpers."""
+
+  @dataclass
+  class Tool:
+    name: str
+
+  tools = [
+    Tool('update_plan'),
+    Tool('submit_conclusion'),
+    Tool('read_project_file'),
+    Tool('write_project_file'),
+    Tool('execute_sql'),
+    Tool('get_table_stats_and_schema'),
+    Tool('list_compute'),
+    Tool('get_current_user'),
+    Tool('manage_cluster'),
+    Tool('generate_and_upload_pdf'),
+  ]
+
+  allowed = filter_openai_tools_by_skills(
+    tools,
+    enabled_skills=['databricks-analysis'],
+  )
+
+  assert [tool.name for tool in allowed] == [
+    'update_plan',
+    'submit_conclusion',
+    'read_project_file',
+    'execute_sql',
+    'get_table_stats_and_schema',
+    'list_compute',
+    'get_current_user',
+  ]
 
 
 def test_user_preview_databricks_tool_filter_blocks_write_tools():
@@ -635,7 +678,7 @@ def test_execute_sql_uses_configured_cluster_when_warehouse_missing(monkeypatch,
     calls.append(kwargs)
     return ExecutionResult(
       success=True,
-      output='answer\n1',
+      output='{"columns": ["answer"], "rows": [[1]]}',
       cluster_id=kwargs['cluster_id'],
       context_id='ctx-1',
       context_destroyed=True,
@@ -660,7 +703,7 @@ def test_execute_sql_uses_configured_cluster_when_warehouse_missing(monkeypatch,
   multi_result = json.loads(_invoke_tool(execute_sql_multi, '{"sql_content":"SELECT 2"}'))
 
   assert [call['cluster_id'] for call in calls] == ['cluster-1', 'cluster-1']
-  assert [call['language'] for call in calls] == ['sql', 'sql']
+  assert [call['language'] for call in calls] == ['python', 'sql']
   assert all(call['destroy_context_on_completion'] is True for call in calls)
   assert result['compute'] == 'cluster'
   assert result['cluster_id'] == 'cluster-1'
