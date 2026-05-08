@@ -786,6 +786,10 @@ export default function ProjectPage() {
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [messageTools, setMessageTools] = useState<Record<string, string[]>>({});
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [rightPanelWidth, setRightPanelWidth] = useState(320);
+  const [isResizingLeft, setIsResizingLeft] = useState(false);
+  const [isResizingRight, setIsResizingRight] = useState(false);
   const [isChatMenuOpen, setIsChatMenuOpen] = useState(false);
   const [isRenameOpen, setIsRenameOpen] = useState(false);
   const chatMenuRef = useRef<HTMLDivElement>(null);
@@ -801,6 +805,75 @@ export default function ProjectPage() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isChatMenuOpen]);
+
+  // Handle manual resizing
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isResizingLeft) {
+        const newWidth = e.clientX;
+        if (newWidth > 200 && newWidth < 500) {
+          setSidebarWidth(newWidth);
+        }
+      } else if (isResizingRight) {
+        const newWidth = window.innerWidth - e.clientX;
+        if (newWidth > 250 && newWidth < 600) {
+          setRightPanelWidth(newWidth);
+        }
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingLeft(false);
+      setIsResizingRight(false);
+    };
+
+    if (isResizingLeft || isResizingRight) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = 'none';
+    } else {
+      document.body.style.userSelect = '';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = '';
+    };
+  }, [isResizingLeft, isResizingRight]);
+
+  // Handle automatic resizing on window resize
+  useEffect(() => {
+    const handleResize = () => {
+      const windowWidth = window.innerWidth;
+      const minLeft = isSidebarCollapsed ? 64 : 200;
+      const minMiddle = 400;
+      const minRight = 250;
+
+      let currentLeft = isSidebarCollapsed ? 64 : sidebarWidth;
+      let currentRight = rightPanelWidth;
+
+      if (currentLeft + minMiddle + currentRight > windowWidth) {
+        // Shrink right first
+        currentRight = Math.max(minRight, windowWidth - currentLeft - minMiddle);
+        
+        // If still not enough, shrink left
+        if (currentLeft + minMiddle + currentRight > windowWidth) {
+          currentLeft = Math.max(minLeft, windowWidth - minMiddle - currentRight);
+        }
+        
+        if (!isSidebarCollapsed) {
+          setSidebarWidth(currentLeft);
+        }
+        setRightPanelWidth(currentRight);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    
+    return () => window.removeEventListener('resize', handleResize);
+  }, [sidebarWidth, rightPanelWidth, isSidebarCollapsed]);
 
   const handleRenameConversation = useCallback(
     async (newTitle: string) => {
@@ -1709,207 +1782,221 @@ export default function ProjectPage() {
     );
   }
 
-  const sidebar = (
-    <Sidebar
-      onViewSkills={handleViewSkills}
-      onOpenProjectSettings={() => setProjectPanelOpen(true)}
-      isCollapsed={isSidebarCollapsed}
-      onToggleCollapse={setIsSidebarCollapsed}
-    />
-  );
-
   return (
-    <MainLayout projectName={project?.name} sidebar={sidebar} hideTopBar>
-      <div className="flex flex-1 flex-col h-full">
-        {/* Chat Header */}
-        <div className="flex h-14 items-center justify-between border-b border-[var(--color-border)]/60 px-6 bg-[var(--color-bg-secondary)]/20">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <h2 className="font-semibold text-[15px] text-[var(--color-text-heading)] truncate">
-              {currentConversation?.title || 'New Chat'}
-            </h2>
-            {currentConversation && (
-              <div className="relative flex-shrink-0" ref={chatMenuRef}>
+    <MainLayout projectName={project?.name} hideTopBar>
+      <div className="flex h-full min-h-0 overflow-hidden">
+        {/* Left Panel: Sidebar */}
+        <Sidebar
+          onViewSkills={handleViewSkills}
+          onOpenProjectSettings={() => setProjectPanelOpen(true)}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={setIsSidebarCollapsed}
+          style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
+          isResizing={isResizingLeft}
+        />
+        
+        {/* Left Resize Handle */}
+        {!isSidebarCollapsed && (
+          <div 
+            className="w-1 cursor-col-resize hover:bg-[var(--color-accent-primary)]/50 transition-colors flex-shrink-0"
+            onMouseDown={() => setIsResizingLeft(true)}
+          />
+        )}
+
+        {/* Rest of the layout (Middle + Right) */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Chat Header */}
+          <div className="flex h-14 items-center justify-between border-b border-[var(--color-border)]/60 px-6 bg-[var(--color-bg-secondary)]/20">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <h2 className="font-semibold text-[15px] text-[var(--color-text-heading)] truncate">
+                {currentConversation?.title || 'New Chat'}
+              </h2>
+              {currentConversation && (
+                <div className="relative flex-shrink-0" ref={chatMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setIsChatMenuOpen((open) => !open)}
+                    className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-border)]/50 hover:text-[var(--color-text-primary)] transition-all"
+                    title="More options"
+                    aria-haspopup="menu"
+                    aria-expanded={isChatMenuOpen}
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                  {isChatMenuOpen && (
+                    <div
+                      role="menu"
+                      className="absolute left-0 top-full mt-1 z-20 min-w-[160px] rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-lg overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setIsChatMenuOpen(false);
+                          setIsRenameOpen(true);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-xs text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] transition-colors"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        Rename
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <ChatRenameModal
+              isOpen={isRenameOpen}
+              initialTitle={currentConversation?.title || ''}
+              onClose={() => setIsRenameOpen(false)}
+              onSave={handleRenameConversation}
+            />
+            <div className="flex items-center gap-2.5">
+              <div className="hidden lg:flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-0.5">
                 <button
                   type="button"
-                  onClick={() => setIsChatMenuOpen((open) => !open)}
-                  className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-border)]/50 hover:text-[var(--color-text-primary)] transition-all"
-                  title="More options"
-                  aria-haspopup="menu"
-                  aria-expanded={isChatMenuOpen}
+                  onClick={() => setRunRole('developer')}
+                  className={cn(
+                    'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors',
+                    runRole === 'developer'
+                      ? 'bg-[var(--color-background)] text-[var(--color-text-heading)] shadow-sm'
+                      : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-heading)]'
+                  )}
                 >
-                  <MoreHorizontal className="h-4 w-4" />
+                  <Code2 className="h-3.5 w-3.5" />
+                  Developer
                 </button>
-                {isChatMenuOpen && (
-                  <div
-                    role="menu"
-                    className="absolute left-0 top-full mt-1 z-20 min-w-[160px] rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-lg overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150"
-                  >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setIsChatMenuOpen(false);
-                        setIsRenameOpen(true);
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-xs text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] transition-colors"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                      Rename
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          <ChatRenameModal
-            isOpen={isRenameOpen}
-            initialTitle={currentConversation?.title || ''}
-            onClose={() => setIsRenameOpen(false)}
-            onSave={handleRenameConversation}
-          />
-          <div className="flex items-center gap-2.5">
-            <div className="hidden lg:flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-0.5">
-              <button
-                type="button"
-                onClick={() => setRunRole('developer')}
-                className={cn(
-                  'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors',
-                  runRole === 'developer'
-                    ? 'bg-[var(--color-background)] text-[var(--color-text-heading)] shadow-sm'
-                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-heading)]'
-                )}
-              >
-                <Code2 className="h-3.5 w-3.5" />
-                Developer
-              </button>
-              <button
-                type="button"
-                onClick={() => setRunRole('user_preview')}
-                className={cn(
-                  'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors',
-                  runRole === 'user_preview'
-                    ? 'bg-[var(--color-background)] text-[var(--color-text-heading)] shadow-sm'
-                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-heading)]'
-                )}
-              >
-                <Eye className="h-3.5 w-3.5" />
-                User Preview
-              </button>
-            </div>
-
-          </div>
-        </div>
-
-        <ProjectManagementPanel
-          isOpen={projectPanelOpen}
-          onClose={() => setProjectPanelOpen(false)}
-          project={project}
-          projectSetting={projectSetting}
-          projectSettingPath={projectSettingPath}
-          validationResult={projectSettingValidation}
-          clusters={clusters}
-          warehouses={warehouses}
-          onSave={handleSaveProjectManagement}
-          onValidate={handleValidateProjectManagement}
-          onPublish={handlePublishRelease}
-          onStartUserPreview={handleStartUserPreview}
-          isSaving={isSavingProjectManagement}
-          isValidating={isValidatingProjectSetting}
-        />
-
-        {/* Analysis Canvas and Input Area */}
-        <div className="min-h-0 flex-1 overflow-hidden">
-          <div 
-            className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_20rem] transition-all duration-300"
-            style={{
-              gridTemplateColumns: isSidebarCollapsed 
-                ? 'minmax(0, 1fr) 536px' 
-                : 'minmax(0, 1fr) 20rem'
-            }}
-          >
-            {/* Middle Panel: StoryCanvas + Input */}
-            <div className="flex flex-col min-h-0 border-r border-[var(--color-border)]/40">
-              <div className="flex-1 overflow-y-auto no-scrollbar">
-                <StoryCanvas
-                  stories={analysisStories}
-                  activeStoryId={activeStoryId}
-                  onSelectStory={setActiveStoryId}
-                  onNextMove={handleNextMove}
-                  emptyTitle={runRole === 'user_preview' ? 'What would a user ask?' : 'What can I help you build?'}
-                  emptyDescription={
+                <button
+                  type="button"
+                  onClick={() => setRunRole('user_preview')}
+                  className={cn(
+                    'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors',
                     runRole === 'user_preview'
-                      ? 'Preview the published project with read-only tools and release-pinned context.'
-                      : 'Build data pipelines, generate synthetic data, create dashboards, and explore Databricks resources.'
-                  }
-                  starterPrompts={starterPrompts}
-                  onStarterPrompt={handleStarterPrompt}
-                />
-
-                {isStreamingHere && analysisStories.length === 0 && (
-                  <div className="mx-auto w-full max-w-4xl px-6 pb-6">
-                    {isReconnecting ? (
-                      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Reconnecting to agent...</span>
-                      </div>
-                    ) : (
-                      <FunLoader todos={todos} className="py-1" />
-                    )}
-                  </div>
-                )}
-
-                <div ref={messagesEndRef} />
+                      ? 'bg-[var(--color-background)] text-[var(--color-text-heading)] shadow-sm'
+                      : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-heading)]'
+                  )}
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  User Preview
+                </button>
               </div>
 
-              {/* Input Area */}
-              <div className="px-6 pb-5 pt-3 bg-[var(--color-background)]">
-                <div className="mx-auto max-w-4xl w-full">
-                  <div className="relative rounded-2xl border border-[var(--color-border)] bg-[var(--color-background)] shadow-sm shadow-black/[0.03] focus-within:border-[var(--color-accent-primary)]/40 focus-within:shadow-lg focus-within:shadow-[var(--color-accent-primary)]/[0.06] transition-all duration-300">
-                    <textarea
-                      ref={inputRef}
-                      value={input}
-                      onChange={handleInputChange}
-                      onKeyDown={handleKeyDown}
-                      placeholder="Message the assistant..."
-                      rows={1}
-                      className="w-full resize-none bg-transparent px-5 pt-4 pb-14 text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                      style={{ maxHeight: 200 }}
-                      disabled={isStreamingHere}
-                    />
-                    <div className="absolute bottom-3 left-5 right-3 flex items-center justify-between">
-                      <span className="text-[11px] text-[var(--color-text-muted)]/40 select-none">
-                        <kbd className="px-1.5 py-0.5 rounded border border-[var(--color-border)]/40 bg-[var(--color-bg-secondary)]/50 text-[10px] font-mono">Enter</kbd> to send
-                      </span>
-                      {isStreamingHere ? (
-                        <button
-                          onClick={handleStopGeneration}
-                          className="flex items-center justify-center h-9 w-9 rounded-xl bg-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/90 text-white transition-all shadow-sm hover:shadow-md"
-                          title="Stop generation"
-                        >
-                          <Square className="h-3.5 w-3.5" />
-                        </button>
+            </div>
+          </div>
+
+          <ProjectManagementPanel
+            isOpen={projectPanelOpen}
+            onClose={() => setProjectPanelOpen(false)}
+            project={project}
+            projectSetting={projectSetting}
+            projectSettingPath={projectSettingPath}
+            validationResult={projectSettingValidation}
+            clusters={clusters}
+            warehouses={warehouses}
+            onSave={handleSaveProjectManagement}
+            onValidate={handleValidateProjectManagement}
+            onPublish={handlePublishRelease}
+            onStartUserPreview={handleStartUserPreview}
+            isSaving={isSavingProjectManagement}
+            isValidating={isValidatingProjectSetting}
+          />
+
+          {/* Analysis Canvas and Input Area */}
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <div className="flex h-full min-h-0">
+              {/* Middle Panel: StoryCanvas + Input */}
+              <div className="flex-1 flex flex-col min-w-[400px] border-r border-[var(--color-border)]/40 overflow-hidden">
+                <div className="flex-1 overflow-y-auto no-scrollbar">
+                  <StoryCanvas
+                    stories={analysisStories}
+                    activeStoryId={activeStoryId}
+                    onSelectStory={setActiveStoryId}
+                    onNextMove={handleNextMove}
+                    emptyTitle={runRole === 'user_preview' ? 'What would a user ask?' : 'What can I help you build?'}
+                    emptyDescription={
+                      runRole === 'user_preview'
+                        ? 'Preview the published project with read-only tools and release-pinned context.'
+                        : 'Build data pipelines, generate synthetic data, create dashboards, and explore Databricks resources.'
+                    }
+                    starterPrompts={starterPrompts}
+                    onStarterPrompt={handleStarterPrompt}
+                  />
+
+                  {isStreamingHere && analysisStories.length === 0 && (
+                    <div className="mx-auto w-full max-w-4xl px-6 pb-6">
+                      {isReconnecting ? (
+                        <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Reconnecting to agent...</span>
+                        </div>
                       ) : (
-                        <button
-                          onClick={handleSendMessage}
-                          disabled={!input.trim()}
-                          className={cn(
-                            'flex items-center justify-center h-9 w-9 rounded-xl transition-all',
-                            input.trim()
-                              ? 'bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/90 text-white shadow-sm shadow-[var(--color-accent-primary)]/30 hover:shadow-md hover:shadow-[var(--color-accent-primary)]/40'
-                              : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]/40 cursor-not-allowed'
-                          )}
-                          title="Send message"
-                        >
-                          <ArrowUp className="h-4.5 w-4.5" />
-                        </button>
+                        <FunLoader todos={todos} className="py-1" />
                       )}
+                    </div>
+                  )}
+
+                  <div ref={messagesEndRef} />
+                </div>
+
+                {/* Input Area */}
+                <div className="px-6 pb-5 pt-3 bg-[var(--color-background)]">
+                  <div className="mx-auto max-w-4xl w-full">
+                    <div className="relative rounded-2xl border border-[var(--color-border)] bg-[var(--color-background)] shadow-sm shadow-black/[0.03] focus-within:border-[var(--color-accent-primary)]/40 focus-within:shadow-lg focus-within:shadow-[var(--color-accent-primary)]/[0.06] transition-all duration-300">
+                      <textarea
+                        ref={inputRef}
+                        value={input}
+                        onChange={handleInputChange}
+                        onKeyDown={handleKeyDown}
+                        placeholder="Message the assistant..."
+                        rows={1}
+                        className="w-full resize-none bg-transparent px-5 pt-4 pb-14 text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                        style={{ maxHeight: 200 }}
+                        disabled={isStreamingHere}
+                      />
+                      <div className="absolute bottom-3 left-5 right-3 flex items-center justify-between">
+                        <span className="text-[11px] text-[var(--color-text-muted)]/40 select-none">
+                          <kbd className="px-1.5 py-0.5 rounded border border-[var(--color-border)]/40 bg-[var(--color-bg-secondary)]/50 text-[10px] font-mono">Enter</kbd> to send
+                        </span>
+                        {isStreamingHere ? (
+                          <button
+                            onClick={handleStopGeneration}
+                            className="flex items-center justify-center h-9 w-9 rounded-xl bg-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/90 text-white transition-all shadow-sm hover:shadow-md"
+                            title="Stop generation"
+                          >
+                            <Square className="h-3.5 w-3.5" />
+                          </button>
+                        ) : (
+                          <button
+                            onClick={handleSendMessage}
+                            disabled={!input.trim()}
+                            className={cn(
+                              'flex items-center justify-center h-9 w-9 rounded-xl transition-all',
+                              input.trim()
+                                ? 'bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/90 text-white shadow-sm shadow-[var(--color-accent-primary)]/30 hover:shadow-md hover:shadow-[var(--color-accent-primary)]/40'
+                                : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]/40 cursor-not-allowed'
+                            )}
+                            title="Send message"
+                          >
+                            <ArrowUp className="h-4.5 w-4.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            <RightInspectPanel story={activeStory} />
+              {/* Right Resize Handle */}
+              <div 
+                className="w-1 cursor-col-resize hover:bg-[var(--color-accent-primary)]/50 transition-colors flex-shrink-0"
+                onMouseDown={() => setIsResizingRight(true)}
+              />
+
+              {/* Right Panel */}
+              <div style={{ width: `${rightPanelWidth}px` }} className="flex-shrink-0 min-w-[250px]">
+                <RightInspectPanel story={activeStory} />
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1928,6 +2015,11 @@ export default function ProjectPage() {
           }}
           onClose={() => setSkillsExplorerOpen(false)}
         />
+      )}
+
+      {/* Resizing Overlay */}
+      {(isResizingLeft || isResizingRight) && (
+        <div className="fixed inset-0 z-50 cursor-col-resize" />
       )}
     </MainLayout>
   );

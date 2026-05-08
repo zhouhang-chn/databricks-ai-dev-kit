@@ -26,6 +26,8 @@ interface SidebarProps {
   onOpenProjectSettings?: () => void;
   isCollapsed: boolean;
   onToggleCollapse: (collapsed: boolean) => void;
+  style?: React.CSSProperties;
+  isResizing?: boolean;
 }
 
 export function Sidebar({
@@ -33,6 +35,8 @@ export function Sidebar({
   onOpenProjectSettings,
   isCollapsed,
   onToggleCollapse,
+  style,
+  isResizing,
 }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -151,8 +155,10 @@ export function Sidebar({
 
   return (
     <aside
+      style={style}
       className={cn(
-        "flex flex-col bg-[var(--color-bg-secondary)] border-r border-[var(--color-border)] h-full relative transition-all duration-300 flex-shrink-0",
+        "flex flex-col bg-[var(--color-bg-secondary)] border-r border-[var(--color-border)] h-full relative flex-shrink-0",
+        !isResizing && "transition-all duration-300",
         isCollapsed ? 'w-16' : 'w-[var(--sidebar-width)]'
       )}
     >
