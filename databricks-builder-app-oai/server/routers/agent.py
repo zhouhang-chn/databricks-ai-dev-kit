@@ -78,9 +78,11 @@ def _synthesis_summary_from_event(event: dict[str, Any]) -> str:
 
 def _answer_text_for_run(final_text: str, synthesis_summary: str | None) -> str:
     """Return the text that should back persistence and post-run metadata."""
+    if synthesis_summary and synthesis_summary.strip():
+        return synthesis_summary.strip()
     if final_text.strip():
         return final_text
-    return (synthesis_summary or '').strip()
+    return ''
 
 
 class InvokeAgentRequest(BaseModel):

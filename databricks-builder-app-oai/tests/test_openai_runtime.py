@@ -306,6 +306,49 @@ def test_plan_tool_output_echo_is_suppressed():
   assert output_events == []
 
 
+def test_duplicate_plan_create_output_emits_step_start():
+  """A duplicate create auto-starts the first step from the plan-tool output."""
+  normalize_openai_event(
+    Event(
+      type='run_item_stream_event',
+      item=Item(
+        type='tool_call_item',
+        raw_item={
+          'call_id': 'call_duplicate_create',
+          'name': 'update_plan',
+          'arguments': (
+            '{"op": "create", "objective": "x", '
+            '"steps": [{"id": "step-1", "title": "Inspect"}]}'
+          ),
+        },
+      ),
+    )
+  )
+
+  output_events = normalize_openai_event(
+    Event(
+      type='run_item_stream_event',
+      item=Item(
+        type='tool_call_output_item',
+        raw_item={'call_id': 'call_duplicate_create'},
+        output={
+          'op': 'start',
+          'ack': 'duplicate_plan_started',
+          'step_id': 'step-1',
+          'narrative': 'Continuing with the existing plan.',
+        },
+      ),
+    )
+  )
+
+  assert output_events == [{
+    'type': 'plan.step_started',
+    'call_id': 'call_duplicate_create',
+    'step_id': 'step-1',
+    'narrative': 'Continuing with the existing plan.',
+  }]
+
+
 def _invoke_plan_tool(tool, args_json: str, call_id: str = 'call_test'):
   """Run a FunctionTool's underlying handler with a synthetic ToolContext."""
   import asyncio
@@ -326,11 +369,12 @@ def _invoke_tool(tool, args_json: str, call_id: str = 'call_test'):
   return _invoke_plan_tool(tool, args_json, call_id)
 
 
-def test_update_plan_create_is_idempotent_per_run():
-  """A second update_plan(op='create') in the same run returns guidance, not ack."""
+def test_update_plan_duplicate_create_auto_starts_first_step():
+  """A second update_plan(op='create') in the same run starts the first step."""
   from server.services.tools.plan_tools import create_plan_tools
 
-  tools = create_plan_tools()
+  run_state = AgentToolRunState(project_dir=None)
+  tools = create_plan_tools(run_state=run_state)
   update_plan = next(t for t in tools if t.name == 'update_plan')
   args = '{"op":"create","objective":"x","steps":[{"id":"step-1","title":"t"}]}'
 
@@ -338,11 +382,12 @@ def test_update_plan_create_is_idempotent_per_run():
   second = _invoke_plan_tool(update_plan, args, 'call_2')
 
   assert first['ack'] == 'plan_created'
-  assert second['ack'] == 'plan_already_exists'
+  assert second['ack'] == 'duplicate_plan_started'
+  assert second['op'] == 'start'
+  assert second['step_id'] == 'step-1'
+  assert run_state.active_step_id == 'step-1'
   assert 'guidance' in second
-  # Guidance must redirect to start/revise, not encourage another create
-  assert 'op="start"' in second['guidance'] or "op='start'" in second['guidance']
-  assert 'create' not in second['guidance'] or 'do not call' in second['guidance'].lower()
+  assert 'Run the step tools now' in second['guidance']
 
 
 def test_submit_conclusion_is_idempotent_per_run():
@@ -375,7 +420,7 @@ def test_plan_tool_state_is_isolated_between_runs():
   # Exhaust run A's create
   _invoke_plan_tool(update_a, args, 'a1')
   duplicate_a = _invoke_plan_tool(update_a, args, 'a2')
-  assert duplicate_a['ack'] == 'plan_already_exists'
+  assert duplicate_a['ack'] == 'duplicate_plan_started'
 
   # Run B (separate concurrent agent) is unaffected
   fresh_b = _invoke_plan_tool(update_b, args, 'b1')
@@ -402,7 +447,8 @@ def test_update_plan_revise_marks_plan_created():
     '{"op":"create","objective":"x","steps":[]}',
     'r2',
   )
-  assert follow_up['ack'] == 'plan_already_exists'
+  assert follow_up['ack'] == 'duplicate_plan_started'
+  assert follow_up['step_id'] == 'step-1'
 
 
 def test_model_settings_require_ai_gateway_env(monkeypatch):
@@ -607,7 +653,10 @@ def test_table_stats_marks_schema_inspected_before_sql(monkeypatch, tmp_path):
   )
   run_state.active_step_id = 'step-1'
 
-  def fake_table_stats(**_kwargs):
+  captured_table_stats_kwargs = {}
+
+  def fake_table_stats(**kwargs):
+    captured_table_stats_kwargs.update(kwargs)
     return {
       'catalog': 'cat',
       'schema_name': 'sch',
@@ -635,10 +684,12 @@ def test_table_stats_marks_schema_inspected_before_sql(monkeypatch, tmp_path):
 
   _invoke_tool(
     stats,
-    (
-      '{"catalog":"cat","schema":"sch",'
-      '"table_names":["pilot_bdr_visit_record_seg"],"table_stat_level":"NONE"}'
-    ),
+    json.dumps({
+      'catalog': 'cat',
+      'schema': 'sch',
+      'table_names': '["pilot_bdr_visit_record_seg"]',
+      'table_stat_level': 'NONE',
+    }),
   )
   result = json.loads(_invoke_tool(
     execute_sql,
@@ -648,6 +699,7 @@ def test_table_stats_marks_schema_inspected_before_sql(monkeypatch, tmp_path):
     ),
   ))
 
+  assert captured_table_stats_kwargs['table_names'] == ['pilot_bdr_visit_record_seg']
   assert result == [{'total_bdrs': 43}]
 
 

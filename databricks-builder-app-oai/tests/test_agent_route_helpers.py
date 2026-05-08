@@ -24,9 +24,16 @@ def test_synthesis_summary_is_ignored_for_other_events():
   assert summary == ''
 
 
-def test_answer_text_prefers_streamed_text_when_present():
-  """Normal assistant text stays canonical when it exists."""
+def test_answer_text_prefers_structured_synthesis_when_present():
+  """submit_conclusion summary is canonical when both text channels exist."""
   answer = _answer_text_for_run('Detailed answer\n', 'Structured summary')
+
+  assert answer == 'Structured summary'
+
+
+def test_answer_text_uses_streamed_text_without_synthesis():
+  """Free-form text remains available for clarification and fallback turns."""
+  answer = _answer_text_for_run('Detailed answer\n', None)
 
   assert answer == 'Detailed answer\n'
 

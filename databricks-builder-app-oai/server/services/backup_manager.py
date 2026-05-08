@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
 from ..db.database import session_scope
-from ..db.models import ProjectBackup
+from ..db.models import ProjectBackup, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ async def create_backup(project_id: str) -> bool:
     )
     stmt = stmt.on_conflict_do_update(
       index_elements=['project_id'],
-      set_={'backup_data': backup_data, 'updated_at': ProjectBackup.updated_at.default.arg()},
+      set_={'backup_data': backup_data, 'updated_at': utc_now()},
     )
     await session.execute(stmt)
 
@@ -200,7 +200,7 @@ def ensure_project_directory(project_id: str) -> Path:
       loop = asyncio.get_event_loop()
       if loop.is_running():
         # We're in an async context, create a new task
-        future = asyncio.ensure_future(restore_backup(project_id))
+        asyncio.ensure_future(restore_backup(project_id))
         # This is a sync function called from async code, we need to handle this
         # For now, just create the directory - the restore will happen async
         project_dir.mkdir(parents=True, exist_ok=True)

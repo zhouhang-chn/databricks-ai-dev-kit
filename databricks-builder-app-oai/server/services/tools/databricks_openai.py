@@ -238,7 +238,7 @@ def create_databricks_tools(
   async def get_table_stats_and_schema(
     catalog: str | None = None,
     schema: str | None = None,
-    table_names: list[str] | None = None,
+    table_names: list[str] | str | None = None,
     table_stat_level: str = 'SIMPLE',
     warehouse_id: str | None = None,
     timeout: int = 180,
@@ -259,6 +259,7 @@ def create_databricks_tools(
       })
 
     normalized_level = _normalize_table_stat_level(table_stat_level)
+    normalized_table_names = _coerce_table_names(table_names)
     effective_warehouse_id = warehouse_id or default_warehouse_id
     if effective_warehouse_id or not default_cluster_id:
       from databricks_tools_core.sql.table_stats import (
@@ -269,7 +270,7 @@ def create_databricks_tools(
         _get_table_stats_and_schema,
         catalog=effective_catalog,
         schema=effective_schema,
-        table_names=table_names,
+        table_names=normalized_table_names,
         table_stat_level=normalized_level,
         warehouse_id=effective_warehouse_id,
       )
@@ -282,7 +283,7 @@ def create_databricks_tools(
         _get_table_stats_with_cluster_fallback,
         catalog=effective_catalog,
         schema=effective_schema,
-        table_names=table_names,
+        table_names=normalized_table_names,
         table_stat_level=normalized_level,
         cluster_id=default_cluster_id,
         timeout=timeout,
@@ -292,7 +293,7 @@ def create_databricks_tools(
       run_state.mark_schema_inspected(
         catalog=effective_catalog,
         schema=effective_schema,
-        table_names=table_names,
+        table_names=normalized_table_names,
       )
     return json.dumps(_jsonable(result), default=str)
 
@@ -414,6 +415,25 @@ def _normalize_table_stat_level(level: str | None):
   if normalized not in {'none', 'simple', 'detailed'}:
     normalized = 'simple'
   return TableStatLevel(normalized)
+
+
+def _coerce_table_names(value: list[str] | str | None) -> list[str] | None:
+  """Accept table_names as a real list or a JSON-encoded list string."""
+  if value is None:
+    return None
+  if isinstance(value, list):
+    return [str(item) for item in value if item]
+  stripped = value.strip()
+  if not stripped:
+    return None
+  if stripped.startswith('['):
+    try:
+      parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+      parsed = None
+    if isinstance(parsed, list):
+      return [str(item) for item in parsed if item]
+  return [stripped]
 
 
 def _quote_sql_identifier(value: str) -> str:

@@ -334,14 +334,15 @@ class OpenAIAgentRuntime:
       emitted_text = False
       sdk_event_count = 0
       # Per-run UI-event dedup. The model sometimes re-emits update_plan(create)
-      # or submit_conclusion many times; the *tool* layer (plan_tools.py) returns
-      # `plan_already_exists` / `conclusion_already_submitted` to the model so
-      # it can correct course, but until it does we must not let the duplicate
-      # SEMANTIC events reach the UI — otherwise a regressed plan from the
-      # model would overwrite the original plan in the stepper. plan.revised is
-      # the intentional channel for changing the plan.
+      # or submit_conclusion many times; the tool layer redirects duplicate
+      # creates into the first step and returns terminal guidance for duplicate
+      # conclusions. Until it corrects course, we must not let duplicate
+      # semantic events reach the UI — otherwise a regressed plan from the model
+      # would overwrite the original plan in the stepper. plan.revised is the
+      # intentional channel for changing the plan.
       plan_created_emitted = False
       conclusion_emitted = False
+      stop_after_conclusion = False
 
       async for sdk_event in result.stream_events():
         sdk_event_count += 1
@@ -385,11 +386,23 @@ class OpenAIAgentRuntime:
               )
               continue
             conclusion_emitted = True
+            stop_after_conclusion = True
           if event_type in {'text', 'text_delta'}:
             emitted_text = True
           yield _with_run_metadata(event, request, trace_id)
+          if stop_after_conclusion:
+            logger.info(
+              'Terminal synthesis submitted; stopping streamed run for conversation=%s',
+              conversation_id,
+            )
+            cancel = getattr(result, 'cancel', None)
+            if callable(cancel):
+              cancel()
+            break
+        if stop_after_conclusion:
+          break
 
-      if not cancelled:
+      if not cancelled and not conclusion_emitted:
         final_output = getattr(result, 'final_output', None)
         if final_output and not emitted_text:
           yield _with_run_metadata({'type': 'text', 'text': str(final_output)}, request, trace_id)

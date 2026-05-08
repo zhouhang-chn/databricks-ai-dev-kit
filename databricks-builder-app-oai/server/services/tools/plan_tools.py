@@ -11,10 +11,10 @@ state that enforces two invariants the contract requires but the model
 sometimes violates (causing turn-budget runaway):
 
   - `update_plan(op='create')` must be called exactly once per run.
-    Subsequent `op='create'` calls return a redirect telling the model to
-    use `op='start'` (to begin executing) or `op='revise'` (to change the
-    plan). The new call still produces a `plan.created` UI event, but the
-    frontend reducer dedups identical re-emissions within the same story.
+    Subsequent `op='create'` calls are treated as starting the first known
+    step. The duplicate call still produces a `plan.created` UI event, but the
+    runtime dedups identical re-emissions within the same story and emits the
+    auto-start from the tool output.
   - `submit_conclusion` must be called exactly once and is the terminal
     action of the run. Subsequent calls return a redirect that tells the
     model the run is finished.
@@ -27,6 +27,18 @@ from .run_state import AgentToolRunState
 PLAN_TOOL_NAMES = frozenset({'update_plan', 'submit_conclusion'})
 
 
+def _first_step_id(steps: list[dict] | None) -> str:
+  """Return the first plan step id, falling back to the canonical id."""
+  if not steps:
+    return 'step-1'
+  first = steps[0]
+  if isinstance(first, dict):
+    step_id = first.get('id') or first.get('step_id')
+    if step_id:
+      return str(step_id)
+  return 'step-1'
+
+
 def create_plan_tools(run_state: AgentToolRunState | None = None) -> list:
   """Build a fresh `update_plan` + `submit_conclusion` pair for one run.
 
@@ -35,7 +47,11 @@ def create_plan_tools(run_state: AgentToolRunState | None = None) -> list:
   """
   from agents import function_tool
 
-  state = {'plan_created': False, 'conclusion_submitted': False}
+  state = {
+    'plan_created': False,
+    'conclusion_submitted': False,
+    'first_step_id': 'step-1',
+  }
 
   @function_tool(strict_mode=False)
   def update_plan(
@@ -62,18 +78,24 @@ def create_plan_tools(run_state: AgentToolRunState | None = None) -> list:
     """
     if op == 'create':
       if state['plan_created']:
+        step_to_start = str(state.get('first_step_id') or _first_step_id(steps))
+        if run_state:
+          run_state.plan_created = True
+          run_state.active_step_id = step_to_start
         return {
-          'op': 'create',
-          'ack': 'plan_already_exists',
+          'op': 'start',
+          'step_id': step_to_start,
+          'narrative': narrative or 'Continuing with the existing plan.',
+          'ack': 'duplicate_plan_started',
           'guidance': (
-            'A plan was already created for this run. Do not call '
-            'update_plan(op="create") again. To begin executing, call '
-            'update_plan(op="start", step_id="step-1", narrative="..."). '
-            'To change the plan, call update_plan(op="revise", steps=[...], '
-            'reason="...").'
+            'A plan was already created for this run. This duplicate create '
+            f'was treated as update_plan(op="start", step_id="{step_to_start}"). '
+            'Run the step tools now, then call update_plan(op="finish") for '
+            'this same step. To change the plan later, call op="revise".'
           ),
         }
       state['plan_created'] = True
+      state['first_step_id'] = _first_step_id(steps)
       if run_state:
         run_state.plan_created = True
       return {
@@ -83,11 +105,12 @@ def create_plan_tools(run_state: AgentToolRunState | None = None) -> list:
         'ack': 'plan_created',
       }
     if op == 'start':
+      effective_step_id = step_id or str(state.get('first_step_id') or 'step-1')
       if run_state:
-        run_state.active_step_id = step_id or ''
+        run_state.active_step_id = effective_step_id
       return {
         'op': 'start',
-        'step_id': step_id or '',
+        'step_id': effective_step_id,
         'narrative': narrative or '',
         'ack': 'step_started',
       }
@@ -105,6 +128,7 @@ def create_plan_tools(run_state: AgentToolRunState | None = None) -> list:
       # A revise implies a plan exists; mark plan_created so subsequent
       # creates also redirect.
       state['plan_created'] = True
+      state['first_step_id'] = _first_step_id(steps)
       if run_state:
         run_state.plan_created = True
         run_state.active_step_id = None
