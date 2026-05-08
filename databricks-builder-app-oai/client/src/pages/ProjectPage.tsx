@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   Square,
   Trash2,
+  Upload,
   UserRound,
   X,
 } from 'lucide-react';
@@ -45,6 +46,7 @@ import {
   fetchProjectSetting,
   fetchWarehouses,
   invokeAgent,
+  parseProjectSetting,
   reconnectToExecution,
   renameConversation,
   saveProjectSetting,
@@ -398,6 +400,48 @@ function ProjectManagementPanel({
   const [outputSchema, setOutputSchema] = useState('');
   const [outputVolumeFolders, setOutputVolumeFolders] = useState('');
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const applyParsedSetting = (setting: ProjectSetting) => {
+    const resources = setting.databricks_resources;
+    setBusinessBackground(setting.business_background || '');
+    setAnalysisNotes(setting.analysis_notes.length > 0 ? setting.analysis_notes : ['']);
+    setDatabricksHost(resources.databricks_host || '');
+    setSelectedClusterId(resources.cluster_id || undefined);
+    setSelectedWarehouseId(resources.warehouse_id || undefined);
+    setWorkspaceFolders(joinLines(resources.workspace_folders));
+    setWorkspaceFiles(joinLines(resources.workspace_files));
+    setWorkflows(joinLines(resources.workflows));
+    setInputSchemas(joinLines(resources.input_schemas));
+    setInputTables(joinLines(resources.input_tables));
+    setInputMetricViews(joinLines(resources.input_metric_views));
+    setInputVolumePaths(joinLines(resources.input_volume_paths));
+    setOutputSchema(resources.output_schema || '');
+    setOutputVolumeFolders(joinLines(resources.output_volume_folders));
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !project?.id) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const content = ev.target?.result as string;
+      try {
+        const parsed = await parseProjectSetting(project.id, content);
+        applyParsedSetting(parsed);
+        toast.success('Project settings imported from file');
+      } catch (error) {
+        toast.error(`Failed to parse YAML: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      e.target.value = '';
+    };
+    reader.readAsText(file);
+  };
+
   useEffect(() => {
     if (!project || !isOpen) return;
     const setting = projectSetting || projectSettingFromProject(project);
@@ -531,10 +575,23 @@ function ProjectManagementPanel({
               {projectSettingPath || `${project?.name || 'Project'} · ${releaseCount} release${releaseCount === 1 ? '' : 's'}`}
             </p>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-md hover:bg-[var(--color-bg-secondary)]">
-            <X className="h-4 w-4 text-[var(--color-text-muted)]" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={handleImportClick} className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--color-text-muted)] hover:bg-[var(--color-bg-secondary)] hover:text-[var(--color-text-heading)] transition-colors" title="Import project-setting.yaml">
+              <Upload className="h-3.5 w-3.5" />
+              Import
+            </button>
+            <button onClick={onClose} className="p-1.5 rounded-md hover:bg-[var(--color-bg-secondary)]">
+              <X className="h-4 w-4 text-[var(--color-text-muted)]" />
+            </button>
+          </div>
         </div>
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          accept=".yaml,.yml"
+          className="hidden"
+        />
 
         <div className="space-y-6 p-6">
           <section className="space-y-4">

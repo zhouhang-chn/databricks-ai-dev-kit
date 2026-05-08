@@ -112,6 +112,16 @@ export async function saveProjectSetting(
   });
 }
 
+export async function parseProjectSetting(
+  projectId: string,
+  content: string
+): Promise<ProjectSetting> {
+  return request<ProjectSetting>(`/projects/${projectId}/project-setting/parse`, {
+    method: 'POST',
+    body: { content },
+  });
+}
+
 export async function validateProjectSetting(
   projectId: string,
   setting: ProjectSetting

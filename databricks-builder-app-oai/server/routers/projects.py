@@ -15,6 +15,7 @@ from ..services.backup_manager import mark_for_backup
 from ..services.project_settings import (
   ProjectSetting,
   ensure_project_setting_file,
+  parse_project_setting_yaml,
   project_update_from_setting,
   read_project_setting,
   validate_project_setting,
@@ -167,6 +168,20 @@ async def save_project_setting(request: Request, project_id: str, body: ProjectS
     setting=body,
     project=project.to_dict(),
   )
+
+
+@router.post('/projects/{project_id}/project-setting/parse')
+async def parse_project_setting_route(request: Request, project_id: str, body: dict):
+  """Parse project_setting.yaml content."""
+  user_email = await get_current_user(request)
+  storage = ProjectStorage(user_email)
+  await _get_owned_project(storage, project_id, user_email)
+
+  content = body.get('content', '')
+  try:
+    return parse_project_setting_yaml(content)
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post('/projects/{project_id}/project-setting/validate')
