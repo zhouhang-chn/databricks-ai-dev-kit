@@ -1,6 +1,6 @@
 # v0.2 Builder Agent Gap Analysis
 
-Date: 2026-05-08
+Date: 2026-05-09
 
 Scope: local source and docs under `databricks-builder-app-oai/` and
 `docs/builder-app-oai/`. This review does not include live AI Gateway,
@@ -116,6 +116,10 @@ What is strong in the current foundation:
   user-preview role.
 - Phase 1 fixed the persistence gap for project resources and structured
   conclusion fallback text.
+- `project_setting.yaml` now has an OAI app implementation surface: a
+  Pydantic schema, readable YAML renderer/parser, default file creation,
+  get/save/parse/validate API routes, Project Management import/save/validate
+  UI, and save-time sync back into persisted project resource defaults.
 
 What is still missing is the Builder Agent layer that converts project settings
 and metadata into a reviewed scenario bundle.
@@ -148,7 +152,7 @@ and metadata into a reviewed scenario bundle.
 | Priority | Gap | Why it matters |
 |---|---|---|
 | P0 | The Builder Agent bundle generator is documented but not implemented. | This is the gate that turns minimal project settings into the scenario, context, and eval assets needed for reliable business analysis. |
-| P0 | `project_setting.yaml` is not yet backed by a schema validator or update workflow. | The generator cannot safely distinguish required business background, optional notes, selected resource hints, malformed paths, inaccessible resources, and changed paths without a validated input contract. |
+| P0 | The bundle generator is not wired to `project_setting.yaml` validation results, changed-path tracking, or artifact generation. | The app can parse, save, validate, and sync project settings, but the preparation lifecycle still cannot turn those inputs into reviewed bundle artifacts safely. |
 | P0 | The completeness and clarification loop is not implemented. | Missing intervention, baseline, population, time window, metric meaning, or success threshold should produce targeted questions rather than confident-looking generated artifacts. |
 | P0 | Review-state preservation and partial regeneration are not implemented. | Analyst-reviewed sections can drift or be overwritten when the user edits a small project-setting field. |
 | P0 | Source-code and Databricks metadata enrichment are not implemented as bounded read-only Builder Agent steps. | `data_context.yaml` can remain generic or speculative instead of being bound to real candidate assets, owners, fields, freshness, and joins. |
@@ -183,7 +187,7 @@ and metadata into a reviewed scenario bundle.
 
 | Requirement | Current state | Gap |
 |---|---|---|
-| Capture minimal project settings | `project_setting.yaml` exists for the seed scenario as business background, optional notes, and Databricks resource hints. | Needs schema validation, UI-selected resource update path, changed-path tracking, and review policy. |
+| Capture minimal project settings | `project_setting.yaml` exists for the seed scenario and is backed by the OAI app's `ProjectSetting` / `DatabricksResources` schema, API routes, Project Management import/save/validate UI, default-file creation, and save-time sync into project settings. | Needs changed-path tracking, bundle-generator consumption, artifact schema validation, and review policy. |
 | Generate scenario bundle | Draft artifacts exist. | No implemented Builder Agent create/update generator, staged prompts, validation gates, or idempotency checks. |
 | Prepare business context | `business_context.yaml` contains structured scenario and decision context. | Needs generator enforcement, completeness checks, reviewer state, and partial regeneration. |
 | Prepare data/metadata context | `data_context.yaml` contains drafted metric and data context. | Needs bounded source-code and Databricks metadata enrichment, binding confidence, owners, freshness, and runnable validation queries. |
@@ -196,8 +200,9 @@ and metadata into a reviewed scenario bundle.
 
 1. Treat v0.2 as the Builder Agent phase: project setting to reviewed scenario
    bundle.
-2. Implement `project_setting.yaml` schema validation, resource-format
-   validation, changed-path detection, and source-of-truth update workflow.
+2. Extend the existing `project_setting.yaml` schema/API/UI workflow with
+   changed-path detection, artifact schema validation, review metadata, and
+   bundle-generator consumption of validation results.
 3. Implement the Builder Agent bundle generator create/update contract,
    staged prompt strategy, completeness gate, clarification loop, review-state
    preservation, and partial regeneration.
@@ -225,7 +230,8 @@ and metadata into a reviewed scenario bundle.
 
 ## Validation Still Needed
 
-- `project_setting.yaml` schema validation and changed-path detection.
+- Changed-path detection and bundle-generator consumption of
+  `project_setting.yaml` validation results.
 - Builder Agent generator validation for create runs, update runs,
   clarification status, blocked status, partial regeneration, review-state
   invalidation, idempotency, and artifact consistency.

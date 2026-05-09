@@ -241,9 +241,17 @@ The generator should treat each input category differently:
 `project_setting.yaml` should be minimal and user-friendly. It should not mirror
 the generated context artifacts or ask users to structure metrics, periods,
 analysis units, answer rules, generated artifacts, or agent policy. The user
-should provide two natural-language fields and select Databricks resources
-where available. Builder Agent extraction turns this into structured business,
-data, and analysis context.
+should provide a natural-language business background, optional free-form notes,
+and selected Databricks resources where available. Builder Agent extraction
+turns this into structured business, data, and analysis context.
+
+Current OAI app baseline: `server/services/project_settings.py` implements the
+minimal `ProjectSetting` and `DatabricksResources` models, YAML rendering and
+parsing, default file creation, save-time conversion into persisted project
+settings, and Databricks resource validation. `server/routers/projects.py`
+exposes get/save/parse/validate routes, and the Project Management panel can
+import, save, and validate the YAML. This baseline does not yet generate the
+scenario bundle or track changed project-setting paths.
 
 ```yaml
 business_background: >-
@@ -506,8 +514,12 @@ Regeneration scope should follow dependency rules:
 Generation is not complete until these gates pass or are explicitly marked as
 blocked:
 
-- `project_setting.yaml` parses and has the minimum project, settings, and
-  business context fields needed for generation.
+- `project_setting.yaml` parses against the minimal schema and has enough
+  business background, analysis notes, and resource hints to drive generation
+  or targeted clarification.
+- Project-setting Databricks validation results are available to the generator
+  for auth, compute, workspace paths, workflows, schemas, tables, metric views,
+  volume paths, and output schema.
 - `business_context.yaml`, `data_context.yaml`, and `analysis_context.yaml`
   parse and conform to their expected top-level schemas.
 - `analysis_context.yaml` has canonical golden cases with anchored scoring

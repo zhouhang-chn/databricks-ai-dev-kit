@@ -38,13 +38,13 @@ build target for this phase.
 
 ## Progress Snapshot
 
-Last updated: 2026-05-08.
+Last updated: 2026-05-09.
 
 | Phase | Status | Notes |
 |---|---|---|
 | Phase 0: Docs and Baseline Alignment | Complete | OAI docs root, v0.1 migration track, and v0.2 gap/design/action-plan are aligned. |
 | Phase 1: Critical Persistence Fixes | Complete | Project Management resources and structured conclusion fallback persistence are implemented with focused regression tests. |
-| Phase 2: Project Setting and Bundle Contract | In progress | `project_setting.yaml` is now a low-burden user input with free-form business background, optional notes, and Databricks resource hints; schema validation and review metadata still need implementation validation. |
+| Phase 2: Project Setting and Bundle Contract | In progress | `project_setting.yaml` is now a low-burden user input with free-form business background, optional notes, and Databricks resource hints. The OAI app implements schema parsing/rendering, default file creation, get/save/parse/validate API routes, Project Management import/save/validate UI, and save-time sync into project settings. Remaining work is artifact schema validation, review metadata, changed-path detection, and bundle-generator enforcement. |
 | Phase 3: Builder Agent Bundle Generator | Pending | Implement create/update generation, staged prompt strategy, completeness gate, clarification loop, idempotency, and partial regeneration. |
 | Phase 4: Business, Data, and Analysis Context Enrichment | In progress | `business_context.yaml`, `data_context.yaml`, and `analysis_context.yaml` are drafted; source-code and Databricks metadata enrichment remain implementation work. |
 | Phase 5: Manual Analyst Review and Execution | Pending | Human analyst execution must validate the BDR pilot bundle and feed discovered gaps back into the generated artifacts. |
@@ -61,7 +61,8 @@ Build the preparation operating system before optimizing end-user analysis:
    `project_setting.yaml`, `README.md`, `business_context.yaml`,
    `data_context.yaml`, `analysis_context.yaml`, and `evals.yaml`.
 3. Implement a file-only Builder Agent generator for create/update runs.
-4. Add project-setting schema validation and artifact schema validation.
+4. Extend project-setting validation into artifact schema validation and
+   bundle-generator validation gates.
 5. Add a completeness gate and targeted clarification loop.
 6. Add partial-regeneration rules and review-state preservation.
 7. Enrich business and data context from bounded source-code and Databricks
@@ -163,6 +164,10 @@ shape.
 Tasks:
 
 - Treat `project_setting.yaml` as the only user-authored payload source of truth.
+- Treat the current OAI implementation as the baseline for this file: the app
+  has `ProjectSetting` / `DatabricksResources` models, YAML render/parse
+  helpers, default-file creation, get/save/parse/validate routes, and a Project
+  Management UI that can import, save, and validate the YAML.
 - Keep user input minimal: `business_background`, optional `analysis_notes`,
   and UI-selected `databricks_resources`.
 - Treat `AGENTS.md` as a project-local operating guide only. It may persist
@@ -201,6 +206,11 @@ Acceptance gates:
 - `project_setting.yaml` parses and contains `business_background`; optional
   notes and resource hints may be incomplete but must be explicit enough to
   drive Builder Agent clarification or enrichment.
+- Saving `project_setting.yaml` syncs resource hints into the persisted project
+  settings used by later runs.
+- The validation route returns structured Databricks checks for auth, compute,
+  workspace paths, workflows, schemas, tables, metric views, volumes, and
+  output schema.
 - Each generated artifact has a clear role and can be understood without
   another document being loaded first.
 - Scenario-specific business facts live in `business_context.yaml`.
@@ -210,6 +220,16 @@ Acceptance gates:
 - `AGENTS.md`, when present, is loaded as a start-of-chat mechanism snapshot
   and is not a hard Databricks-tool gate or payload source.
 - Generated YAML files pass top-level schema checks.
+
+Suggested validation:
+
+```bash
+cd databricks-builder-app-oai
+UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run pytest tests/test_project_settings_yaml.py tests/test_project_management_frontend_contract.py tests/test_project_config.py -q
+cd client
+pnpm lint
+pnpm build:typecheck
+```
 
 ## Phase 3: Builder Agent Bundle Generator
 
@@ -388,8 +408,8 @@ Acceptance gates:
 1. Keep Phase 1 persistence fixes complete.
 2. Finalize `project_setting.yaml` and bundle artifact contracts.
 3. Implement the file-only Builder Agent generator.
-4. Add schema validation, completeness checks, clarification, and partial
-   regeneration.
+4. Add artifact schema validation, completeness checks, clarification,
+   changed-path detection, and partial regeneration.
 5. Add bounded source-code and Databricks metadata enrichment.
 6. Review and manually execute the BDR routing pilot case.
 7. Calibrate golden evals from generation behavior and manual execution.

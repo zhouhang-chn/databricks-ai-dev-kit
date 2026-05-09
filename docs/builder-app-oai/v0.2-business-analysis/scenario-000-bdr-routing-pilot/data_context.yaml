@@ -112,12 +112,14 @@ data_context:
     runtime_binding:
       source_of_truth: "project_setting.yaml"
       target_environment: "databricks_workspace"
-      databricks_host: "https://dbc-68f93c80-55e9.cloud.databricks.com/"
-      cluster_id: "c-7d68e944-b17c"
-      catalog: null
-      schema: "POC_BDR_Pilot_Plan_and_Visit_Data"
-      warehouse_id: null
-      workspace_folder: "build-your-own-agent/llm_rag_agents/sql"
+      databricks_host: "https://adb-960767945362324.0.databricks.azure.cn/"
+      cluster_id: "1021-020841-thvbkra7"
+      catalog: "ds_uc_china_dev"
+      schema: "bdr_routing_workdb"
+      warehouse_id: "1af3859d87e5fce6"
+      workspace_folder: "/Workspace/Users/hang.zhou1@budweiserapac.com/bees_bdr_territory"
+      preferred_input_tables:
+        - "ds_uc_china_dev.bdr_routing_workdb.pilot_bdr_visit_record_seg"
       data_profile_status: "source_hints_provided_not_profiled"
       synthetic_dataset_status: "not_created"
     glossary:
@@ -140,7 +142,12 @@ data_context:
           - { name: "pilot_month", type: "date_or_month", nullable: false, pii: false }
           - { name: "previous_month", type: "date_or_month", nullable: false, pii: false }
       - asset_id: "bdr_visit_base_monthly"
-        physical_name: "POC_BDR_Pilot_Plan_and_Visit_Data.bdr_visit_base"
+        physical_name: null
+        source_hint: >-
+          current project_setting.yaml names
+          ds_uc_china_dev.bdr_routing_workdb.pilot_bdr_visit_record_seg as the
+          preferred source; exact monthly visit-base asset still requires
+          confirmation
         asset_type: "monthly_bridge"
         grain: "one row per BDR-POC-month"
         refresh_cadence: "monthly_with_possible_in_month_updates"
