@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -16,12 +16,23 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type {
   AnalysisStory,
+  EvidenceBlock,
   NextMove,
   PlanRevision,
   PlanStep,
   ToolCallSummary,
 } from '@/features/analysis/types';
 import { cn } from '@/lib/utils';
+import { EvidenceContent } from './EvidenceContent';
+
+const INLINE_EVIDENCE_LIMIT = 3;
+const NON_NARRATIVE_TOOLS = new Set([
+  'get_table_stats_and_schema',
+  'get_volume_folder_details',
+  'list_compute',
+  'list_sql_warehouses',
+  'get_best_sql_warehouse',
+]);
 
 function StatusBadge({ status }: { status: AnalysisStory['status'] }) {
   const inFlight = status === 'discovery' || status === 'planning' || status === 'running';
@@ -76,6 +87,55 @@ function StepIcon({ status }: { status: PlanStep['status'] }) {
 
 function friendlyToolName(name: string): string {
   return name.replace(/^mcp__databricks__/, '').replace(/_/g, ' ');
+}
+
+function normalizeToolName(name?: string): string {
+  return (name || '').replace(/^mcp__databricks__/, '');
+}
+
+function tryParseJson(text: string): unknown | null {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function isEmptyEvidenceBlock(block: EvidenceBlock): boolean {
+  const raw = block.rawContent ?? block.content ?? '';
+  const parsed = tryParseJson(raw);
+  if (Array.isArray(parsed)) return parsed.length === 0;
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    const rowsField = obj.rows ?? obj.data ?? obj.results ?? obj.records;
+    if (Array.isArray(rowsField)) return rowsField.length === 0;
+  }
+  return false;
+}
+
+function selectInlineEvidence(story: AnalysisStory): { blocks: EvidenceBlock[]; hiddenCount: number } {
+  const successful = story.evidence.filter((block) => !block.isError);
+  if (successful.length === 0) return { blocks: [], hiddenCount: 0 };
+
+  const narrativeFirst = successful.filter((block) => !NON_NARRATIVE_TOOLS.has(normalizeToolName(block.toolName)));
+  const source = narrativeFirst.length > 0 ? narrativeFirst : successful;
+  const nonEmpty = source.filter((block) => !isEmptyEvidenceBlock(block));
+  const candidates = nonEmpty.length > 0 ? nonEmpty : source;
+
+  const ranked = candidates
+    .map((block, idx) => {
+      const toolName = normalizeToolName(block.toolName);
+      let score = idx;
+      if (block.type === 'chart') score += 60;
+      if (toolName === 'execute_sql' || toolName === 'execute_sql_multi') score += 40;
+      if (block.rawContent?.startsWith('{') || block.rawContent?.startsWith('[')) score += 10;
+      return { block, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const blocks = ranked.slice(0, INLINE_EVIDENCE_LIMIT).map((entry) => entry.block);
+  return { blocks, hiddenCount: Math.max(0, source.length - blocks.length) };
 }
 
 function ToolCallRow({ call }: { call: ToolCallSummary }) {
@@ -257,6 +317,7 @@ function ConclusionCard({
   story: AnalysisStory;
 }) {
   const conclusion = story.conclusion;
+  const narrative = story.narrative;
   if (!conclusion) {
     const text = story.conclusionText?.trim();
     if (!text) return null;
@@ -275,6 +336,30 @@ function ConclusionCard({
       <div className="prose prose-xs max-w-none text-[14px] leading-7 text-[var(--color-text-primary)]">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{conclusion.summary}</ReactMarkdown>
       </div>
+      {(narrative?.confidence || narrative?.caveat || narrative?.recommendedNextStep || narrative?.hasContradiction) && (
+        <div className="space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/40 p-3">
+          {narrative?.confidence && (
+            <div className="text-[11px] text-[var(--color-text-muted)]">
+              Confidence: <span className="font-semibold text-[var(--color-text-primary)] capitalize">{narrative.confidence}</span>
+            </div>
+          )}
+          {narrative?.caveat && (
+            <div className="text-[12px] text-[var(--color-text-primary)]">
+              Caveat: {narrative.caveat}
+            </div>
+          )}
+          {narrative?.hasContradiction && (
+            <div className="text-[12px] text-[var(--color-error)]">
+              Evidence and conclusion signals conflict. Validate before acting.
+            </div>
+          )}
+          {narrative?.recommendedNextStep && (
+            <div className="text-[12px] text-[var(--color-text-primary)]">
+              Recommended next step: {narrative.recommendedNextStep}
+            </div>
+          )}
+        </div>
+      )}
       {conclusion.highlights.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {conclusion.highlights.map((h, i) => (
@@ -320,6 +405,7 @@ export function StoryCard({
   const doneSteps = plan?.steps.filter((s) => s.status === 'done' || s.status === 'failed').length ?? 0;
   const showStepper = !!plan;
   const showScoping = !plan && isStreaming;
+  const inlineEvidence = useMemo(() => selectInlineEvidence(story), [story]);
 
   return (
     <article
@@ -386,6 +472,33 @@ export function StoryCard({
               </ol>
               <ContextLoadsFooter loads={story.contextLoads} />
             </>
+          )}
+        </section>
+      )}
+
+      {inlineEvidence.blocks.length > 0 && (
+        <section
+          className="mt-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/20 p-3"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+            <FileText className="h-3.5 w-3.5" />
+            Evidence
+          </div>
+          <div className="space-y-2">
+            {inlineEvidence.blocks.map((block) => (
+              <div key={block.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3">
+                <div className="text-[11px] font-medium text-[var(--color-text-heading)]">
+                  {block.title}
+                </div>
+                <EvidenceContent block={block} />
+              </div>
+            ))}
+          </div>
+          {inlineEvidence.hiddenCount > 0 && (
+            <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+              {inlineEvidence.hiddenCount} more evidence block{inlineEvidence.hiddenCount === 1 ? '' : 's'} in Inspect.
+            </div>
           )}
         </section>
       )}

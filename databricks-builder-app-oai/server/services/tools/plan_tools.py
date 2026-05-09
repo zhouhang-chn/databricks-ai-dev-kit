@@ -145,6 +145,13 @@ def create_plan_tools(run_state: AgentToolRunState | None = None) -> list:
     summary: str,
     highlights: list[dict] | None = None,
     next_steps: list[str] | None = None,
+    claim: str | None = None,
+    primary_evidence_id: str | None = None,
+    insight: str | None = None,
+    caveat: str | None = None,
+    confidence: Literal['high', 'medium', 'low'] | None = None,
+    recommended_next_step: str | None = None,
+    has_contradiction: bool | None = None,
   ) -> dict:
     """Submit the final synthesis instead of a regular markdown response.
 
@@ -163,11 +170,26 @@ def create_plan_tools(run_state: AgentToolRunState | None = None) -> list:
         ),
       }
     state['conclusion_submitted'] = True
-    return {
+    payload = {
       'summary': summary,
       'highlights': highlights or [],
       'next_steps': next_steps or [],
       'ack': 'conclusion_submitted',
     }
+    if claim:
+      payload['claim'] = claim
+    if primary_evidence_id:
+      payload['primary_evidence_id'] = primary_evidence_id
+    if insight:
+      payload['insight'] = insight
+    if caveat:
+      payload['caveat'] = caveat
+    if confidence:
+      payload['confidence'] = confidence
+    if recommended_next_step:
+      payload['recommended_next_step'] = recommended_next_step
+    if has_contradiction is not None:
+      payload['has_contradiction'] = bool(has_contradiction)
+    return payload
 
   return [update_plan, submit_conclusion]

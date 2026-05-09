@@ -66,13 +66,25 @@ def _plan_events_from_call(call_id: str, tool_name: str, tool_input: Any) -> lis
   """Translate an update_plan / submit_conclusion call into UI events."""
   args = tool_input if isinstance(tool_input, dict) else {}
   if tool_name == 'submit_conclusion':
-    return [{
+    synthesis_event = {
       'type': 'synthesis.appended',
       'call_id': call_id,
       'summary': str(args.get('summary') or ''),
       'highlights': args.get('highlights') or [],
       'next_steps': args.get('next_steps') or [],
-    }]
+    }
+    for key in (
+      'claim',
+      'primary_evidence_id',
+      'insight',
+      'caveat',
+      'confidence',
+      'recommended_next_step',
+      'has_contradiction',
+    ):
+      if key in args and args.get(key) is not None:
+        synthesis_event[key] = args.get(key)
+    return [synthesis_event]
   if tool_name == 'update_plan':
     op = str(args.get('op') or '')
     if op == 'create':

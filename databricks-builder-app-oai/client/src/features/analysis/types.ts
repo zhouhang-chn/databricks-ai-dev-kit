@@ -5,6 +5,7 @@ export type EvidenceType = 'text' | 'table' | 'chart' | 'tool_result' | 'error';
 export type AnalysisStepStatus = 'running' | 'done' | 'error';
 export type NextMoveType = 'drill' | 'compare' | 'validate' | 'explain' | 'pivot';
 export type PlanStepStatus = 'pending' | 'running' | 'done' | 'failed';
+export type NarrativeConfidence = 'high' | 'medium' | 'low';
 
 export interface ToolCallSummary {
   toolName: string;
@@ -48,6 +49,16 @@ export interface Conclusion {
   summary: string;
   highlights: ConclusionHighlight[];
   nextSteps: string[];
+}
+
+export interface StoryNarrative {
+  claim?: string;
+  primaryEvidenceId?: string;
+  insight?: string;
+  caveat?: string;
+  confidence?: NarrativeConfidence;
+  recommendedNextStep?: string;
+  hasContradiction?: boolean;
 }
 
 export interface AnalysisContext {
@@ -103,6 +114,7 @@ export interface AnalysisStory {
   evidence: EvidenceBlock[];
   trace: AnalysisStep[];
   nextMoves: NextMove[];
+  narrative?: StoryNarrative;
   context: AnalysisContext;
   createdAt: string;
   updatedAt: string;
@@ -117,7 +129,20 @@ export type AnalysisEvent =
   | { type: 'plan.revised'; storyId: string; steps: Array<{ id: string; title: string }>; reason: string }
   | { type: 'plan.tool_call'; storyId: string; toolName: string; toolInput?: string; toolCallId?: string }
   | { type: 'plan.tool_result'; storyId: string; toolCallId?: string; resultSummary: string; evidenceId?: string; isError: boolean }
-  | { type: 'synthesis.appended'; storyId: string; summary: string; highlights: ConclusionHighlight[]; nextSteps: string[] }
+  | {
+    type: 'synthesis.appended';
+    storyId: string;
+    summary: string;
+    highlights: ConclusionHighlight[];
+    nextSteps: string[];
+    claim?: string;
+    primaryEvidenceId?: string;
+    insight?: string;
+    caveat?: string;
+    confidence?: NarrativeConfidence;
+    recommendedNextStep?: string;
+    hasContradiction?: boolean;
+  }
   | { type: 'conclusion.appended'; storyId: string; text: string }
   | { type: 'thinking.appended'; storyId: string; text: string }
   | { type: 'trace.appended'; storyId: string; step: AnalysisStep }
@@ -158,4 +183,14 @@ export interface StreamStoryEvent {
   summary?: unknown;
   highlights?: unknown;
   next_steps?: unknown;
+  claim?: unknown;
+  primary_evidence_id?: unknown;
+  primaryEvidenceId?: unknown;
+  insight?: unknown;
+  caveat?: unknown;
+  confidence?: unknown;
+  recommended_next_step?: unknown;
+  recommendedNextStep?: unknown;
+  has_contradiction?: unknown;
+  hasContradiction?: unknown;
 }

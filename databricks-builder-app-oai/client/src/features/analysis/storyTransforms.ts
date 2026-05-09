@@ -3,6 +3,7 @@ import type {
   AnalysisStep,
   AnalysisStory,
   EvidenceBlock,
+  NarrativeConfidence,
   NextMove,
   PlanStep,
   StoryFromMessagesOptions,
@@ -112,6 +113,18 @@ function summarizeToolResult(content: unknown, isError: boolean): string {
   return text.length > 80 ? `${text.slice(0, 77)}...` : text;
 }
 
+function isEmptyStructuredResult(content: unknown): boolean {
+  const parsed = typeof content === 'string' ? tryParseJson(content) : content;
+  if (Array.isArray(parsed)) return parsed.length === 0;
+
+  const record = objectRecord(parsed);
+  if (!record) return false;
+  for (const key of ['items', 'rows', 'data', 'results', 'records']) {
+    if (Array.isArray(record[key])) return record[key].length === 0;
+  }
+  return false;
+}
+
 function summarizeToolInput(toolName: string, raw: string): string | undefined {
   if (!raw) return undefined;
   if (toolName === 'execute_sql' || toolName === 'execute_sql_multi') {
@@ -201,6 +214,12 @@ function nextMoveSource(value: unknown): NextMove['source'] {
 function nextMoveConfidence(value: unknown): number | undefined {
   if (typeof value !== 'number' || Number.isNaN(value)) return undefined;
   return Math.max(0, Math.min(value, 1));
+}
+
+function narrativeConfidence(value: unknown): NarrativeConfidence | undefined {
+  return value === 'high' || value === 'medium' || value === 'low'
+    ? value
+    : undefined;
 }
 
 export function createAnalysisStory(args: {
@@ -521,7 +540,21 @@ export function reduceAnalysisEvent(
       return updateStory(stories, event.storyId, (story) => {
         const incomingHighlights = Array.isArray(event.highlights) ? event.highlights : [];
         const incomingNextSteps = Array.isArray(event.nextSteps) ? event.nextSteps : [];
-        
+        const narrative = {
+          ...story.narrative,
+          claim: event.claim || story.narrative?.claim,
+          primaryEvidenceId: event.primaryEvidenceId || story.narrative?.primaryEvidenceId,
+          insight: event.insight || story.narrative?.insight,
+          caveat: event.caveat || story.narrative?.caveat,
+          confidence: event.confidence || story.narrative?.confidence,
+          recommendedNextStep: event.recommendedNextStep
+            || incomingNextSteps[0]
+            || story.narrative?.recommendedNextStep,
+          hasContradiction: typeof event.hasContradiction === 'boolean'
+            ? event.hasContradiction
+            : story.narrative?.hasContradiction,
+        };
+
         return {
           ...story,
           status: story.status === 'error' ? 'error' : 'done',
@@ -536,6 +569,7 @@ export function reduceAnalysisEvent(
               ? incomingNextSteps
               : (story.conclusion?.nextSteps || []),
           },
+          narrative,
           nextMoves: story.nextMoves.length > 0 ? story.nextMoves : defaultNextMoves(story.question),
           updatedAt: nowIso(),
         };
@@ -679,12 +713,23 @@ export function storyEventsFromStreamEvent(
       ? (parsedNextSteps as unknown[]).map((s) => String(s)).filter(Boolean)
       : [];
 
+    const recommendedRaw = event.recommendedNextStep ?? event.recommended_next_step;
+    const primaryEvidenceRaw = event.primaryEvidenceId ?? event.primary_evidence_id;
+    const contradictionRaw = event.hasContradiction ?? event.has_contradiction;
+
     return [{
       type: 'synthesis.appended',
       storyId,
       summary: String(event.summary || ''),
       highlights,
       nextSteps,
+      claim: typeof event.claim === 'string' ? event.claim : undefined,
+      primaryEvidenceId: typeof primaryEvidenceRaw === 'string' ? primaryEvidenceRaw : undefined,
+      insight: typeof event.insight === 'string' ? event.insight : undefined,
+      caveat: typeof event.caveat === 'string' ? event.caveat : undefined,
+      confidence: narrativeConfidence(event.confidence),
+      recommendedNextStep: typeof recommendedRaw === 'string' ? recommendedRaw : undefined,
+      hasContradiction: typeof contradictionRaw === 'boolean' ? contradictionRaw : undefined,
     }];
   }
 
@@ -743,6 +788,7 @@ export function storyEventsFromStreamEvent(
   if (type === 'tool_result') {
     const isError = Boolean(event.is_error);
     const summary = summarizeToolResult(event.content, isError);
+    const isEmptyResult = !isError && isEmptyStructuredResult(event.content);
     const rawContent = asText(event.content);
     const toolName = typeof event.tool_name === 'string' ? event.tool_name : undefined;
     const toolInput = event.tool_input != null ? asText(event.tool_input) : undefined;
@@ -765,33 +811,33 @@ export function storyEventsFromStreamEvent(
       }
     }
 
-    return [
-      {
-        type: 'evidence.appended',
-        storyId,
-        block: {
-          id: evidenceId,
-          type: isError ? 'error' : 'tool_result',
-          title: purpose || (isError
-            ? `${friendlyName || 'Tool'} (error)`
-            : friendlyName || 'Tool result'),
-          content: summary,
-          rawContent,
-          isError,
-          createdAt: nowIso(),
-          toolName,
-          toolInput,
-        },
-      },
-      {
-        type: 'plan.tool_result',
-        storyId,
-        toolCallId: typeof event.tool_use_id === 'string' ? event.tool_use_id : undefined,
-        resultSummary: summary,
-        evidenceId,
+    const resultEvent: AnalysisEvent = {
+      type: 'plan.tool_result',
+      storyId,
+      toolCallId: typeof event.tool_use_id === 'string' ? event.tool_use_id : undefined,
+      resultSummary: summary,
+      evidenceId: isEmptyResult ? undefined : evidenceId,
+      isError,
+    };
+    if (isEmptyResult) return [resultEvent];
+
+    return [{
+      type: 'evidence.appended',
+      storyId,
+      block: {
+        id: evidenceId,
+        type: isError ? 'error' : 'tool_result',
+        title: purpose || (isError
+          ? `${friendlyName || 'Tool'} (error)`
+          : friendlyName || 'Tool result'),
+        content: summary,
+        rawContent,
         isError,
+        createdAt: nowIso(),
+        toolName,
+        toolInput,
       },
-    ];
+    }, resultEvent];
   }
   if (type === 'todos' && Array.isArray(event.todos)) return [];
   if (type === 'next_moves.updated' && Array.isArray(event.moves)) {

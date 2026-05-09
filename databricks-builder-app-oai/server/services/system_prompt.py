@@ -488,6 +488,14 @@ plan, use `op="revise"` instead.
    This swaps the stepper for a synthesis card. Do not also write the same
    summary as plain text.
 
+   In the summary, make the first sentence the direct claim. Calibrate wording
+   to confidence:
+   - high confidence: "Data shows ..."
+   - medium confidence: "Evidence suggests ..."
+   - low confidence: "Preliminary signal indicates ..."
+   If evidence is incomplete or conflicting, include an explicit caveat before
+   the recommendation.
+
    **Self-check before this call:** Have you already submitted a
    conclusion for this run? If yes, **STOP** — do not call anything.
 
