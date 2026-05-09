@@ -1,141 +1,183 @@
 # v0.3 Visual Storytelling Action Plan
 
-## Purpose
+## Objective And Release Gates
 
-This plan turns the roadmap and visualization design into an implementation
-sequence for `databricks-builder-app-oai`.
+Objective:
 
-The build order is intentionally frontend-first. The app already persists SQL
-tool results and renders tables in the inspect panel. v0.3 should first bring
-that evidence into the story, then make chartable evidence visual, then add
-model and tool support.
+- Deliver decision-ready analysis stories where claim, evidence, caveat, and
+  action are visible in the main story card.
 
-## Execution Principles
+Release gates:
 
-- Use `pnpm` for all frontend package commands.
-- Do not introduce npm lockfiles.
-- Keep existing SSE and persisted execution events backward compatible.
-- Reuse the current evidence pipeline before adding new backend tools.
-- Add chart behavior as optional metadata on evidence blocks.
-- Keep table fallback available for every chart.
-- Prefer focused tests around parsing, detection, and event transforms.
+1. Story-first gate: stakeholder can decide from story card in under 60s.
+2. Evidence gate: chart/table evidence is inline with reliable fallback.
+3. Trust gate: confidence and caveat policy is enforced.
+4. Replay gate: persisted executions reproduce narrative visuals consistently.
 
-## Progress Snapshot
+## Workstreams
 
-Last updated: 2026-05-09.
+Workstream A: Narrative UX
 
-| Phase | Status | Notes |
-|---|---|---|
-| Phase 0: Fact Check And Design Docs | Complete | Current docs identify the evidence/table foundation and the missing chart/story gaps. |
-| Phase 1: In-Story Evidence Foundation | Not started | Required before charting satisfies the roadmap. |
-| Phase 2: Client-Side Chart Detection | Not started | Frontend-only Phase 1 from `data-visualization.md`. |
-| Phase 3: Model-Guided Visualization | Not started | Needs adjustment to the current `submit_conclusion` contract. |
-| Phase 4: Visualization Tool And Interactions | Not started | Backend tool and chart-click continuation. |
-| Phase 5: Export And Polish | Not started | Clipboard/PNG story sharing and visual QA. |
+- Narrative contract and reading order
+- Claim/evidence/caveat/action presentation
+- Confidence language policy
+- Contradiction handling
 
-## v0.3 Build Order
+Workstream B: Visualization Pipeline
 
-1. Extract shared evidence parsing and table rendering.
-2. Render evidence inside the main story card.
-3. Add `ChartSpec` and Recharts chart rendering.
-4. Add client-side chart detection for SQL results.
-5. Add model-guided specs in a way that fits `submit_conclusion`.
-6. Add `visualize_data` and chart-click next moves.
-7. Add export and responsive visual QA.
+- Shared evidence parsing
+- Chart spec contract
+- Heuristic chart detection
+- Chart rendering + table fallback
 
-## Phase 0: Fact Check And Design Docs
+Workstream C: Agent And Tooling
 
-Goal: align v0.3 docs with the actual OAI app.
+- Model-guided visualization specs
+- `submit_conclusion` structured visualization path
+- `visualize_data` tool and read-only gating
+- Chart-driven continuation prompts
 
-Tasks:
+## Milestone 1: Storytelling Alpha
 
-- Compare `data-visualization.md` and `roadmap.md` against the current app.
-- Document implemented foundations and missing pieces.
-- Reconcile `__chart_spec__` planning with the current `submit_conclusion`
-  runtime contract.
-- Create v0.3 `gap-analysis.md`, `design.md`, and `action-plan.md`.
+Goal:
 
-Acceptance gates:
+- Establish narrative quality baseline before adding charts.
 
-- Docs identify that evidence currently renders only in the right inspect
-  panel.
-- Docs identify that `EvidenceType` includes `'chart'` but no code produces or
-  renders chart evidence.
-- Docs recommend a frontend-first Phase 1.
+Scope:
 
-## Phase 1: In-Story Evidence Foundation
+1. Add inline evidence section in `StoryCard`.
+2. Limit default story evidence to top 1-3 blocks.
+3. Introduce narrative contract fields as optional metadata.
+4. Add confidence wording policy in design and prompt guidance.
+5. Define contradiction rule behavior.
 
-Goal: make evidence part of the main story narrative before adding charts.
+Acceptance:
 
-Tasks:
+- Story card displays claim + evidence + recommended next step in a single flow.
+- At least 5 golden runs score >= 6/12 on storytelling rubric.
 
-- Extract evidence parsing helpers from `EvidenceContent.tsx` into
-  `client/src/features/analysis/evidenceData.ts`.
-- Extract tabular rendering into `TableEvidence.tsx`.
-- Keep JSON, markdown, error, and schema-stat rendering behavior compatible.
-- Add an inline evidence section to `StoryCard.tsx`.
-- Show the most relevant 1-3 evidence blocks in the story card.
-- Keep the full evidence list in `RightInspectPanel.tsx`.
-- Ensure evidence blocks can be selected/opened through the existing active
-  story behavior.
+## Milestone 2: Visual Evidence Beta
 
-Acceptance gates:
+Goal:
 
-- A story with SQL evidence shows a compact table in the main story card.
-- The right inspect panel still shows all evidence and tool inputs.
-- CSV download still works for tabular evidence.
-- Old persisted executions replay into the same visible evidence.
+- Deliver frontend-only chart evidence from existing SQL results.
 
-Suggested validation:
+Scope:
 
-```bash
-cd databricks-builder-app-oai/client
-pnpm lint
-pnpm build:typecheck
-```
+1. Extract shared parser utilities from `EvidenceContent.tsx`.
+2. Add `ChartSpec` and `chartSpec?` in analysis types.
+3. Add chart detection heuristics and chart rendering components.
+4. Keep table/CSV fallback for all chart evidence.
+5. Ensure inspect panel and story card stay consistent.
 
-## Phase 2: Client-Side Chart Detection
+Acceptance:
 
-Goal: deliver Phase 1 from `data-visualization.md`: existing SQL evidence can
-become chart evidence without backend changes.
+- Bar, line, pie, and scatter render for valid shapes.
+- Metadata/schema/single-value outputs remain non-chart.
+- Replayed executions render same chart decisions deterministically.
 
-Tasks:
+## Milestone 3: Model-Guided Narrative
 
-- Add Recharts with `pnpm`.
-- Add `ChartSpec` to `client/src/features/analysis/types.ts`.
-- Add optional `chartSpec?: ChartSpec` to `EvidenceBlock`.
-- Create `client/src/features/analysis/chartDetection.ts`.
-- Create `client/src/features/analysis/components/ChartEvidence.tsx`.
-- Create `client/src/features/analysis/components/chartTheme.ts`.
-- Update `EvidenceContent.tsx` to render chart evidence before table fallback.
-- Update `storyTransforms.ts` to detect chart specs for successful SQL tool
-  results.
-- Normalize tool names before detection so both `execute_sql` and
-  `mcp__databricks__execute_sql` are handled.
-- Treat invalid chart specs as table evidence.
+Goal:
 
-Detection acceptance gates:
+- Improve chart intent and insight quality with model context.
 
-- Date/time plus numeric data renders as a line chart.
-- Category plus numeric data renders as a bar chart when row count is
-  reasonable.
-- One category plus one numeric value with no more than 8 rows can render as a
-  pie chart.
-- Two numeric fields with no category can render as a scatter chart.
-- Metadata and schema inspection results do not chart.
-- Single-row results do not chart.
-- Very wide or high-cardinality results stay as tables.
+Scope:
 
-UI acceptance gates:
+1. Add structured visualization argument path for `submit_conclusion`.
+2. Emit/consume visualization spec events in stream transforms.
+3. Support `__chart_spec__` parsing only as compatibility fallback.
+4. Add spec validation and safe fallback behavior.
+5. Add contradiction detection between insight and evidence values.
 
-- Chart evidence includes a table toggle.
-- Table fallback is always available.
-- Chart tooltips show exact values.
-- CSV download still exports all rows, not only visible rows.
-- Dark mode colors are readable.
-- Mobile/narrow layouts do not overlap labels or controls.
+Acceptance:
 
-Suggested validation:
+- Model can provide title + insight on primary chart evidence.
+- Invalid model spec never breaks story rendering.
+- Confidence downgrades when contradiction is detected.
+
+## Milestone 4: Interactive Continuation
+
+Goal:
+
+- Turn evidence interactions into controlled next steps.
+
+Scope:
+
+1. Add `visualize_data` typed tool with read-only SQL safety parity.
+2. Add prompt policy for `visualize_data` vs `execute_sql`.
+3. Convert visualization tool payloads into chart evidence directly.
+4. Add chart-click generated drill prompts (user-confirmed send).
+5. Add optional hover-link between chart mark and table row.
+
+Acceptance:
+
+- Trace shows explicit visualization intent.
+- Chart click proposes follow-up prompt without auto-send.
+- Read-only mode blocks non-read SQL through visualization path.
+
+## Milestone 5: Shareability And Hardening
+
+Goal:
+
+- Ship shareable, reliable narrative output.
+
+Scope:
+
+1. Copy story as Markdown with narrative fields.
+2. Export primary chart as PNG.
+3. Add large-result guards and rendering caps.
+4. Validate mobile and narrow desktop readability.
+5. Validate light/dark theme readability.
+
+Acceptance:
+
+- Story markdown export includes claim/evidence/caveat/action.
+- Chart PNG export works for primary chart types.
+- Large evidence payloads do not freeze story panel.
+
+## Acceptance Criteria: Story-First + Technical
+
+Story-first criteria:
+
+1. Clear decision claim exists in every completed story.
+2. Primary evidence is visible inline in story card.
+3. Caveat and confidence are explicit when uncertainty exists.
+4. Recommended next step is concrete, not generic.
+5. Story quality rubric score >= 8/12 with no zero in core dimensions.
+
+Technical criteria:
+
+1. Chart rendering is backward compatible with old execution events.
+2. Invalid chart specs fallback to table.
+3. Parser behavior is shared between chart and table paths.
+4. `pnpm lint` and `pnpm build:typecheck` pass for client.
+5. Python test suite additions pass for runtime/tooling changes.
+
+## Golden Conversation Review Loop
+
+Use 10 representative conversations:
+
+1. Trend deterioration
+2. Segment outlier
+3. Composition shift
+4. Correlation suspicion
+5. Metadata-only query
+6. Single-value KPI query
+7. High-cardinality ranking
+8. Partial data period query
+9. Contradictory evidence scenario
+10. Cross-check follow-up scenario
+
+Review process:
+
+1. Score each run with storytelling rubric.
+2. Track contradictions and confidence misuse.
+3. Feed defects into next milestone backlog.
+
+## Validation Commands And Environments
+
+Frontend validation:
 
 ```bash
 cd databricks-builder-app-oai/client
@@ -144,147 +186,43 @@ pnpm lint
 pnpm build:typecheck
 ```
 
-If a frontend unit-test harness is added:
-
-```bash
-cd databricks-builder-app-oai/client
-pnpm test
-```
-
-## Phase 3: Model-Guided Visualization
-
-Goal: let the agent choose chart specs based on the analytical question, not
-only data shape.
-
-Tasks:
-
-- Choose the structured contract:
-  - preferred: add optional `visualizations` to `submit_conclusion`
-  - fallback: parse `__chart_spec__` from conclusion markdown
-- Add validation for model-supplied chart specs.
-- Add a stream event for submitted visualization specs if using the structured
-  contract.
-- Attach specs to evidence by explicit id when possible.
-- Fall back to the most recent successful SQL evidence only when unambiguous.
-- Let model specs override heuristic specs only after validation.
-- Strip raw `__chart_spec__` blocks from visible markdown when fallback parsing
-  is used.
-- Add prompt guidance for when to visualize and when not to visualize.
-
-Acceptance gates:
-
-- The model can request a chart title and insight annotation.
-- Model-guided specs survive persisted execution replay.
-- Bad model specs do not break evidence rendering.
-- A run that follows the current plan-tool lifecycle can still submit a
-  visualization spec without free-form response leakage.
-
-Suggested validation:
-
-```bash
-cd databricks-builder-app-oai
-UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run pytest tests/test_openai_runtime.py -q
-cd client
-pnpm lint
-pnpm build:typecheck
-```
-
-## Phase 4: Visualization Tool And Interactions
-
-Goal: make visualization intent explicit and let charts become story navigation
-surfaces.
-
-Tasks:
-
-- Add a typed `visualize_data` function tool in
-  `server/services/tools/databricks_openai.py`.
-- Reuse `execute_sql` read-only SQL checks and default resource handling.
-- Return JSON with rows, columns, `chart_spec`, and `__visualization__: true`.
-- Add `visualize_data` to typed tool names and read-only skill filtering only
-  after SQL safety gates are shared.
-- Update `system_prompt.py` with `visualize_data` vs `execute_sql` guidance.
-- Update `storyTransforms.ts` to convert `__visualization__` tool results into
-  chart evidence.
-- Add chart click handlers that create a proposed drill-down prompt.
-- Wire chart-generated prompts through the existing next-move/input flow.
-- Add optional hover state linking chart marks to table rows.
-
-Acceptance gates:
-
-- `visualize_data` works in read-only user-preview mode only for read-only SQL.
-- The plan/trace clearly shows visualization intent.
-- A chart click proposes a follow-up prompt but does not auto-run it.
-- The underlying table remains available.
-
-Suggested validation:
+Backend/runtime validation:
 
 ```bash
 cd databricks-builder-app-oai
 UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run pytest tests/test_openai_runtime.py tests/test_skills_manager.py -q
-cd client
-pnpm lint
-pnpm build:typecheck
 ```
 
-## Phase 5: Export, QA, And Release Hardening
-
-Goal: make the visual story shareable and reliable enough for analyst pilot
-use.
-
-Tasks:
-
-- Add "copy story as Markdown" for question, conclusion, evidence summaries,
-  and next moves.
-- Add PNG export for individual charts.
-- Decide whether full-story PNG export is required for v0.3 or deferred.
-- Add loading, empty, invalid-spec, and too-many-points states.
-- Add chart data caps and truncation messaging.
-- Test narrow desktop and mobile widths.
-- Test light and dark theme readability.
-- Run a local browser smoke test with both backend and frontend reachable.
-
-Acceptance gates:
-
-- Analyst can copy a story summary with visible evidence references.
-- Chart PNG export works for bar and line charts.
-- Large SQL results do not freeze the story panel.
-- Browser smoke test confirms chart and table toggles render correctly.
-
-Suggested validation:
+Local app smoke setup:
 
 ```bash
 cd databricks-builder-app-oai
 ./scripts/start_local.sh --profile <profile>
 ```
 
-Before browser tests, confirm both services are reachable:
+Before browser tests, confirm services:
 
 ```bash
 curl -fsS http://127.0.0.1:8000/health
 curl -fsS http://127.0.0.1:3000
 ```
 
-If the frontend under test is served on a different Vite port, for example
-`4173` for `pnpm preview`, check that port instead of `3000`.
+If testing `pnpm preview`, check `127.0.0.1:4173`.
 
-## v0.3 Exit Criteria
+## Risks And Mitigations
 
-- SQL result evidence appears in the main Analysis Story Panel.
-- At least bar, line, pie, and scatter chart evidence can render from existing
-  SQL results.
-- Every chart can switch to the underlying table.
-- Chart rendering failure falls back to table rendering.
-- Persisted executions replay chart evidence deterministically.
-- The agent has guidance for when not to visualize.
-- A shareable copy/export path exists for the story or chart.
-- `pnpm lint` and `pnpm build:typecheck` pass.
+| Risk | Impact | Mitigation |
+|---|---|---|
+| Charts improve visuals but not decisions | v0.3 misses product goal | Enforce narrative contract and rubric gates |
+| Overfitting heuristics to synthetic examples | Poor real-query behavior | Use golden conversation suite with mixed query shapes |
+| Model specs conflict with runtime contract | Broken or ignored specs | Prefer structured `submit_conclusion` extension |
+| Performance degradation on large results | Poor UX and trust loss | Add row caps and fallback behavior early |
 
-## Deferred After v0.3
+## Exit Criteria
 
-- Saved chart library.
-- Dashboard composition.
-- Full BI-style chart editing.
-- Statistical insight verification.
-- Auto-send chart interactions.
-- Heatmap heuristics for pivoted data.
-- Server-rendered chart images.
+v0.3 is complete when:
+
+1. Narrative and visual gates both pass.
+2. Golden conversation loop meets score threshold.
+3. No critical contradiction/trust defects remain open.
+4. Story output is shareable without leaving the app.
