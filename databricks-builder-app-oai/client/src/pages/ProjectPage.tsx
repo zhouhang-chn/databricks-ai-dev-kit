@@ -609,7 +609,7 @@ function ProjectManagementPanel({
                     <textarea
                       value={note}
                       onChange={(e) => handleAnalysisNoteChange(index, e.target.value)}
-                      placeholder={`Note ${index + 1}`}
+                      placeholder="Metric definition, required filter, caveat, validation check, rejected path, or decision-owner expectation"
                       className="min-h-16 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm"
                     />
                     <button
@@ -629,7 +629,7 @@ function ProjectManagementPanel({
                   className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 text-sm text-[var(--color-text-heading)] hover:bg-[var(--color-bg-secondary)]"
                 >
                   <Plus className="h-4 w-4" />
-                  Add Note
+                  Add Analysis Note
                 </button>
               </div>
             </div>

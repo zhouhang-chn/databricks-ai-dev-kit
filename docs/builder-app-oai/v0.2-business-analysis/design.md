@@ -133,8 +133,8 @@ partial, malformed, inaccessible, or insufficient.
 
 ## Analysis Notes Contract
 
-Analysis notes are the main pilot tuning surface. They should stay free-form in
-v0.2, but the docs and UI should encourage these note types:
+Analysis notes are the main pilot tuning surface. They stay free-form in v0.2,
+with these supported pilot categories:
 
 - Metric definitions and preferred formulas.
 - Required filters and exclusions.
@@ -245,13 +245,17 @@ v0.2 is stable enough for analyst pilot when:
 - User-preview/read-only tool exposure is verified.
 - One BDR read-only run uses configured resources and notes.
 - Missing-context feedback has a path back into analysis notes.
+- `scripts/v02_pilot_readiness.py` records the project id, setting path,
+  selected resources, validation result, run role, trace id, and write-tool
+  exposure/invocation evidence for the pilot run.
 
-## Open Questions
+## Pilot Decisions And Remaining Manual Gates
 
-- Should analysis notes remain a list of strings for the whole pilot, or do we
-  need typed note categories before v0.2 is tagged?
-- What exact smoke-test question should represent BDR pilot readiness?
-- What validation result is acceptable for a pilot when a workspace resource is
-  accessible but not running?
-- How should missing-context feedback be reviewed before it becomes durable
-  analysis notes?
+- Analysis notes remain a list of strings for v0.2.
+- The seed smoke-test question is: "Did the ML routing pilot perform well
+  enough to roll out?"
+- A pilot can proceed when validation either passes or records explicit
+  warnings/errors that the analyst accepts for the run, such as stopped compute
+  that can be started through normal workspace procedures.
+- Missing-context feedback should be reviewed by the analyst before it becomes
+  durable analysis notes.

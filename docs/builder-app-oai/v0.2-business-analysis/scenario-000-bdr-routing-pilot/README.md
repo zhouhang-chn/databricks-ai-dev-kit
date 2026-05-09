@@ -49,6 +49,24 @@ analyst discovers missing context, rejected paths, validation rules, or
 caveats. Reference YAML files can still be updated when they help preserve
 future v0.4 trace or golden-case ideas.
 
+## Pilot Readiness Record
+
+Use the OAI app script to record the v0.2 pilot run evidence:
+
+```bash
+cd databricks-builder-app-oai
+UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run python scripts/v02_pilot_readiness.py \
+  --project-id bdr-routing-pilot \
+  --project-setting ../docs/builder-app-oai/v0.2-business-analysis/scenario-000-bdr-routing-pilot/project_setting.yaml \
+  --run-role user_preview \
+  --validation-json /path/to/project-setting-validation.json \
+  --events-json /path/to/pilot-run-events.jsonl \
+  --tool-manifest-json /path/to/exposed-tools.json
+```
+
+The generated checklist records selected resources, validation status, run
+role, trace id, and whether write tools were exposed or invoked.
+
 ## Folder Convention
 
 Reference asset folder ids use:

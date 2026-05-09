@@ -127,6 +127,23 @@ def test_system_prompt_renders_project_context():
   assert 'Annual recurring revenue' in prompt
 
 
+def test_system_prompt_renders_analysis_notes_as_known_caveats():
+  """Analysis notes saved through project settings reach prompt context."""
+  project = ProjectLike(settings_json=merge_project_settings(None, {
+    'semantics': {
+      'known_caveats': [
+        'Use validated visit-base denominator and exclude BDR 28062128.',
+      ],
+    },
+  }))
+  context = build_project_context(project)
+
+  prompt = get_system_prompt(project_context=context, enabled_skills=[])
+
+  assert 'Known Caveats' in prompt
+  assert 'Use validated visit-base denominator and exclude BDR 28062128.' in prompt
+
+
 def test_system_prompt_renders_project_operating_guide_snapshot():
   """AGENTS.md content is injected as mechanism guidance, not payload."""
   prompt = get_system_prompt(

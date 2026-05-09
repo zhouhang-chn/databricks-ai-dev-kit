@@ -52,14 +52,12 @@ Implemented or mostly implemented in the OAI app:
 - Read-only/user-preview mode filters project-file mutation tools and blocks
   write-oriented Databricks tools by construction.
 
-## Critical Gaps For Pilot
+## Remaining Pilot Gates And Risks
 
-| Priority | Gap | Why it matters for v0.2 pilot |
+| Priority | Gate or risk | Why it matters for v0.2 pilot |
 |---|---|---|
-| P0 | No explicit pilot stabilization checklist ties project settings, notes, read-only execution, and feedback capture together. | The pilot can drift back into broad builder work instead of validating one analyst workflow end to end. |
-| P0 | Analysis notes are free-form caveats but not yet treated as the main iterative tuning surface. | Analysts need a low-friction way to add metric definitions, caveats, canonical checks, and feedback without authoring generated YAML artifacts. |
-| P0 | Deterministic retrieval and injection of project settings/notes needs an explicit pilot gate. | The Analysis Agent should always see the current business background, resource hints, caveats, and analysis notes before planning. |
-| P0 | Live read-only pilot validation is not documented as a release gate. | The pilot audience needs a stable read-only path, not a draft artifact generator. |
+| P0 | Live BDR workspace validation and one user-preview run still need pilot evidence. | The release gate is the real analyst path: selected resources validate or produce explicit warnings, the run uses those resources, and no writes occur. |
+| P0 | The pilot readiness checklist must be filled with a trace id and tool-safety evidence. | `scripts/v02_pilot_readiness.py` exists, but the release decision still needs a concrete BDR run record. |
 | P1 | Legacy reference artifacts can still be mistaken for the v0.2 runtime contract. | This can pull pilot work back toward generated bundles instead of settings and notes. |
 | P1 | Source-code and Databricks metadata enrichment are not implemented as bounded preparation steps. | Useful, but deferrable to v0.2.x because selected project settings already name the pilot resources. |
 | P1 | SQL safety remains partly prefix-based, including `WITH` as read-only. | Important for later serving; for pilot, mitigate with read-only role, selected resources, schema inspection gates, and analyst review. |
@@ -112,8 +110,8 @@ For v0.4:
 
 1. Freeze the v0.2 pilot contract around `project_setting.yaml`,
    `analysis_notes`, read-only agent context, and feedback capture.
-2. Add a pilot readiness checklist to the action plan and use it as the
-   release gate.
+2. Use the pilot readiness checklist script in the action plan as the release
+   evidence record.
 3. Treat the BDR routing pilot reference bundle as documentation and
    v0.4 scaffolding, not as a runtime dependency.
 4. Validate that the Analysis Agent receives settings/notes and uses configured

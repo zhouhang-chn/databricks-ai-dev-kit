@@ -42,8 +42,8 @@ Last updated: 2026-05-09.
 |---|---|---|
 | Phase 0: Docs and Baseline Alignment | Complete | OAI docs root and v0.1 migration track exist. v0.2 docs now follow the roadmap pivot to Project Settings + Analysis Notes. |
 | Phase 1: Critical Persistence Fixes | Complete | Project Management resources and structured conclusion fallback persistence are implemented with focused regression tests. |
-| Phase 2: Project Setting and Analysis Notes Foundation | Mostly complete | The OAI app implements schema parsing/rendering, default file creation, get/save/parse/validate routes, Project Management import/save/validate UI, and save-time sync into project settings. Analysis notes map into project semantics as known caveats. |
-| Phase 3: Pilot Readiness Hardening | Next | Validate deterministic settings/notes injection, read-only user-preview behavior, BDR resource validation, and stable local verification commands. |
+| Phase 2: Project Setting and Analysis Notes Foundation | Complete | The OAI app implements schema parsing/rendering, default file creation, get/save/parse/validate routes, Project Management import/save/validate UI, save-time sync into project settings, prompt injection, and analyst-note UI wording. |
+| Phase 3: Pilot Readiness Hardening | Local checks complete; live pilot gate pending | Runtime tests cover configured compute, schema-inspection gates, read-only tool filtering, and AGENTS.md guidance scope. `scripts/v02_pilot_readiness.py` records the live BDR pilot evidence. |
 | Deferred: Manual Analyst Trace | v0.4 | Revisit formal analyst traces when building Golden Analysis Cases. |
 | Deferred: Golden Cases | v0.4 | Revisit canonical cases, scoring anchors, and fast-path execution in v0.4. |
 | Deferred: Bundle Generator Follow-up | Future | Keep the generator contract as future scaffolding, not as a v0.2 tagging requirement. |
@@ -136,13 +136,12 @@ Current baseline:
   views, workflows, and `analysis_notes` back into persisted project settings.
 - `analysis_notes` are injected through project semantics as known caveats.
 
-Remaining tasks:
+Pilot contract:
 
-- Make the UI copy and docs consistently describe analysis notes as the
-  analyst tuning surface.
-- Add/keep tests that prove notes round-trip from YAML to project settings and
-  prompt context.
-- Decide the minimum supported note categories for pilot:
+- The UI and docs describe analysis notes as the analyst tuning surface.
+- Tests prove notes round-trip from YAML to project settings and prompt
+  context.
+- The minimum supported free-form note categories for pilot are:
   - metric definitions
   - required filters
   - caveats and exclusions
@@ -184,7 +183,8 @@ Tasks:
 - Confirm user-preview/read-only runs expose no project-file mutation tools and
   block write-oriented Databricks tools.
 - Confirm `AGENTS.md` remains mechanism guidance only.
-- Add a pilot smoke-test script or checklist that records:
+- Use `scripts/v02_pilot_readiness.py` as the pilot smoke-test checklist to
+  record:
   - project id
   - project setting path
   - selected resources
@@ -192,6 +192,17 @@ Tasks:
   - run role
   - trace id
   - whether any write tool was exposed or invoked
+
+Suggested local validation:
+
+```bash
+cd databricks-builder-app-oai
+UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run pytest tests/test_openai_runtime.py tests/test_v02_pilot_readiness.py -q
+UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run python scripts/v02_pilot_readiness.py \
+  --project-id bdr-routing-pilot \
+  --project-setting ../docs/builder-app-oai/v0.2-business-analysis/scenario-000-bdr-routing-pilot/project_setting.yaml \
+  --run-role user_preview
+```
 
 Acceptance gates:
 
@@ -238,7 +249,8 @@ Before tagging v0.2:
 - Project settings and analysis notes round-trip through save/reload.
 - BDR `project_setting.yaml` validates against the pilot workspace or records
   explicit validation warnings/errors.
-- User-preview/read-only tool exposure is verified.
+- User-preview/read-only tool exposure is verified and recorded through
+  `scripts/v02_pilot_readiness.py`.
 - One BDR pilot read-only run uses configured resources and notes.
 - Missing-context feedback has a documented path back into analysis notes.
 - The docs clearly mark bundle generation as deferred.
