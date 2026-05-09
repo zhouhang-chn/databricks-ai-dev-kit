@@ -748,6 +748,23 @@ export function storyEventsFromStreamEvent(
     const toolInput = event.tool_input != null ? asText(event.tool_input) : undefined;
     const friendlyName = toolName?.replace(/^mcp__databricks__/, '');
     const evidenceId = makeId('evidence-tool');
+
+    // Extract purpose from SQL comment if available
+    let purpose: string | undefined = undefined;
+    const parsedInput = typeof event.tool_input === 'object' 
+      ? (event.tool_input as Record<string, unknown>) 
+      : (toolInput ? (tryParseJson(toolInput) as Record<string, unknown> | null) : null);
+      
+    if (parsedInput && typeof parsedInput === 'object') {
+      const sql = parsedInput.sql_query ?? parsedInput.query ?? parsedInput.sql ?? parsedInput.sql_content;
+      if (typeof sql === 'string') {
+        const firstLine = sql.split('\n').map((line) => line.trim()).find((line) => line.length > 0);
+        if (firstLine && firstLine.startsWith('--')) {
+          purpose = firstLine.slice(2).trim();
+        }
+      }
+    }
+
     return [
       {
         type: 'evidence.appended',
@@ -755,9 +772,9 @@ export function storyEventsFromStreamEvent(
         block: {
           id: evidenceId,
           type: isError ? 'error' : 'tool_result',
-          title: isError
+          title: purpose || (isError
             ? `${friendlyName || 'Tool'} (error)`
-            : friendlyName || 'Tool result',
+            : friendlyName || 'Tool result'),
           content: summary,
           rawContent,
           isError,
