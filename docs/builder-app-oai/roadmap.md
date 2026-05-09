@@ -39,16 +39,18 @@
 
 ## v0.3 — Visualization for Storytelling
 
-**Theme:** Turn evidence blocks into a narrative the decision owner can read in 60 seconds.
+**Theme:** Turn the analysis story into a rich visual narrative that makes conclusions more convincing.
 
 **Why now:** v0.2 produces tables, conclusions, and next moves; analysts still hand-build charts elsewhere. Storytelling is what turns analysis into a decision.
 
 **Scope:**
-- Wire a chart library into `RightInspectPanel` (the `EvidenceType.chart` placeholder already exists).
-- Chart types tied to evidence contracts already in the v0.2 design: trend, ranking, composition, anomaly.
-- The Analysis Agent emits chart specs (data + chart type + encoding) as evidence; the client renders. No separate "create chart" step from the analyst.
-- Conclusion view stitches text + table + chart into a shareable narrative (export to PNG / PDF / clipboard).
-- Golden cases extend to include expected chart spec, not just expected text.
+- **Focus on Analysis Story Panel**: Charts are rendered directly within the main analysis story flow (rather than just the right inspect panel), making visualization a critical part of the core narrative.
+- **Phased implementation based on `data-visualization.md`**:
+  - **Phase 1**: Client-side chart detection (Recharts) on SQL results using heuristics (no backend changes).
+  - **Phase 2**: Model-guided visualization using `__chart_spec__` JSON blocks in agent responses for custom types and insight annotations.
+  - **Phase 3**: Dedicated `visualize_data` tool for explicit intent and chart-click interactions for story continuation.
+- Conclusion view stitches text + table + chart into a shareable narrative (export to PNG / clipboard).
+- Charts support toggle back to underlying data table at any time.
 
 **Out of scope:** dashboarding, saved charts library, BI-tool parity. v0.3 is in-conversation visuals, not a dashboard product.
 
