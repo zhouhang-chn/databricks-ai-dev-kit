@@ -6,7 +6,7 @@
 ## Guiding Principles
 
 1. **Preparation before scale.** v0.2 establishes that project settings (business background + data settings) and analysis notes are the foundation for tuning agent behavior. We move away from the generated scenario bundle concept.
-2. **One scenario end-to-end before breadth.** The BDR routing pilot must be repeatable (generate → review → execute → eval → consume) before we add new themes.
+2. **One scenario before breadth.** The BDR routing pilot must be stable through project settings, analysis notes, read-only execution, and feedback capture before we add new themes.
 3. **Latency is a feature.** v0.6 is the dedicated latency release, but every release should keep "time-to-first-answer" in view.
 4. **Permissions are layered, not retrofitted.** v0.5 splits role permission (UI/server gate) from data permission (row filter) so each can ship cleanly.
 
@@ -21,10 +21,9 @@
 - Analysis notes implemented to further tune agent behavior by providing more contexts.
 - `project_setting.yaml` schema validator + API route + UI workflow (Action Plan Phase 2).
 - Deterministic retrieval path for project settings and analysis notes consumed by Analysis Agent in read-only mode; Builder/Analysis boundary enforced.
-- One full manual analyst trace completed for `scenario-000-bdr-routing-pilot`, evidence and gaps recorded back into analysis notes.
 
 **Deferred to v0.2.x patch releases during pilot:**
-- Source-code / Databricks metadata enrichment (Phase 4)
+- Source-code / Databricks metadata enrichment
 - Partial regeneration engine
 - Settings and notes retrieval optimization
 - Tool surface trimming per project
@@ -33,7 +32,7 @@
 
 **Pilot success signals:**
 - ≥ 1 BDR pilot answer accepted by the decision owner without analyst rework
-- Analyst clarification questions reduce by ≥ 30% on the second project after the first bundle
+- Analyst clarification questions reduce by ≥ 30% on the second project after the first settings/notes tuning pass
 - Missing-context feedback from Analysis Agent loops back into Builder refinement at least once
 
 ---
@@ -64,6 +63,7 @@
 **Why now:** We dropped the full bundle generator in v0.2, but golden cases remain a powerful concept for ensuring quality. We will implement them without the overhead of business context and data context YAMLs.
 
 **Scope:**
+- Manual analyst trace workflow for high-value scenarios, starting from the BDR routing pilot.
 - Golden cases implementation: defined as part of project settings or a lightweight template, mapping specific questions to canonical paths/SQL.
 - No business context YAML or data context YAML.
 - Fast path for the Analysis Agent: when the user's question matches a golden case, the Agent runs the canonical path instead of free-form planning.
