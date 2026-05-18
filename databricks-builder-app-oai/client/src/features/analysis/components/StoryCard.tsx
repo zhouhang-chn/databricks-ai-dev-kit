@@ -8,6 +8,7 @@ import {
   FileText,
   Loader2,
   Pin,
+  RotateCcw,
   Search,
   Sparkles,
   Wrench,
@@ -54,7 +55,13 @@ function StatusBadge({ status }: { status: AnalysisStory['status'] }) {
         inFlight && 'border-[var(--color-border)] text-[var(--color-text-muted)]'
       )}
     >
-      {inFlight ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+      {inFlight ? (
+        <Loader2 className="h-3 w-3 animate-spin" />
+      ) : status === 'error' ? (
+        <AlertTriangle className="h-3 w-3" />
+      ) : (
+        <CheckCircle2 className="h-3 w-3" />
+      )}
       {label}
     </span>
   );
@@ -387,16 +394,79 @@ function ConclusionCard({
   );
 }
 
+function FailureRecoveryCard({
+  story,
+  retryDisabled,
+  onRetry,
+  onViewDetails,
+}: {
+  story: AnalysisStory;
+  retryDisabled: boolean;
+  onRetry: (story: AnalysisStory) => void;
+  onViewDetails: () => void;
+}) {
+  const failure = story.failure;
+  if (!failure) return null;
+
+  return (
+    <div className="mt-4 rounded-lg border border-[var(--color-error)]/25 bg-[var(--color-error)]/[0.04] p-3">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-error)]" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-[var(--color-text-heading)]">
+            {failure.retryable ? 'Temporary service issue' : 'Analysis stopped before it could finish'}
+          </div>
+          <div className="mt-0.5 text-[12px] leading-5 text-[var(--color-text-muted)]">
+            {failure.retryable
+              ? 'The system could not finish this run. Retrying the same request is a reasonable next step.'
+              : 'The run needs inspection before another attempt.'}
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {failure.retryable && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRetry(story);
+            }}
+            disabled={retryDisabled}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--color-accent-primary)] px-3 text-xs font-medium text-white transition-colors hover:bg-[var(--color-accent-primary)]/90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Retry
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onViewDetails();
+          }}
+          className="inline-flex h-8 items-center rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-xs font-medium text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-secondary)]"
+        >
+          View details
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function StoryCard({
   story,
   isActive,
   onSelect,
   onNextMove,
+  onRetry,
+  retryDisabled,
 }: {
   story: AnalysisStory;
   isActive: boolean;
   onSelect: (storyId: string) => void;
   onNextMove: (move: NextMove) => void;
+  onRetry: (story: AnalysisStory) => void;
+  retryDisabled: boolean;
 }) {
   const [stepperCollapsed, setStepperCollapsed] = useState(false);
   const isStreaming = story.status === 'discovery' || story.status === 'planning' || story.status === 'running';
@@ -505,7 +575,13 @@ export function StoryCard({
 
       <section className="mt-4">
         <ConclusionCard story={story} />
-        {story.status === 'error' && !story.conclusion && !story.conclusionText && (
+        <FailureRecoveryCard
+          story={story}
+          retryDisabled={retryDisabled}
+          onRetry={onRetry}
+          onViewDetails={() => onSelect(story.id)}
+        />
+        {story.status === 'error' && !story.failure && !story.conclusion && !story.conclusionText && (
           <div className="flex items-center gap-2 rounded-lg border border-[var(--color-error)]/30 bg-[var(--color-error)]/5 px-3 py-2 text-sm text-[var(--color-error)]">
             <AlertTriangle className="h-4 w-4" />
             Analysis failed.
@@ -519,7 +595,7 @@ export function StoryCard({
         )}
       </section>
 
-      {story.nextMoves.length > 0 && (
+      {story.nextMoves.length > 0 && !story.failure?.retryable && (
         <section className="mt-6 border-t border-[var(--color-border)]/60 pt-4">
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-[var(--color-text-muted)]">
             <Pin className="h-3.5 w-3.5" />

@@ -201,6 +201,40 @@ function defaultNextMoves(question: string): NextMove[] {
   ];
 }
 
+function cleanFailureMessage(message: string): string {
+  return message.replace(/^error:\s*/i, '').trim();
+}
+
+function isRetryableFailureMessage(message: string): boolean {
+  const normalized = message.toLowerCase();
+  const retryableStatus = /<\s*(429|502|503|504)\s*>/.test(normalized)
+    || /\berror code:\s*(429|502|503|504)\b/.test(normalized)
+    || /\b(?:status[_\s-]*code|http)\s*[:=]?\s*(429|502|503|504)\b/.test(normalized);
+  if (retryableStatus) return true;
+
+  return (
+    normalized.includes('serviceunavailable')
+    || normalized.includes('too many requests')
+    || normalized.includes('throttl')
+    || normalized.includes('capacity limit')
+    || normalized.includes('temporarily unavailable')
+    || normalized.includes('timed out')
+    || normalized.includes('timeout')
+    || normalized.includes('stream closed')
+    || normalized.includes('connection lost')
+    || normalized.includes('network error')
+    || normalized.includes('connection reset')
+  );
+}
+
+function storyFailure(message: string): NonNullable<AnalysisStory['failure']> {
+  const cleaned = cleanFailureMessage(message);
+  return {
+    message: cleaned || message,
+    retryable: isRetryableFailureMessage(cleaned || message),
+  };
+}
+
 function nextMoveType(value: unknown): NextMove['actionType'] {
   return (
     value === 'drill'
@@ -504,14 +538,26 @@ export function storiesFromMessages({
     if (message.role !== 'user') continue;
 
     const assistant = messages.slice(index + 1).find((candidate) => candidate.role === 'assistant');
+    const failure = assistant?.is_error ? storyFailure(assistant.content) : undefined;
     const story = createAnalysisStory({
       id: `story-${message.id}`,
       conversationId: message.conversation_id,
       question: message.content,
       status: assistant?.is_error ? 'error' : assistant ? 'done' : 'discovery',
-      conclusionText: assistant?.content,
+      conclusionText: assistant?.is_error ? undefined : assistant?.content,
       messageIds: assistant ? [message.id, assistant.id] : [message.id],
     });
+    story.failure = failure;
+    if (failure) {
+      story.evidence.push({
+        id: makeId('evidence-error'),
+        type: 'error',
+        title: 'Error',
+        content: failure.message,
+        isError: true,
+        createdAt: assistant?.timestamp || story.createdAt,
+      });
+    }
 
     const tools = assistant ? messageTools[assistant.id] || [] : [];
     story.trace = tools.map((toolName) => ({
@@ -892,18 +938,21 @@ export function reduceAnalysisEvent(
         updatedAt: nowIso(),
       }));
     case 'story.failed':
-      return updateStory(stories, event.storyId, (story) => appendEvidence({
-        ...story,
-        status: 'error',
-        conclusionText: story.conclusionText || event.error,
-      }, {
-        id: makeId('evidence-error'),
-        type: 'error',
-        title: 'Error',
-        content: event.error,
-        isError: true,
-        createdAt: nowIso(),
-      }));
+      return updateStory(stories, event.storyId, (story) => {
+        const failure = storyFailure(event.error);
+        return appendEvidence({
+          ...story,
+          status: 'error',
+          failure,
+        }, {
+          id: makeId('evidence-error'),
+          type: 'error',
+          title: 'Error',
+          content: failure.message,
+          isError: true,
+          createdAt: nowIso(),
+        });
+      });
     default:
       return stories;
   }

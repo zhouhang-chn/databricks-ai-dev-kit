@@ -82,6 +82,11 @@ export interface StoryNarrative {
   hasContradiction?: boolean;
 }
 
+export interface StoryFailure {
+  message: string;
+  retryable: boolean;
+}
+
 export interface AnalysisContext {
   conversationId?: string;
   messageIds?: string[];
@@ -137,6 +142,7 @@ export interface AnalysisStory {
   trace: AnalysisStep[];
   nextMoves: NextMove[];
   narrative?: StoryNarrative;
+  failure?: StoryFailure;
   context: AnalysisContext;
   createdAt: string;
   updatedAt: string;

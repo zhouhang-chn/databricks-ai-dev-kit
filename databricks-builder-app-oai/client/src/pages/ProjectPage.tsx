@@ -1348,15 +1348,20 @@ export default function ProjectPage() {
   };
 
 
-  // Send message
-  const handleSendMessage = useCallback(async () => {
-    if (!projectId || !input.trim()) return;
+  // Start an agent run from either the composer or a recovery action.
+  const submitMessage = useCallback(async (
+    message: string,
+    options: { clearInput?: boolean } = {}
+  ) => {
+    const userMessage = message.trim();
+    if (!projectId || !userMessage) return;
     const convId = currentConversation?.id;
     // Block only if THIS conversation is already streaming
     if (convId && allStreamsRef.current[convId]) return;
 
-    const userMessage = input.trim();
-    setInput('');
+    if (options.clearInput !== false) {
+      setInput('');
+    }
     setStreamingText('');
     setTodos([]);
 
@@ -1608,7 +1613,6 @@ export default function ProjectPage() {
     }
   }, [
     projectId,
-    input,
     currentConversation?.id,
     selectedClusterId,
     defaultCatalog,
@@ -1620,6 +1624,10 @@ export default function ProjectPage() {
     applyStoryEvents,
     applyStoryStreamEvent,
   ]);
+
+  const handleSendMessage = useCallback(async () => {
+    await submitMessage(input, { clearInput: true });
+  }, [input, submitMessage]);
 
   // Stop generation - abort client stream AND tell backend to cancel
   const handleStopGeneration = useCallback(async () => {
@@ -1819,6 +1827,10 @@ export default function ProjectPage() {
     requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
 
+  const handleRetryStory = useCallback((story: AnalysisStory) => {
+    void submitMessage(story.question, { clearInput: false });
+  }, [submitMessage]);
+
   const handleStarterPrompt = useCallback((prompt: string) => {
     setInput(prompt);
     requestAnimationFrame(() => inputRef.current?.focus());
@@ -1967,6 +1979,8 @@ export default function ProjectPage() {
                     activeStoryId={activeStoryId}
                     onSelectStory={setActiveStoryId}
                     onNextMove={handleNextMove}
+                    onRetryStory={handleRetryStory}
+                    retryDisabled={isStreamingHere}
                     emptyTitle={runRole === 'user_preview' ? 'What would a user ask?' : 'What can I help you build?'}
                     emptyDescription={
                       runRole === 'user_preview'

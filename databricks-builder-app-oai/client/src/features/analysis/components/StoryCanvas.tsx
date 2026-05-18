@@ -7,6 +7,8 @@ export function StoryCanvas({
   activeStoryId,
   onSelectStory,
   onNextMove,
+  onRetryStory,
+  retryDisabled,
   emptyTitle,
   emptyDescription,
   starterPrompts,
@@ -16,6 +18,8 @@ export function StoryCanvas({
   activeStoryId?: string;
   onSelectStory: (storyId: string) => void;
   onNextMove: (move: NextMove) => void;
+  onRetryStory: (story: AnalysisStory) => void;
+  retryDisabled: boolean;
   emptyTitle: string;
   emptyDescription: string;
   starterPrompts: Array<{ title: string; desc: string; prompt: string }>;
@@ -76,6 +80,8 @@ export function StoryCanvas({
             isActive={story.id === activeStoryId}
             onSelect={onSelectStory}
             onNextMove={onNextMove}
+            onRetry={onRetryStory}
+            retryDisabled={retryDisabled}
           />
         ))}
       </div>
