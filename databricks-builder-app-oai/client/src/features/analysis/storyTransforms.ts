@@ -1,17 +1,19 @@
 import type {
   AnalysisEvent,
+  ChartSpec,
   AnalysisStep,
   AnalysisStory,
   EvidenceBlock,
   NarrativeConfidence,
   NextMove,
   PlanStep,
+  StoryVisualization,
   StoryFromMessagesOptions,
   StreamStoryEvent,
   ToolCallSummary,
 } from '@/features/analysis/types';
-import { detectChartSpec } from '@/features/analysis/chartDetection';
-import { asRowTable, tryParseJson as parseJson } from '@/features/analysis/evidenceData';
+import { detectChartSpec, validateChartSpec } from '@/features/analysis/chartDetection';
+import { asRowTable, coerceNumber, tryParseJson as parseJson } from '@/features/analysis/evidenceData';
 
 const UTILITY_TOOL_NAMES = new Set([
   'read_project_file',
@@ -222,6 +224,241 @@ function narrativeConfidence(value: unknown): NarrativeConfidence | undefined {
   return value === 'high' || value === 'medium' || value === 'low'
     ? value
     : undefined;
+}
+
+function parseVisualizationsPayload(raw: unknown): StoryVisualization[] {
+  const parsed = typeof raw === 'string' ? tryParseJson(raw) : raw;
+  if (!parsed) return [];
+
+  const entries = Array.isArray(parsed)
+    ? parsed
+    : (parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>).visualizations))
+      ? (parsed as Record<string, unknown>).visualizations as unknown[]
+      : [parsed];
+
+  const out: StoryVisualization[] = [];
+  for (const entry of entries) {
+    const normalized = normalizeVisualizationEntry(entry);
+    if (normalized) out.push(normalized);
+  }
+  return out;
+}
+
+function normalizeVisualizationEntry(value: unknown): StoryVisualization | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const evidenceRaw = record.evidenceId ?? record.evidence_id ?? record.primary_evidence_id;
+  const specInput = record.chartSpec && typeof record.chartSpec === 'object'
+    ? record.chartSpec as Record<string, unknown>
+    : record;
+
+  const chartType = normalizeChartType(specInput.chartType ?? specInput.chart_type);
+  const xField = asNonEmptyString(specInput.xField ?? specInput.x_field);
+  const yFields = asStringList(specInput.yFields ?? specInput.y_fields);
+
+  if (!chartType || !xField || yFields.length === 0) return null;
+
+  const chartSpec: ChartSpec = {
+    chartType,
+    xField,
+    yFields,
+  };
+
+  const colorField = asNonEmptyString(specInput.colorField ?? specInput.color_field);
+  const sizeField = asNonEmptyString(specInput.sizeField ?? specInput.size_field);
+  const xLabel = asNonEmptyString(specInput.xLabel ?? specInput.x_label);
+  const yLabel = asNonEmptyString(specInput.yLabel ?? specInput.y_label);
+  const title = asNonEmptyString(specInput.title);
+  const insight = asNonEmptyString(specInput.insight);
+  const sort = normalizeSort(specInput.sort);
+  const stacked = typeof specInput.stacked === 'boolean' ? specInput.stacked : undefined;
+  const showLabels = typeof specInput.showLabels === 'boolean'
+    ? specInput.showLabels
+    : typeof specInput.show_labels === 'boolean'
+      ? specInput.show_labels
+      : undefined;
+
+  if (colorField) chartSpec.colorField = colorField;
+  if (sizeField) chartSpec.sizeField = sizeField;
+  if (xLabel) chartSpec.xLabel = xLabel;
+  if (yLabel) chartSpec.yLabel = yLabel;
+  if (title) chartSpec.title = title;
+  if (insight) chartSpec.insight = insight;
+  if (sort) chartSpec.sort = sort;
+  if (stacked !== undefined) chartSpec.stacked = stacked;
+  if (showLabels !== undefined) chartSpec.showLabels = showLabels;
+
+  return {
+    evidenceId: typeof evidenceRaw === 'string' ? evidenceRaw : undefined,
+    chartSpec,
+  };
+}
+
+function normalizeChartType(value: unknown): ChartSpec['chartType'] | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'area') return 'line';
+  if (normalized === 'bar' || normalized === 'line' || normalized === 'pie' || normalized === 'scatter') {
+    return normalized;
+  }
+  return undefined;
+}
+
+function normalizeSort(value: unknown): ChartSpec['sort'] | undefined {
+  return value === 'asc' || value === 'desc' || value === 'natural' ? value : undefined;
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function asStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === 'string' ? item.trim() : String(item).trim()))
+      .filter(Boolean);
+  }
+  const single = asNonEmptyString(value);
+  return single ? [single] : [];
+}
+
+function parseLegacyChartSpecFromSummary(summary: string): StoryVisualization[] {
+  const marker = '__chart_spec__';
+  const markerIndex = summary.indexOf(marker);
+  if (markerIndex < 0) return [];
+  const tail = summary.slice(markerIndex + marker.length);
+  const chunk = extractFirstJsonChunk(tail);
+  if (!chunk) return [];
+  return parseVisualizationsPayload(chunk);
+}
+
+function stripLegacyChartSpecFromSummary(summary: string): string {
+  const markerIndex = summary.indexOf('__chart_spec__');
+  if (markerIndex < 0) return summary;
+  return summary.slice(0, markerIndex).trim();
+}
+
+function extractFirstJsonChunk(text: string): string | null {
+  const start = text.search(/[[{]/);
+  if (start < 0) return null;
+
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === '{' || ch === '[') {
+      stack.push(ch);
+      continue;
+    }
+
+    if (ch === '}' || ch === ']') {
+      const open = stack.pop();
+      if (!open) return null;
+      if ((open === '{' && ch !== '}') || (open === '[' && ch !== ']')) return null;
+      if (stack.length === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+function applyVisualizationsToEvidence(
+  story: AnalysisStory,
+  visualizations: StoryVisualization[]
+): AnalysisStory {
+  if (visualizations.length === 0 || story.evidence.length === 0) return story;
+
+  const nextEvidence = [...story.evidence];
+  let changed = false;
+
+  for (const visualization of visualizations) {
+    const candidateIndexes = visualization.evidenceId
+      ? nextEvidence.map((block, index) => ({ block, index }))
+          .filter(({ block }) => block.id === visualization.evidenceId)
+          .map(({ index }) => index)
+      : nextEvidence.map((_, index) => index);
+
+    for (const index of candidateIndexes) {
+      const block = nextEvidence[index];
+      if (!block || block.isError) continue;
+      const parsed = block.rawContent ? parseJson(block.rawContent) : null;
+      const tabular = parsed ? asRowTable(parsed) : null;
+      if (!tabular) continue;
+      if (!validateChartSpec(visualization.chartSpec, tabular)) continue;
+
+      nextEvidence[index] = {
+        ...block,
+        type: 'chart',
+        chartSpec: visualization.chartSpec,
+      };
+      changed = true;
+      break;
+    }
+  }
+
+  if (!changed) return story;
+  return {
+    ...story,
+    evidence: nextEvidence,
+    updatedAt: nowIso(),
+  };
+}
+
+function detectNarrativeContradiction(story: AnalysisStory, insight?: string): boolean {
+  if (!insight) return false;
+  const primaryEvidenceId = story.narrative?.primaryEvidenceId;
+  const primary = primaryEvidenceId
+    ? story.evidence.find((block) => block.id === primaryEvidenceId)
+    : story.evidence.find((block) => Boolean(block.chartSpec) && !block.isError);
+  if (!primary || !primary.chartSpec || !primary.rawContent) return false;
+  if (primary.chartSpec.chartType !== 'line' && primary.chartSpec.chartType !== 'bar') return false;
+
+  const parsed = parseJson(primary.rawContent);
+  const tabular = parsed ? asRowTable(parsed) : null;
+  if (!tabular || !validateChartSpec(primary.chartSpec, tabular)) return false;
+
+  const yField = primary.chartSpec.yFields[0];
+  const series = tabular.rows
+    .map((row) => coerceNumber(row[yField]))
+    .filter((value): value is number => value !== undefined);
+  if (series.length < 2) return false;
+
+  const first = series[0];
+  const last = series[series.length - 1];
+  const delta = last - first;
+  if (Math.abs(delta) < 1e-9) return false;
+
+  const normalizedInsight = insight.toLowerCase();
+  const indicatesPositive = /(increase|increased|up|higher|rise|rose|grew|growth|improv|上升|增加|增长|提升)/.test(normalizedInsight);
+  const indicatesNegative = /(decrease|decreased|down|lower|drop|decline|fell|falling|worse|下降|减少|降低|下滑)/.test(normalizedInsight);
+  const indicatesFlat = /(flat|stable|unchanged|no change|持平|稳定|不变)/.test(normalizedInsight);
+
+  if (delta > 0 && indicatesNegative) return true;
+  if (delta < 0 && indicatesPositive) return true;
+  if (indicatesFlat) {
+    const relative = Math.abs(delta) / Math.max(Math.abs(first), 1);
+    if (relative > 0.05) return true;
+  }
+  return false;
 }
 
 export function createAnalysisStory(args: {
@@ -542,6 +779,8 @@ export function reduceAnalysisEvent(
       return updateStory(stories, event.storyId, (story) => {
         const incomingHighlights = Array.isArray(event.highlights) ? event.highlights : [];
         const incomingNextSteps = Array.isArray(event.nextSteps) ? event.nextSteps : [];
+        const incomingVisualizations = Array.isArray(event.visualizations) ? event.visualizations : [];
+
         const narrative = {
           ...story.narrative,
           claim: event.claim || story.narrative?.claim,
@@ -557,7 +796,7 @@ export function reduceAnalysisEvent(
             : story.narrative?.hasContradiction,
         };
 
-        return {
+        const nextStoryBase: AnalysisStory = {
           ...story,
           status: story.status === 'error' ? 'error' : 'done',
           conclusion: {
@@ -573,6 +812,28 @@ export function reduceAnalysisEvent(
           },
           narrative,
           nextMoves: story.nextMoves.length > 0 ? story.nextMoves : defaultNextMoves(story.question),
+          updatedAt: nowIso(),
+        };
+
+        const withVisualizations = incomingVisualizations.length > 0
+          ? applyVisualizationsToEvidence(nextStoryBase, incomingVisualizations)
+          : nextStoryBase;
+
+        const detectedContradiction = detectNarrativeContradiction(
+          withVisualizations,
+          withVisualizations.narrative?.insight
+        );
+        if (!detectedContradiction) return withVisualizations;
+
+        return {
+          ...withVisualizations,
+          narrative: {
+            ...withVisualizations.narrative,
+            hasContradiction: true,
+            confidence: withVisualizations.narrative?.confidence === 'high'
+              ? 'medium'
+              : withVisualizations.narrative?.confidence,
+          },
           updatedAt: nowIso(),
         };
       });
@@ -700,6 +961,7 @@ export function storyEventsFromStreamEvent(
     return [{ type: 'plan.revised', storyId, steps, reason: String(event.reason || '') }];
   }
   if (type === 'synthesis.appended') {
+    const summaryRaw = String(event.summary || '');
     const rawHighlights = event.highlights;
     const parsedHighlights = typeof rawHighlights === 'string' ? tryParseJson(rawHighlights) : rawHighlights;
     const highlights = Array.isArray(parsedHighlights)
@@ -718,11 +980,21 @@ export function storyEventsFromStreamEvent(
     const recommendedRaw = event.recommendedNextStep ?? event.recommended_next_step;
     const primaryEvidenceRaw = event.primaryEvidenceId ?? event.primary_evidence_id;
     const contradictionRaw = event.hasContradiction ?? event.has_contradiction;
+    const visualizationRaw = event.visualizations ?? event.visualization_specs;
+
+    let visualizations = parseVisualizationsPayload(visualizationRaw);
+    let summary = summaryRaw;
+    if (visualizations.length === 0) {
+      visualizations = parseLegacyChartSpecFromSummary(summaryRaw);
+      if (visualizations.length > 0) {
+        summary = stripLegacyChartSpecFromSummary(summaryRaw);
+      }
+    }
 
     return [{
       type: 'synthesis.appended',
       storyId,
-      summary: String(event.summary || ''),
+      summary,
       highlights,
       nextSteps,
       claim: typeof event.claim === 'string' ? event.claim : undefined,
@@ -732,6 +1004,7 @@ export function storyEventsFromStreamEvent(
       confidence: narrativeConfidence(event.confidence),
       recommendedNextStep: typeof recommendedRaw === 'string' ? recommendedRaw : undefined,
       hasContradiction: typeof contradictionRaw === 'boolean' ? contradictionRaw : undefined,
+      visualizations: visualizations.length > 0 ? visualizations : undefined,
     }];
   }
 

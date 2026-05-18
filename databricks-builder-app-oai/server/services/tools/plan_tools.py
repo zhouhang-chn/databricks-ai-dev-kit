@@ -152,6 +152,7 @@ def create_plan_tools(run_state: AgentToolRunState | None = None) -> list:
     confidence: Literal['high', 'medium', 'low'] | None = None,
     recommended_next_step: str | None = None,
     has_contradiction: bool | None = None,
+    visualizations: list[dict] | None = None,
   ) -> dict:
     """Submit the final synthesis instead of a regular markdown response.
 
@@ -190,6 +191,8 @@ def create_plan_tools(run_state: AgentToolRunState | None = None) -> list:
       payload['recommended_next_step'] = recommended_next_step
     if has_contradiction is not None:
       payload['has_contradiction'] = bool(has_contradiction)
+    if visualizations:
+      payload['visualizations'] = visualizations
     return payload
 
   return [update_plan, submit_conclusion]

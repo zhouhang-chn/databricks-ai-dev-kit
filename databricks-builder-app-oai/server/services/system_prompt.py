@@ -482,6 +482,16 @@ plan, use `op="revise"` instead.
        summary="<markdown executive summary, 2-5 sentences>",
        highlights=[{{"label": "Rows scanned", "value": "3.2M"}}, ...],  # 0-5
        next_steps=["<follow-up the user might want>", ...],             # optional
+       visualizations=[                                                   # optional, preferred
+         {{
+           "evidence_id": "<evidence block id to attach>",               # optional
+           "chart_type": "line|bar|pie|scatter",
+           "x_field": "<column name>",
+           "y_fields": ["<column name>", ...],
+           "title": "<chart title>",                                     # optional
+           "insight": "<one-line reading of the chart>"                  # optional
+         }}
+       ]
    )
    ```
 
@@ -495,6 +505,8 @@ plan, use `op="revise"` instead.
    - low confidence: "Preliminary signal indicates ..."
    If evidence is incomplete or conflicting, include an explicit caveat before
    the recommendation.
+   Prefer `visualizations` for chart instructions. `__chart_spec__` text blocks
+   are legacy compatibility only and should not be the primary path.
 
    **Self-check before this call:** Have you already submitted a
    conclusion for this run? If yes, **STOP** — do not call anything.

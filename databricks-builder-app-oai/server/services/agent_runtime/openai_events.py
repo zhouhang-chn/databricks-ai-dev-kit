@@ -81,6 +81,7 @@ def _plan_events_from_call(call_id: str, tool_name: str, tool_input: Any) -> lis
       'confidence',
       'recommended_next_step',
       'has_contradiction',
+      'visualizations',
     ):
       if key in args and args.get(key) is not None:
         synthesis_event[key] = args.get(key)

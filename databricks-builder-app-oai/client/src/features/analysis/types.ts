@@ -23,6 +23,11 @@ export interface ChartSpec {
   insight?: string;
 }
 
+export interface StoryVisualization {
+  evidenceId?: string;
+  chartSpec: ChartSpec;
+}
+
 export interface ToolCallSummary {
   toolName: string;
   count: number;
@@ -159,6 +164,7 @@ export type AnalysisEvent =
     confidence?: NarrativeConfidence;
     recommendedNextStep?: string;
     hasContradiction?: boolean;
+    visualizations?: StoryVisualization[];
   }
   | { type: 'conclusion.appended'; storyId: string; text: string }
   | { type: 'thinking.appended'; storyId: string; text: string }
@@ -210,4 +216,6 @@ export interface StreamStoryEvent {
   recommendedNextStep?: unknown;
   has_contradiction?: unknown;
   hasContradiction?: unknown;
+  visualizations?: unknown;
+  visualization_specs?: unknown;
 }

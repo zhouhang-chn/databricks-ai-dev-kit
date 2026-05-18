@@ -10,6 +10,7 @@ const NON_CHART_TOOLS = new Set([
 ]);
 
 const MAX_RENDERABLE_ROWS = 500;
+const SUPPORTED_CHART_TYPES = new Set(['bar', 'line', 'pie', 'scatter']);
 
 type ColumnProfile = {
   name: string;
@@ -90,6 +91,7 @@ export function detectChartSpec(
 
 export function validateChartSpec(spec: ChartSpec, tabular: RowOriented): boolean {
   if (!spec || !spec.chartType || !spec.xField || !Array.isArray(spec.yFields)) return false;
+  if (!SUPPORTED_CHART_TYPES.has(spec.chartType)) return false;
   if (!tabular.columns.includes(spec.xField)) return false;
   if (spec.yFields.length === 0) return false;
   if (!spec.yFields.every((field) => tabular.columns.includes(field))) return false;
