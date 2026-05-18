@@ -1,6 +1,7 @@
 """OpenAI Agents SDK runtime implementation."""
 
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -33,12 +34,48 @@ from .openai_sessions import build_session_id, get_openai_session
 logger = logging.getLogger(__name__)
 ensure_logger_active(logger, set_propagate_false=True)
 
+_EMBEDDED_HTTP_STATUS_PATTERNS = (
+  re.compile(r'<\s*(?P<status>[1-5]\d{2})\s*>'),
+  re.compile(r'\bstatus[_\s-]*code\s*[:=]\s*(?P<status>[1-5]\d{2})\b', re.IGNORECASE),
+  re.compile(r'\bhttp\s*(?P<status>[1-5]\d{2})\b', re.IGNORECASE),
+)
+
 
 def _preview_value(value: object, max_chars: int = 2000) -> str:
   """Return a bounded single-line preview for runtime logs."""
   text = str(value)
   text = text.replace('\n', '\\n')
   return text if len(text) <= max_chars else f'{text[:max_chars]}...'
+
+
+def _extract_embedded_http_status(message: str | None) -> int | None:
+  """Parse embedded HTTP status from wrapped provider error messages."""
+  if not message:
+    return None
+  for pattern in _EMBEDDED_HTTP_STATUS_PATTERNS:
+    match = pattern.search(message)
+    if not match:
+      continue
+    status_text = match.group('status')
+    if not status_text:
+      continue
+    try:
+      return int(status_text)
+    except ValueError:
+      continue
+  return None
+
+
+def _retry_on_wrapped_real_503(context: Any) -> bool:
+  """Retry gateway-wrapped failures when the provider message indicates HTTP 503."""
+  normalized = getattr(context, 'normalized', None)
+  normalized_message = getattr(normalized, 'message', None) if normalized is not None else None
+  if _extract_embedded_http_status(normalized_message) == 503:
+    return True
+
+  # Fallback: some wrappers keep the full provider payload only on context.error.
+  error_text = str(getattr(context, 'error', '') or '')
+  return _extract_embedded_http_status(error_text) == 503
 
 
 def _with_run_metadata(event: dict, request: AgentRunRequest, trace_id: str | None) -> dict:
@@ -280,6 +317,7 @@ class OpenAIAgentRuntime:
         policy=retry_policies.any(
           retry_policies.network_error(),
           retry_policies.http_status([429, 502, 503, 504]),
+          _retry_on_wrapped_real_503,
           retry_policies.retry_after(),
           retry_policies.provider_suggested(),
         ),

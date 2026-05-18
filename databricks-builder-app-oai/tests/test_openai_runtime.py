@@ -8,7 +8,11 @@ import pytest
 from server.services.active_stream import ActiveStream
 from server.services.agent_runtime.openai_events import normalize_openai_event
 from server.services.agent_runtime.openai_models import load_model_settings
-from server.services.agent_runtime.openai_runtime import _resolve_enabled_skills
+from server.services.agent_runtime.openai_runtime import (
+  _extract_embedded_http_status,
+  _resolve_enabled_skills,
+  _retry_on_wrapped_real_503,
+)
 from server.services.logging_utils import ensure_logger_active
 from server.services.project_operating_guide import (
   DEFAULT_PROJECT_OPERATING_GUIDE,
@@ -63,6 +67,23 @@ class ContentPart:
 
   text: str = ''
   type: str = 'output_text'
+
+
+@dataclass
+class RetryNormalized:
+  """Minimal normalized error stub for retry policy testing."""
+
+  status_code: int | None = None
+  error_code: str | None = None
+  message: str | None = None
+
+
+@dataclass
+class RetryContext:
+  """Minimal retry context stub for retry policy testing."""
+
+  error: Exception
+  normalized: RetryNormalized
 
 
 def test_raw_text_delta_event_normalizes_to_text_delta():
@@ -453,6 +474,48 @@ def test_update_plan_revise_marks_plan_created():
   assert follow_up['is_error'] is True
   assert follow_up['error'] == 'plan_already_exists'
   assert 'step-1' in follow_up['next_action_required']
+
+
+def test_extract_embedded_http_status_from_angle_brackets():
+  """Wrapped provider payloads with <503> should be detected."""
+  message = (
+    "Error code: 500 - {'error': {'message': '<503> InternalError.Algo: Too many requests.'}}"
+  )
+  assert _extract_embedded_http_status(message) == 503
+
+
+def test_extract_embedded_http_status_returns_none_without_match():
+  """Messages without an embedded HTTP status should not trigger retries."""
+  assert _extract_embedded_http_status('Error code: 500 - internal failure') is None
+
+
+def test_retry_policy_retries_wrapped_503_from_normalized_message():
+  """Retry should trigger when wrapper reports 500 but embedded status is 503."""
+  context = RetryContext(
+    error=RuntimeError('Error code: 500'),
+    normalized=RetryNormalized(
+      status_code=500,
+      message=(
+        "Error code: 500 - {'error': {'message': "
+        "'<503> InternalError.Algo: Too many requests. throttled'}}"
+      ),
+    ),
+  )
+
+  assert _retry_on_wrapped_real_503(context) is True
+
+
+def test_retry_policy_ignores_wrapped_429():
+  """Only embedded 503 should be handled by this wrapper-specific policy."""
+  context = RetryContext(
+    error=RuntimeError('Error code: 500'),
+    normalized=RetryNormalized(
+      status_code=500,
+      message="Error code: 500 - {'error': {'message': '<429> Too many requests'}}",
+    ),
+  )
+
+  assert _retry_on_wrapped_real_503(context) is False
 
 
 def test_model_settings_require_ai_gateway_env(monkeypatch):
