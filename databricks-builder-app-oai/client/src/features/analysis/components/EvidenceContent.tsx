@@ -3,104 +3,18 @@ import { Download } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { EvidenceBlock } from '@/features/analysis/types';
+import { detectChartSpec, validateChartSpec } from '@/features/analysis/chartDetection';
+import {
+  asRowTable,
+  cellToString,
+  rowsToCsv,
+  safeFilename,
+  tryParseJson,
+} from '@/features/analysis/evidenceData';
 import { cn } from '@/lib/utils';
+import { EvidenceChart } from './EvidenceChart';
 
 const PREVIEW_ROWS = 50;
-
-type RowOriented = { rows: Array<Record<string, unknown>>; columns: string[] };
-
-function tryParseJson(text: string): unknown | null {
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
-/** If the parsed value is row-oriented tabular data, return it normalised. */
-function asRowTable(value: unknown): RowOriented | null {
-  if (Array.isArray(value) && value.length > 0 && value.every(
-    (item) => item && typeof item === 'object' && !Array.isArray(item)
-  )) {
-    const rows = value as Array<Record<string, unknown>>;
-    const columns = Array.from(
-      rows.reduce<Set<string>>((set, row) => {
-        Object.keys(row).forEach((k) => set.add(k));
-        return set;
-      }, new Set())
-    );
-    return { rows, columns };
-  }
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    const obj = value as Record<string, unknown>;
-    const rowsField = obj.rows ?? obj.data ?? obj.results ?? obj.records;
-    if (Array.isArray(rowsField)) {
-      // {rows: [["a", 1], ["b", 2]], columns: ["name", "value"]}
-      if (Array.isArray(rowsField[0]) && Array.isArray(obj.columns)) {
-        const columns = (obj.columns as unknown[]).map(String);
-        const rows = (rowsField as unknown[][]).map((arr) =>
-          Object.fromEntries(columns.map((c, i) => [c, arr[i]]))
-        );
-        return { rows, columns };
-      }
-      // {rows: [{...}, {...}]}
-      if (rowsField.every(
-        (item) => item && typeof item === 'object' && !Array.isArray(item)
-      )) {
-        const rows = rowsField as Array<Record<string, unknown>>;
-        const columns = Array.isArray(obj.columns)
-          ? (obj.columns as unknown[]).map(String)
-          : Array.from(
-            rows.reduce<Set<string>>((set, row) => {
-              Object.keys(row).forEach((k) => set.add(k));
-              return set;
-            }, new Set())
-          );
-        return { rows, columns };
-      }
-    }
-    const output = obj.output;
-    if (typeof output === 'string' && output.startsWith('[[')) {
-      try {
-        const jsonStr = output.replace(/'/g, '"');
-        const rows = JSON.parse(jsonStr) as unknown[][];
-        if (Array.isArray(rows) && rows.length > 0) {
-          const columns = rows[0].map((_, i) => `Col ${i + 1}`);
-          const normalizedRows = rows.map((row) =>
-            Object.fromEntries(columns.map((c, i) => [c, row[i]]))
-          );
-          return { rows: normalizedRows, columns };
-        }
-      } catch { /* fall through */ }
-    }
-  }
-  return null;
-}
-
-function cellToString(value: unknown): string {
-  if (value == null) return '';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function rowsToCsv(columns: string[], rows: Array<Record<string, unknown>>): string {
-  const escape = (raw: string): string => {
-    if (raw === '') return '';
-    if (/[",\n\r]/.test(raw)) return `"${raw.replace(/"/g, '""')}"`;
-    return raw;
-  };
-  const header = columns.map(escape).join(',');
-  const body = rows
-    .map((row) => columns.map((c) => escape(cellToString(row[c]))).join(','))
-    .join('\n');
-  return `${header}\n${body}`;
-}
 
 function downloadBlob(filename: string, content: string, mime: string): void {
   const blob = new Blob([content], { type: `${mime};charset=utf-8;` });
@@ -112,10 +26,6 @@ function downloadBlob(filename: string, content: string, mime: string): void {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-}
-
-function safeFilename(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80) || 'evidence';
 }
 
 function TableStatsRenderer({ data }: { data: any }) {
@@ -248,6 +158,11 @@ export function EvidenceContent({ block }: { block: EvidenceBlock }) {
   const raw = block.rawContent ?? block.content ?? '';
   const parsed = useMemo(() => tryParseJson(raw), [raw]);
   const tabular = useMemo(() => (parsed ? asRowTable(parsed) : null), [parsed]);
+  const chartSpec = useMemo(() => {
+    if (!tabular) return undefined;
+    if (block.chartSpec && validateChartSpec(block.chartSpec, tabular)) return block.chartSpec;
+    return detectChartSpec(tabular, { toolName: block.toolName });
+  }, [block.chartSpec, block.toolName, tabular]);
   const [expanded, setExpanded] = useState(false);
 
   if (block.toolName === 'get_table_stats_and_schema' || block.toolName === 'get_volume_folder_details') {
@@ -288,6 +203,14 @@ export function EvidenceContent({ block }: { block: EvidenceBlock }) {
             CSV
           </button>
         </div>
+        {chartSpec && (
+          <EvidenceChart tabular={tabular} spec={chartSpec} />
+        )}
+        {chartSpec && (
+          <div className="mb-1 mt-2 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+            Table fallback
+          </div>
+        )}
         <div className="evidence-markdown max-w-full overflow-x-auto rounded border border-[var(--color-border)] no-scrollbar">
           <table>
             <thead>

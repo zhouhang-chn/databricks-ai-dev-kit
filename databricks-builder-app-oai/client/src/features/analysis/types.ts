@@ -6,6 +6,22 @@ export type AnalysisStepStatus = 'running' | 'done' | 'error';
 export type NextMoveType = 'drill' | 'compare' | 'validate' | 'explain' | 'pivot';
 export type PlanStepStatus = 'pending' | 'running' | 'done' | 'failed';
 export type NarrativeConfidence = 'high' | 'medium' | 'low';
+export type ChartType = 'bar' | 'line' | 'area' | 'pie' | 'scatter' | 'heatmap';
+
+export interface ChartSpec {
+  chartType: ChartType;
+  xField: string;
+  yFields: string[];
+  colorField?: string;
+  sizeField?: string;
+  xLabel?: string;
+  yLabel?: string;
+  sort?: 'asc' | 'desc' | 'natural';
+  stacked?: boolean;
+  showLabels?: boolean;
+  title?: string;
+  insight?: string;
+}
 
 export interface ToolCallSummary {
   toolName: string;
@@ -80,6 +96,7 @@ export interface EvidenceBlock {
   createdAt: string;
   toolName?: string;
   toolInput?: string;
+  chartSpec?: ChartSpec;
 }
 
 export interface AnalysisStep {

@@ -10,6 +10,8 @@ import type {
   StreamStoryEvent,
   ToolCallSummary,
 } from '@/features/analysis/types';
+import { detectChartSpec } from '@/features/analysis/chartDetection';
+import { asRowTable, tryParseJson as parseJson } from '@/features/analysis/evidenceData';
 
 const UTILITY_TOOL_NAMES = new Set([
   'read_project_file',
@@ -821,12 +823,18 @@ export function storyEventsFromStreamEvent(
     };
     if (isEmptyResult) return [resultEvent];
 
+    const parsed = typeof event.content === 'string' ? parseJson(event.content) : event.content;
+    const tabular = asRowTable(parsed);
+    const chartSpec = !isError && tabular
+      ? detectChartSpec(tabular, { toolName })
+      : undefined;
+
     return [{
       type: 'evidence.appended',
       storyId,
       block: {
         id: evidenceId,
-        type: isError ? 'error' : 'tool_result',
+        type: isError ? 'error' : chartSpec ? 'chart' : 'tool_result',
         title: purpose || (isError
           ? `${friendlyName || 'Tool'} (error)`
           : friendlyName || 'Tool result'),
@@ -836,6 +844,7 @@ export function storyEventsFromStreamEvent(
         createdAt: nowIso(),
         toolName,
         toolInput,
+        chartSpec,
       },
     }, resultEvent];
   }
