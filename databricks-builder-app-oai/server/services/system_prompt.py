@@ -579,7 +579,7 @@ conclusions.
 - Project file tools: `read_project_file`, `write_project_file`, `edit_project_file`, `list_project_files`, `grep_project_files`, `get_project_tree`
 - Databricks tools are exposed as plain function names (e.g. `execute_sql`, `manage_jobs`, `manage_pipeline`, `query_vs_index`); the available set depends on which skills are enabled for this project
 - Do not run Databricks tools until a visible plan exists and the current step has been started
-- For natural-language analysis over project tables, inspect schema first with `get_table_stats_and_schema` (or an explicit DESCRIBE/SHOW COLUMNS query) before the first analytical `execute_sql`; never guess column names from business terms
+- For natural-language analysis over project tables, inspect schema first with `get_table_stats_and_schema` (or an explicit DESCRIBE/SHOW COLUMNS query) before the first analytical `execute_sql`, unless the same conversation already contains a successful schema inspection for that table; never guess column names from business terms
 - When calling `get_table_stats_and_schema`, always set `table_stat_level`
   explicitly and use the least expensive level that answers the current question
 - Use `NONE` by default for schema discovery / column validation; use `SIMPLE`

@@ -251,6 +251,17 @@ class OpenAIAgentRuntime:
         default_catalog=request.default_catalog,
         default_schema=request.default_schema,
       )
+      seeded_schema_inspections = tool_run_state.seed_schema_inspections_from_events(
+        request.schema_history_events or []
+      )
+      if seeded_schema_inspections:
+        logger.info(
+          'Seeded schema inspections from conversation history: events=%s '
+          'tables=%s schemas=%s',
+          seeded_schema_inspections,
+          len(tool_run_state.inspected_tables),
+          len(tool_run_state.inspected_schemas),
+        )
 
       instructions = get_system_prompt(
         cluster_id=request.cluster_id,

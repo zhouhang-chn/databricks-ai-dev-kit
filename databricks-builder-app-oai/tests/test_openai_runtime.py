@@ -731,6 +731,71 @@ def test_execute_sql_requires_schema_for_configured_project_tables(tmp_path):
   assert 'Do not guess column names' in blocked['error']
 
 
+def test_schema_history_events_unlock_configured_project_tables(tmp_path):
+  """Prior successful schema tool results should satisfy the SQL schema gate."""
+  run_state = AgentToolRunState(
+    project_dir=tmp_path,
+    schema_required_tables={'cat.sch.pilot_bdr_visit_record_seg'},
+  )
+
+  seeded = run_state.seed_schema_inspections_from_events([
+    {
+      'type': 'tool_result',
+      'tool_name': 'get_table_stats_and_schema',
+      'tool_input': {
+        'catalog': 'cat',
+        'schema': 'sch',
+        'table_names': ['pilot_bdr_visit_record_seg'],
+      },
+      'content': json.dumps({
+        'catalog': 'cat',
+        'schema_name': 'sch',
+        'tables': [{
+          'name': 'pilot_bdr_visit_record_seg',
+          'column_details': {'employee_no': {'data_type': 'string'}},
+        }],
+      }),
+      'is_error': False,
+    }
+  ])
+
+  assert seeded == 1
+  assert run_state.sql_schema_gate_error(
+    'SELECT COUNT(DISTINCT employee_no) FROM cat.sch.pilot_bdr_visit_record_seg'
+  ) is None
+
+
+def test_failed_schema_history_event_does_not_unlock_sql(tmp_path):
+  """Failed or empty schema history must not bypass the SQL schema gate."""
+  run_state = AgentToolRunState(
+    project_dir=tmp_path,
+    schema_required_tables={'cat.sch.pilot_bdr_visit_record_seg'},
+  )
+
+  seeded = run_state.seed_schema_inspections_from_events([
+    {
+      'type': 'tool_result',
+      'tool_name': 'get_table_stats_and_schema',
+      'tool_input': {
+        'catalog': 'cat',
+        'schema': 'sch',
+        'table_names': ['pilot_bdr_visit_record_seg'],
+      },
+      'content': json.dumps({
+        'catalog': 'cat',
+        'schema_name': 'sch',
+        'tables': [],
+      }),
+      'is_error': False,
+    }
+  ])
+
+  assert seeded == 0
+  assert run_state.sql_schema_gate_error(
+    'SELECT COUNT(DISTINCT employee_no) FROM cat.sch.pilot_bdr_visit_record_seg'
+  ) is not None
+
+
 def test_execute_sql_uses_configured_cluster_when_warehouse_missing(monkeypatch, tmp_path):
   """A configured cluster is used for SQL when no warehouse is configured."""
   from databricks_tools_core.compute import ExecutionResult

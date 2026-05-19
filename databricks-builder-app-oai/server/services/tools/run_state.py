@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 _TABLE_REF_RE = re.compile(
   r'\b(?:from|join|into|update|table)\s+`?([a-zA-Z_][\w-]*)`?'
@@ -46,6 +49,67 @@ def _split_table_name(table_name: str) -> tuple[str | None, str | None, str | No
   if len(parts) == 1:
     return None, None, parts[0]
   return None, None, None
+
+
+def _normalize_tool_name(tool_name: Any) -> str:
+  normalized = str(tool_name or '').strip()
+  if normalized.startswith('mcp__databricks__'):
+    normalized = normalized.removeprefix('mcp__databricks__')
+  return normalized
+
+
+def _parse_json_value(value: Any) -> Any:
+  if not isinstance(value, str):
+    return value
+  stripped = value.strip()
+  if not stripped:
+    return value
+  if stripped.startswith('```'):
+    lines = stripped.splitlines()
+    if lines and lines[0].startswith('```'):
+      lines = lines[1:]
+    if lines and lines[-1].startswith('```'):
+      lines = lines[:-1]
+    stripped = '\n'.join(lines).strip()
+  try:
+    return json.loads(stripped)
+  except json.JSONDecodeError:
+    return value
+
+
+def _coerce_table_names(value: Any) -> list[str] | None:
+  parsed = _parse_json_value(value)
+  if parsed is None:
+    return None
+  if isinstance(parsed, str):
+    return [parsed] if parsed.strip() else None
+  if isinstance(parsed, list):
+    names = [str(item).strip() for item in parsed if str(item).strip()]
+    return names or None
+  return None
+
+
+def _table_names_from_schema_payload(payload: dict[str, Any]) -> list[str] | None:
+  tables = payload.get('tables')
+  if not isinstance(tables, list):
+    return None
+
+  names: list[str] = []
+  for table in tables:
+    if isinstance(table, str):
+      name = table
+    elif isinstance(table, dict):
+      name = (
+        table.get('full_name')
+        or table.get('table_full_name')
+        or table.get('name')
+        or table.get('table_name')
+      )
+    else:
+      name = None
+    if name:
+      names.append(str(name).strip())
+  return names or None
 
 
 @dataclass
@@ -159,6 +223,57 @@ class AgentToolRunState:
         table = self._normalize_match_table(match.groups())
         if table:
           self.inspected_tables.add(table)
+
+  def seed_schema_inspections_from_events(self, events: Iterable[dict[str, Any]]) -> int:
+    """Record trusted schema inspections from prior structured tool events.
+
+    Only successful tool result events are trusted. Free-form assistant text is
+    intentionally ignored so the SQL guard remains grounded in actual schema
+    evidence from this conversation.
+    """
+    seeded = 0
+    for event in events:
+      if not isinstance(event, dict) or event.get('is_error') is True:
+        continue
+      tool_name = _normalize_tool_name(event.get('tool_name') or event.get('name'))
+      tool_input = _parse_json_value(event.get('tool_input')) or {}
+      if not isinstance(tool_input, dict):
+        tool_input = {}
+
+      if tool_name == 'get_table_stats_and_schema':
+        content = _parse_json_value(event.get('content'))
+        if not isinstance(content, dict) or content.get('error'):
+          continue
+
+        tables_value = content.get('tables')
+        table_names = _table_names_from_schema_payload(content)
+        if isinstance(tables_value, list) and not table_names:
+          continue
+        table_names = table_names or _coerce_table_names(tool_input.get('table_names'))
+        before = (len(self.inspected_tables), len(self.inspected_schemas))
+        self.mark_schema_inspected(
+          catalog=content.get('catalog') or content.get('catalog_name') or tool_input.get('catalog'),
+          schema=content.get('schema_name') or content.get('schema') or tool_input.get('schema'),
+          table_names=table_names,
+        )
+        after = (len(self.inspected_tables), len(self.inspected_schemas))
+        if after != before:
+          seeded += 1
+        continue
+
+      if tool_name in {'execute_sql', 'execute_sql_multi'}:
+        sql_query = (
+          tool_input.get('sql_query')
+          or tool_input.get('sql_content')
+          or tool_input.get('query')
+          or tool_input.get('sql')
+          or ''
+        )
+        before = len(self.inspected_tables)
+        self.mark_sql_schema_inspection(str(sql_query))
+        if len(self.inspected_tables) != before:
+          seeded += 1
+    return seeded
 
   def sql_schema_gate_error(self, sql_query: str) -> dict | None:
     """Require schema inspection before first SQL against configured tables."""

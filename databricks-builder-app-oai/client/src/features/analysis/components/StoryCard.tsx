@@ -7,6 +7,7 @@ import {
   Circle,
   FileText,
   Loader2,
+  Pin,
   RotateCcw,
   Search,
   Sparkles,
@@ -62,6 +63,27 @@ function StatusBadge({ status }: { status: AnalysisStory['status'] }) {
       )}
       {label}
     </span>
+  );
+}
+
+function SuggestedNextStepButton({
+  step,
+  onSelect,
+}: {
+  step: string;
+  onSelect: (step: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect(step);
+      }}
+      className="min-h-11 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-left text-xs leading-5 text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-accent-primary)]/40 hover:text-[var(--color-accent-primary)]"
+    >
+      {step}
+    </button>
   );
 }
 
@@ -360,16 +382,6 @@ function ConclusionCard({
           ))}
         </div>
       )}
-      {conclusion.nextSteps.length > 0 && (
-        <div>
-          <div className="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Suggested next steps</div>
-          <ul className="space-y-0.5 text-[12px] text-[var(--color-text-primary)]">
-            {conclusion.nextSteps.map((s, i) => (
-              <li key={i}>· {s}</li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }
@@ -437,12 +449,14 @@ export function StoryCard({
   story,
   isActive,
   onSelect,
+  onSuggestedNextStep,
   onRetry,
   retryDisabled,
 }: {
   story: AnalysisStory;
   isActive: boolean;
   onSelect: (storyId: string) => void;
+  onSuggestedNextStep: (step: string) => void;
   onRetry: (story: AnalysisStory) => void;
   retryDisabled: boolean;
 }) {
@@ -455,6 +469,17 @@ export function StoryCard({
   const showScoping = !plan && isStreaming;
   const inlineEvidence = useMemo(() => selectInlineEvidence(story), [story]);
   const showInlineEvidence = !isStreaming && inlineEvidence.blocks.length > 0;
+  const suggestedNextSteps = useMemo(() => {
+    const seen = new Set<string>();
+    return (story.conclusion?.nextSteps || [])
+      .map((step) => step.trim())
+      .filter((step) => {
+        const key = step.toLowerCase();
+        if (!step || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }, [story.conclusion?.nextSteps]);
 
   return (
     <article
@@ -573,6 +598,24 @@ export function StoryCard({
           </div>
         )}
       </section>
+
+      {suggestedNextSteps.length > 0 && !story.failure?.retryable && (
+        <section className="mt-6 border-t border-[var(--color-border)]/60 pt-4">
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-[var(--color-text-muted)]">
+            <Pin className="h-3.5 w-3.5" />
+            Suggested next steps
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {suggestedNextSteps.map((step) => (
+              <SuggestedNextStepButton
+                key={step}
+                step={step}
+                onSelect={onSuggestedNextStep}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
     </article>
   );

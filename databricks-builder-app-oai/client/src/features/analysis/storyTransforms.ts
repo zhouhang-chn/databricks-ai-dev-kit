@@ -808,9 +808,7 @@ export function reduceAnalysisEvent(
           insight: event.insight || story.narrative?.insight,
           caveat: event.caveat || story.narrative?.caveat,
           confidence: event.confidence || story.narrative?.confidence,
-          recommendedNextStep: event.recommendedNextStep
-            || incomingNextSteps[0]
-            || story.narrative?.recommendedNextStep,
+          recommendedNextStep: event.recommendedNextStep || story.narrative?.recommendedNextStep,
           hasContradiction: typeof event.hasContradiction === 'boolean'
             ? event.hasContradiction
             : story.narrative?.hasContradiction,

@@ -56,7 +56,9 @@ Analysis Agent. It is not the project payload.
 - Start data work with a concise visible plan and execute one started step at a
   time.
 - Before analytical SQL, inspect the schema of configured tables or metric views
-  and verify column names instead of inferring them from business language.
+  unless the same conversation already has a successful schema inspection for
+  the table. Verify column names instead of inferring them from business
+  language.
 - When using `get_table_stats_and_schema`, always set `table_stat_level`
   explicitly. Prefer `NONE` for schema discovery and column validation; use
   `SIMPLE` or `DETAILED` only when the current question requires actual stats.

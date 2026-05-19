@@ -24,7 +24,7 @@ from ..services.active_stream import get_stream_manager
 from ..services.agent import get_project_directory, stream_agent_response
 from ..services.backup_manager import mark_for_backup
 from ..services.logging_utils import ensure_logger_active
-from ..services.storage import ConversationStorage, ProjectStorage
+from ..services.storage import ConversationStorage, ExecutionStorage, ProjectStorage
 from ..services.title_generator import generate_title_async
 from ..services.user import get_current_token, get_current_user, get_workspace_url
 
@@ -34,11 +34,56 @@ router = APIRouter()
 
 # SSE streaming window duration (seconds) - break before 60s timeout
 SSE_WINDOW_SECONDS = 50
+SCHEMA_HISTORY_TOOL_NAMES = {
+    'get_table_stats_and_schema',
+    'execute_sql',
+    'execute_sql_multi',
+}
 
 
 def sse_event(data: dict) -> str:
     """Format data as SSE event."""
     return f'data: {json.dumps(data)}\n\n'
+
+
+def _normalize_tool_name(tool_name: object) -> str:
+    """Normalize tool names from persisted stream events."""
+    normalized = str(tool_name or '').strip()
+    if normalized.startswith('mcp__databricks__'):
+        normalized = normalized.removeprefix('mcp__databricks__')
+    return normalized
+
+
+def _schema_history_events_from_executions(
+    executions: list[Any],
+    *,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Extract prior schema-bearing tool result events from executions."""
+    history: list[dict[str, Any]] = []
+    for execution in reversed(executions):
+        try:
+            events = json.loads(getattr(execution, 'events_json', '') or '[]')
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(events, list):
+            continue
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            if event.get('type') != 'tool_result' or event.get('is_error') is True:
+                continue
+            tool_name = _normalize_tool_name(event.get('tool_name'))
+            if tool_name not in SCHEMA_HISTORY_TOOL_NAMES:
+                continue
+            history.append({
+                'type': 'tool_result',
+                'tool_name': tool_name,
+                'tool_input': event.get('tool_input'),
+                'content': event.get('content'),
+                'is_error': False,
+            })
+    return history[-limit:]
 
 
 def _synthesis_summary_from_event(event: dict[str, Any]) -> str:
@@ -222,6 +267,23 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
 
     # Get session_id from conversation for resumption
     session_id = conversation.session_id if conversation else None
+    schema_history_events: list[dict[str, Any]] = []
+    try:
+        recent_executions = await ExecutionStorage(
+            user_email,
+            body.project_id,
+            conversation_id,
+        ).get_recent(limit=10)
+        schema_history_events = _schema_history_events_from_executions(recent_executions)
+        if schema_history_events:
+            logger.info(
+                'Loaded prior schema history events: project=%s conversation=%s count=%s',
+                body.project_id,
+                conversation_id,
+                len(schema_history_events),
+            )
+    except Exception as e:
+        logger.warning('Failed to load schema history events: %s', e)
 
     # Create active stream with user_email for persistence
     stream_manager = get_stream_manager()
@@ -298,6 +360,7 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                 enabled_skills=enabled_skills,
                 mlflow_experiment_name=effective_mlflow_experiment_name,
                 project_context=project_context,
+                schema_history_events=schema_history_events,
                 execution_id=stream.execution_id,
                 story_id=story_id,
             ):

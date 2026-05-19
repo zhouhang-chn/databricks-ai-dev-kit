@@ -16,7 +16,9 @@ OPENAI_AGENTS_DISABLE_TRACING=1
 
 `deepseek-v4-pro` is used for agent work. `deepseek-v4-flash` is used for cheaper metadata tasks such as title generation.
 
-Follow-up suggestions come from the terminal `submit_conclusion.next_steps` payload. The app does not run a separate post-response Next Moves generator, which avoids an extra model call and keeps the visible follow-ups consistent with the final synthesis.
+Follow-up suggestions come from the terminal `submit_conclusion.next_steps` payload and render as clickable chips under the answer. The app does not run a separate post-response Next Moves generator, which avoids an extra model call and keeps the visible follow-ups consistent with the final synthesis.
+
+SQL schema checks are conversation-aware. The runtime still blocks analytical SQL over configured project tables when no schema is known, but a successful prior `get_table_stats_and_schema`, `DESCRIBE`, or `SHOW COLUMNS` event in the same conversation seeds the next run so repeated follow-up questions do not re-inspect the same table.
 
 ## Local Development
 

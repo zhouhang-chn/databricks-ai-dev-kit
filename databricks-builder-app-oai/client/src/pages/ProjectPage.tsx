@@ -1850,6 +1850,11 @@ export default function ProjectPage() {
     void submitMessage(story.question, { clearInput: false });
   }, [submitMessage]);
 
+  const handleSuggestedNextStep = useCallback((step: string) => {
+    setInput(step);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
+
   const handleStarterPrompt = useCallback((prompt: string) => {
     setInput(prompt);
     requestAnimationFrame(() => inputRef.current?.focus());
@@ -1997,6 +2002,7 @@ export default function ProjectPage() {
                     stories={analysisStories}
                     activeStoryId={activeStoryId}
                     onSelectStory={setActiveStoryId}
+                    onSuggestedNextStep={handleSuggestedNextStep}
                     onRetryStory={handleRetryStory}
                     retryDisabled={isStreamingHere}
                     emptyTitle={runRole === 'user_preview' ? 'What would a user ask?' : 'What can I help you build?'}

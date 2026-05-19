@@ -6,6 +6,7 @@ export function StoryCanvas({
   stories,
   activeStoryId,
   onSelectStory,
+  onSuggestedNextStep,
   onRetryStory,
   retryDisabled,
   emptyTitle,
@@ -16,6 +17,7 @@ export function StoryCanvas({
   stories: AnalysisStory[];
   activeStoryId?: string;
   onSelectStory: (storyId: string) => void;
+  onSuggestedNextStep: (step: string) => void;
   onRetryStory: (story: AnalysisStory) => void;
   retryDisabled: boolean;
   emptyTitle: string;
@@ -77,6 +79,7 @@ export function StoryCanvas({
             story={story}
             isActive={story.id === activeStoryId}
             onSelect={onSelectStory}
+            onSuggestedNextStep={onSuggestedNextStep}
             onRetry={onRetryStory}
             retryDisabled={retryDisabled}
           />

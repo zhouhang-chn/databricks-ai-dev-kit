@@ -109,6 +109,7 @@ async def stream_agent_response(
   enabled_skills: list[str] | None = None,
   mlflow_experiment_name: str | None = None,
   project_context: dict[str, Any] | None = None,
+  schema_history_events: list[dict[str, Any]] | None = None,
 ) -> AsyncIterator[dict]:
   """Stream OpenAI Agents SDK events normalized for the Builder App UI."""
   ensure_logger_active(logger, set_propagate_false=True)
@@ -142,6 +143,7 @@ async def stream_agent_response(
     enabled_skills=enabled_skills,
     mlflow_experiment_name=mlflow_experiment_name,
     project_context=project_context,
+    schema_history_events=schema_history_events,
     is_cancelled_fn=is_cancelled_fn or (lambda: False),
   )
 

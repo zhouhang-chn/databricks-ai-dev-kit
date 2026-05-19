@@ -26,6 +26,7 @@ class AgentRunRequest:
   enabled_skills: list[str] | None = None
   mlflow_experiment_name: str | None = None
   project_context: dict[str, Any] | None = None
+  schema_history_events: list[dict[str, Any]] | None = None
   is_cancelled_fn: Callable[[], bool] | None = None
 
 
