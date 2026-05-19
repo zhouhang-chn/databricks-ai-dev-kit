@@ -164,6 +164,9 @@ export function EvidenceContent({ block }: { block: EvidenceBlock }) {
     return detectChartSpec(tabular, { toolName: block.toolName });
   }, [block.chartSpec, block.toolName, tabular]);
   const [expanded, setExpanded] = useState(false);
+  const [evidenceView, setEvidenceView] = useState<'both' | 'chart' | 'table'>('both');
+  const [activeRowIndex, setActiveRowIndex] = useState<number | null>(null);
+  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
 
   if (block.toolName === 'get_table_stats_and_schema' || block.toolName === 'get_volume_folder_details') {
     if (parsed && typeof parsed === 'object') {
@@ -204,30 +207,81 @@ export function EvidenceContent({ block }: { block: EvidenceBlock }) {
           </button>
         </div>
         {chartSpec && (
-          <EvidenceChart tabular={tabular} spec={chartSpec} />
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="inline-flex rounded border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/40 p-0.5 text-[10px]">
+              {(['both', 'chart', 'table'] as const).map((view) => (
+                <button
+                  key={view}
+                  type="button"
+                  onClick={() => setEvidenceView(view)}
+                  className={cn(
+                    'rounded px-2 py-0.5 capitalize transition-colors',
+                    evidenceView === view
+                      ? 'bg-[var(--color-background)] text-[var(--color-text-heading)] shadow-sm'
+                      : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'
+                  )}
+                >
+                  {view}
+                </button>
+              ))}
+            </div>
+            {selectedRowIndex !== null && (
+              <button
+                type="button"
+                onClick={() => setSelectedRowIndex(null)}
+                className="text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-accent-primary)]"
+              >
+                Clear selection
+              </button>
+            )}
+          </div>
         )}
-        {chartSpec && (
+        {chartSpec && evidenceView !== 'table' && (
+          <EvidenceChart
+            tabular={tabular}
+            spec={chartSpec}
+            activeRowIndex={activeRowIndex}
+            selectedRowIndex={selectedRowIndex}
+            onActiveRowChange={setActiveRowIndex}
+            onSelectRow={(rowIndex) => {
+              setSelectedRowIndex((current) => (current === rowIndex ? null : rowIndex));
+            }}
+          />
+        )}
+        {chartSpec && evidenceView !== 'chart' && (
           <div className="mb-1 mt-2 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
             Table fallback
           </div>
         )}
-        <div className="evidence-markdown max-w-full overflow-x-auto rounded border border-[var(--color-border)] no-scrollbar">
-          <table>
-            <thead>
-              <tr>{tabular.columns.map((c) => <th key={c}>{c}</th>)}</tr>
-            </thead>
-            <tbody>
-              {visibleRows.map((row, idx) => (
-                <tr key={idx}>
-                  {tabular.columns.map((c) => (
-                    <td key={c}>{cellToString(row[c])}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {truncated && (
+        {evidenceView !== 'chart' && (
+          <div className="evidence-markdown max-w-full overflow-x-auto rounded border border-[var(--color-border)] no-scrollbar">
+            <table>
+              <thead>
+                <tr>{tabular.columns.map((c) => <th key={c}>{c}</th>)}</tr>
+              </thead>
+              <tbody>
+                {visibleRows.map((row, idx) => (
+                  <tr
+                    key={idx}
+                    onMouseEnter={() => setActiveRowIndex(idx)}
+                    onMouseLeave={() => setActiveRowIndex(null)}
+                    onClick={() => setSelectedRowIndex((current) => (current === idx ? null : idx))}
+                    className={cn(
+                      'cursor-pointer transition-colors',
+                      activeRowIndex === idx && 'bg-[var(--color-bg-secondary)]/70',
+                      selectedRowIndex === idx && 'bg-[var(--color-accent-primary)]/10'
+                    )}
+                  >
+                    {tabular.columns.map((c) => (
+                      <td key={c}>{cellToString(row[c])}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {truncated && evidenceView !== 'chart' && (
           <button
             type="button"
             onClick={() => setExpanded(true)}

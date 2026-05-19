@@ -10,7 +10,7 @@ const NON_CHART_TOOLS = new Set([
 ]);
 
 const MAX_RENDERABLE_ROWS = 500;
-const SUPPORTED_CHART_TYPES = new Set(['bar', 'line', 'pie', 'scatter']);
+const SUPPORTED_CHART_TYPES = new Set(['bar', 'line', 'area', 'pie', 'scatter']);
 
 type ColumnProfile = {
   name: string;
@@ -18,6 +18,8 @@ type ColumnProfile = {
   dateLikeCount: number;
   distinctValues: number;
   nonNullCount: number;
+  minNumeric?: number;
+  maxNumeric?: number;
 };
 
 export function detectChartSpec(
@@ -30,9 +32,9 @@ export function detectChartSpec(
   if (tabular.columns.length < 2) return undefined;
 
   const profiles = profileColumns(tabular);
-  const numeric = profiles.filter((p) => isMostlyNumeric(p));
   const temporal = profiles.filter((p) => isMostlyTemporal(p));
-  const categorical = profiles.filter((p) => !isMostlyNumeric(p));
+  const numeric = profiles.filter((p) => isMostlyNumeric(p) && !temporal.includes(p));
+  const categorical = profiles.filter((p) => !isMostlyNumeric(p) && !temporal.includes(p));
 
   if (numeric.length === 0) return undefined;
 
@@ -45,8 +47,25 @@ export function detectChartSpec(
     .map((p) => p.name)
     .filter((name) => name !== xField)
     .slice(0, 3);
+  const breakdownField = categorical.find((p) => (
+    p.name !== xField
+    && p.distinctValues > 1
+    && p.distinctValues <= 20
+  ))?.name;
 
   if (yFields.length === 0) return undefined;
+
+  if (temporal.some((p) => p.name === xField)) {
+    return {
+      chartType: 'line',
+      xField,
+      yFields,
+      title: `${yFields.join(', ')} trend`,
+      insight: `Trend over ${xField}.`,
+      sort: 'asc',
+      colorField: breakdownField,
+    };
+  }
 
   if (shouldUseScatter(tabular, numeric, xField)) {
     return {
@@ -58,7 +77,7 @@ export function detectChartSpec(
     };
   }
 
-  if (shouldUsePie(tabular, xField, yFields[0])) {
+  if (shouldUsePie(tabular, xField, yFields[0], categorical)) {
     return {
       chartType: 'pie',
       xField,
@@ -69,23 +88,14 @@ export function detectChartSpec(
     };
   }
 
-  if (temporal.some((p) => p.name === xField)) {
-    return {
-      chartType: 'line',
-      xField,
-      yFields,
-      title: `${yFields.join(', ')} trend`,
-      insight: `Trend over ${xField}.`,
-    };
-  }
-
   return {
     chartType: 'bar',
     xField,
     yFields,
     title: `${yFields.join(', ')} by ${xField}`,
     insight: `Compare categories by magnitude.`,
-    sort: 'desc',
+    sort: breakdownField ? 'natural' : 'desc',
+    colorField: breakdownField,
   };
 }
 
@@ -105,6 +115,8 @@ function profileColumns(tabular: RowOriented): ColumnProfile[] {
     let numericCount = 0;
     let dateLikeCount = 0;
     let nonNullCount = 0;
+    let minNumeric: number | undefined;
+    let maxNumeric: number | undefined;
     const distinct = new Set<string>();
 
     for (const row of tabular.rows) {
@@ -112,7 +124,12 @@ function profileColumns(tabular: RowOriented): ColumnProfile[] {
       if (value == null || value === '') continue;
       nonNullCount += 1;
       distinct.add(String(value));
-      if (coerceNumber(value) !== undefined) numericCount += 1;
+      const numeric = coerceNumber(value);
+      if (numeric !== undefined) {
+        numericCount += 1;
+        minNumeric = minNumeric === undefined ? numeric : Math.min(minNumeric, numeric);
+        maxNumeric = maxNumeric === undefined ? numeric : Math.max(maxNumeric, numeric);
+      }
       if (isLikelyDateString(value)) dateLikeCount += 1;
     }
 
@@ -122,6 +139,8 @@ function profileColumns(tabular: RowOriented): ColumnProfile[] {
       dateLikeCount,
       distinctValues: distinct.size,
       nonNullCount,
+      minNumeric,
+      maxNumeric,
     };
   });
 }
@@ -133,7 +152,28 @@ function isMostlyNumeric(profile: ColumnProfile): boolean {
 
 function isMostlyTemporal(profile: ColumnProfile): boolean {
   if (profile.nonNullCount === 0) return false;
+  if (isLikelyTemporalColumnName(profile.name) && hasTemporalValueShape(profile)) return true;
   return profile.dateLikeCount / profile.nonNullCount >= 0.8;
+}
+
+function isLikelyTemporalColumnName(name: string): boolean {
+  if (/(pct|percent|percentage|rate|ratio|amount|count|total|score|avg|average|sum)$/i.test(name)) {
+    return false;
+  }
+  return /(^|_)(date|time|timestamp|month|yearmonth|yyyymm|year_month|week|quarter|period|day)(_|$)/i.test(name)
+    || /(_at|_ts)$/i.test(name);
+}
+
+function hasTemporalValueShape(profile: ColumnProfile): boolean {
+  if (profile.dateLikeCount > 0) return true;
+  if (profile.numericCount / profile.nonNullCount < 0.8) return false;
+  const min = profile.minNumeric;
+  const max = profile.maxNumeric;
+  if (min === undefined || max === undefined) return true;
+  if (min >= 1900 && max <= 2200) return true;
+  if (min >= 190001 && max <= 220012) return true;
+  if (profile.distinctValues <= 60 && min >= 1 && max <= 366) return true;
+  return false;
 }
 
 function shouldUseScatter(
@@ -147,8 +187,16 @@ function shouldUseScatter(
   return false;
 }
 
-function shouldUsePie(tabular: RowOriented, xField: string, yField: string): boolean {
+function shouldUsePie(
+  tabular: RowOriented,
+  xField: string,
+  yField: string,
+  categoricalColumns: ColumnProfile[]
+): boolean {
   if (tabular.rows.length < 2 || tabular.rows.length > 12) return false;
+  if (categoricalColumns.some((column) => column.name !== xField && column.distinctValues > 1)) return false;
+  const xValues = tabular.rows.map((row) => String(row[xField] ?? ''));
+  if (new Set(xValues).size !== xValues.length) return false;
   const total = tabular.rows.reduce((sum, row) => {
     const value = coerceNumber(row[yField]);
     return value !== undefined && value >= 0 ? sum + value : sum;
