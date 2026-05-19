@@ -989,14 +989,38 @@ export default function ProjectPage() {
       const dbStories = storiesFromMessages({ messages: nextMessages, messageTools: messageToolsRef.current });
       if (prev.length === 0) return dbStories;
 
+      const storyMessageIds = (story: AnalysisStory): string[] => story.context.messageIds || [];
+      const hasSharedMessageId = (left: AnalysisStory, right: AnalysisStory): boolean => {
+        const rightIds = new Set(storyMessageIds(right));
+        return storyMessageIds(left).some((id) => rightIds.has(id));
+      };
+      const isUnfinished = (story: AnalysisStory): boolean => (
+        story.status !== 'done' && story.status !== 'error'
+      );
+      const sameQuestionAndConversation = (left: AnalysisStory, right: AnalysisStory): boolean => (
+        left.conversationId === right.conversationId
+        && left.question.trim() === right.question.trim()
+      );
+      const findLiveMatch = (dbStory: AnalysisStory): AnalysisStory | undefined => {
+        const exact = prev.find((liveStory) => liveStory.id === dbStory.id);
+        if (exact) return exact;
+
+        const byMessageId = prev.find((liveStory) => hasSharedMessageId(liveStory, dbStory));
+        if (byMessageId) return byMessageId;
+
+        // Only use text matching to bridge a temporary live story to a newly
+        // persisted, unfinished user turn. Repeated identical questions must
+        // not merge a new running story into an older completed DB story.
+        if (!isUnfinished(dbStory)) return undefined;
+        return prev.find((liveStory) => (
+          isUnfinished(liveStory) && sameQuestionAndConversation(liveStory, dbStory)
+        ));
+      };
+
       // 1. Process dbStories and merge with matching live stories
       const matchedLiveIds = new Set<string>();
       const updatedDbStories = dbStories.map(dbStory => {
-        const match = prev.find(liveStory => 
-          liveStory.id === dbStory.id || 
-          (liveStory.conversationId === dbStory.conversationId && 
-           liveStory.question.trim() === dbStory.question.trim())
-        );
+        const match = findLiveMatch(dbStory);
 
         if (match) {
           matchedLiveIds.add(match.id);
@@ -1018,7 +1042,7 @@ export default function ProjectPage() {
       // 2. Preserve "live" stories that weren't matched in dbStories
       // These are stories currently running or streaming that haven't been saved to DB yet
       const orphanedLiveStories = prev.filter(liveStory => 
-        liveStory.conversationId === currentConversation?.id &&
+        liveStory.conversationId === currentConvIdRef.current &&
         !matchedLiveIds.has(liveStory.id) && 
         (liveStory.status === 'running' || liveStory.status === 'planning' || liveStory.trace.length > 0)
       );
