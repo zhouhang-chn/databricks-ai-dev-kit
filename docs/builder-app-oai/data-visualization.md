@@ -169,6 +169,37 @@ highlighting the exception rather than the overall pattern.
    choose the visualization. Phase 3 gives the model a dedicated tool.
    Each phase improves chart quality without breaking the prior one.
 
+## Current Renderer Gaps
+
+The current frontend uses a hand-rolled SVG/HTML renderer in
+`EvidenceChart.tsx`. It is useful as a proof of concept, but it is now the
+main blocker for production-quality visual evidence:
+
+1. **Coordinates are incomplete.** Line and scatter charts draw only the axis
+   baselines and a small amount of text. They do not render y-axis ticks,
+   x-axis tick series, gridlines, numeric domains, or responsive label
+   collision handling. Bar charts are rendered as progress-bar rows, so users
+   can compare relative magnitude but cannot read a real chart scale.
+2. **Temporal fields can be misclassified.** Encoded time fields such as
+   `yearmonth`, `yyyymm`, `month`, `week`, and `period` can be treated as
+   numeric scatter axes instead of ordered time dimensions.
+3. **Mixed units share one scale.** Results that combine volume fields
+   (`total_records`, counts, amounts) with rate fields (`achieved_pct`,
+   percentages, ratios) need dual-axis combo charts. A single y-axis makes the
+   rate line unreadable beside large counts.
+4. **Breakdown rows repeat the x-axis.** Time-series results that include an
+   extra category dimension can produce repeated x ticks. For mixed-unit
+   summaries, the chart should keep one x bucket per period while preserving
+   the breakdown as separate count bars and rate lines. Aggregation is only
+   allowed for duplicate rows at the exact `(xField, colorField)` grain.
+5. **Charts are not interactive.** There is no tooltip, active mark state,
+   keyboard focus state, legend toggle, point/bar/slice selection, or linked
+   highlight between a chart mark and its backing table row.
+
+The next visualization change should therefore replace the renderer layer with
+Recharts while keeping the existing evidence data contract (`ChartSpec` +
+`RowOriented`) stable.
+
 ## Chart Specification
 
 The `ChartSpec` is the contract between detection (client heuristic or
@@ -272,8 +303,13 @@ function detectChartSpec(
     };
   }
 
-  // Composition: 1 category + 1 numeric, very few rows → pie
-  if (categoryCols.length === 1 && numericCols.length === 1 && rows.length <= 8) {
+  // Composition: 1 category + 1 numeric, very few unique categories → pie
+  if (
+    categoryCols.length === 1
+    && numericCols.length === 1
+    && rows.length <= 8
+    && new Set(rows.map((r) => r[categoryCols[0]])).size === rows.length
+  ) {
     return {
       chartType: 'pie',
       xField: categoryCols[0],
@@ -287,6 +323,7 @@ function detectChartSpec(
       chartType: 'bar',
       xField: categoryCols[0],
       yFields: numericCols.slice(0, 3),
+      colorField: categoryCols[1],
       sort: rows.length > 10 ? 'desc' : 'natural',
     };
   }
@@ -313,7 +350,7 @@ function isLikelyDateColumn(col: string): boolean {
 ### How Rendering Works
 
 **Library:** Recharts — React-native, declarative, CSS-variable-aware,
-~150 KB gzipped.
+and already aligned with the documented chart direction.
 
 | Factor | Recharts | D3 | Observable Plot | ECharts |
 |--------|----------|----|-----------------|---------|
@@ -322,12 +359,43 @@ function isLikelyDateColumn(col: string): boolean {
 | Declarative | ✅ | ❌ | ✅ | ✅ |
 | Dark mode | CSS vars | Manual | CSS | Theme |
 
+**Renderer responsibilities:**
+
+- Render complete axes for Cartesian charts: x-axis ticks, y-axis ticks,
+  axis labels, gridlines, numeric/date formatting, and responsive tick
+  reduction for narrow evidence cards.
+- Render mixed-unit trend results as dual-axis combo charts: count/volume
+  measures as bars on the left axis, percentage/rate measures as lines on the
+  right axis.
+- For combo charts with a `colorField`, preserve category grain exactly:
+  collapse repeated x values into axis buckets, then render one count/volume
+  bar series and one percentage/rate line series per category. Sum or
+  weighted-average values only when multiple rows share the same
+  `(xField, colorField)` key.
+- Encode chart mark type in legends and tooltips. Category color may be shared
+  across count and rate series, but bars must use a bar marker and lines must
+  use a line marker so users can distinguish mark type without inspecting the
+  plot.
+- Treat missing category-metric combinations as missing. Do not borrow values
+  from another category in the same x bucket, do not interpolate lines through
+  missing points, and do not show missing combinations as real tooltip values.
+- Choose appropriate Recharts primitives from `ChartSpec`: `BarChart`,
+  `LineChart`, `AreaChart`, `ScatterChart`, `PieChart`, and `ComposedChart`.
+- Preserve table fallback and CSV download for every chart.
+- Keep layout stable in both the main story card and right Inspect panel.
+- Expose accessible hover/focus/click state for chart marks.
+
 **Components:**
 
-- `ChartEvidence.tsx` — reads `ChartSpec` + tabular data, renders the
-  appropriate Recharts chart (bar, line, area, pie, scatter).
+- `EvidenceChart.tsx` — refactor the existing component into the Recharts
+  wrapper. Keep the public component name so `EvidenceContent.tsx` integration
+  stays small.
 - `chartTheme.ts` — maps design system CSS variables into Recharts
-  colors, fonts, and tooltip styling.
+  colors, fonts, gridlines, axes, active marks, and tooltip styling.
+- `chartScales.ts` or equivalent helpers — shared tick/formatting logic for
+  numbers, dates, percentages, and compact large values.
+- Optional later split: `ChartEvidence.tsx` can be introduced only if the
+  wrapper becomes too large; it is not required for the first implementation.
 
 **Integration into `EvidenceContent`:**
 
@@ -351,10 +419,16 @@ const evidenceType = chartSpec ? 'chart' : isError ? 'error' : 'tool_result';
 
 ### Interactivity
 
-Phase 1 charts are read-only evidence:
+Phase 1 charts are interactive evidence:
 
 - **Tooltip** on hover shows exact values.
 - **Legend click** toggles series visibility.
+- **Mark hover/focus** highlights the active bar, point, line point, or pie
+  slice and exposes the same values through `aria-label`.
+- **Mark click** selects the backing row and can populate a user-confirmed
+  drill-down prompt in a later milestone.
+- **Linked table highlight** highlights the corresponding fallback table row
+  when a chart mark is active.
 - **View toggle** switches between chart and table within the same block.
 - **CSV download** (existing) remains available.
 - **PNG export** via Recharts SVG serialization (optional toolbar button).
@@ -363,15 +437,15 @@ Phase 1 charts are read-only evidence:
 
 | File | Change |
 |------|--------|
-| `client/package.json` | Add `recharts` dependency |
-| `client/src/features/analysis/types.ts` | Add `ChartSpec`, add `chartSpec?` to `EvidenceBlock` |
-| `client/src/features/analysis/chartDetection.ts` | **NEW** — heuristic detection |
-| `client/src/features/analysis/storyTransforms.ts` | Import detection, apply in `tool_result` handler |
-| `client/src/features/analysis/components/ChartEvidence.tsx` | **NEW** — Recharts wrapper |
+| `client/package.json` | Add `recharts` dependency using `pnpm add recharts` |
+| `client/src/features/analysis/types.ts` | Reuse existing `ChartSpec`; add interaction metadata only if needed |
+| `client/src/features/analysis/chartDetection.ts` | Improve temporal detection and scatter gating |
+| `client/src/features/analysis/storyTransforms.ts` | Keep existing chart spec attachment path |
+| `client/src/features/analysis/components/EvidenceChart.tsx` | Refactor from hand-rolled SVG/HTML into Recharts wrapper; add dual-axis combo rendering |
 | `client/src/features/analysis/components/chartTheme.ts` | **NEW** — design token mapping |
-| `client/src/features/analysis/components/EvidenceContent.tsx` | Add chart branch before table fallback |
+| `client/src/features/analysis/components/EvidenceContent.tsx` | Add chart/table view toggle and linked highlight state |
 
-Estimated scope: ~7 files, ~600 lines. No backend changes.
+Estimated scope: ~6 files, ~500-800 lines. No backend changes.
 
 ### What Phase 1 Cannot Do
 
@@ -380,8 +454,8 @@ Estimated scope: ~7 files, ~600 lines. No backend changes.
   It only reads column types and row counts.
 - No `insight` annotation — the chart shows data but does not highlight
   what matters.
-- No connection between chart interaction and story continuation — the
-  chart is passive evidence.
+- No auto-sent chart interactions. Clicks may select marks and prepare
+  prompts, but the user must confirm before any agent run starts.
 
 ---
 
@@ -474,7 +548,7 @@ heuristic still fires as a fallback.
 
 ### Insight Annotation Rendering
 
-When `chartSpec.insight` is present, the `ChartEvidence` component
+When `chartSpec.insight` is present, the `EvidenceChart` component
 renders a subtle annotation below the chart:
 
 ```
@@ -495,7 +569,7 @@ renders a subtle annotation below the chart:
 |------|--------|
 | `server/services/system_prompt.py` | Add visualization guidance section |
 | `client/src/features/analysis/storyTransforms.ts` | Parse `__chart_spec__` from conclusion text, attach to evidence |
-| `client/src/features/analysis/components/ChartEvidence.tsx` | Render `insight` annotation |
+| `client/src/features/analysis/components/EvidenceChart.tsx` | Render `insight` annotation |
 
 ### What Phase 2 Cannot Do
 
@@ -602,7 +676,7 @@ highlights the corresponding row. This requires a lightweight shared
 selection context:
 
 ```typescript
-// Shared between ChartEvidence and EvidenceContent via React context
+// Shared between EvidenceChart and EvidenceContent via React context
 interface EvidenceSelectionContext {
   hoveredRowIndex: number | null;
   setHoveredRowIndex: (index: number | null) => void;
@@ -632,7 +706,7 @@ The system prompt in Phase 3 adds tool-selection guidance:
 | `server/services/tools/databricks_openai.py` | Add `visualize_data` function tool |
 | `server/services/system_prompt.py` | Add tool-selection guidance |
 | `client/src/features/analysis/storyTransforms.ts` | Handle `__visualization__` in tool results |
-| `client/src/features/analysis/components/ChartEvidence.tsx` | Add click handler, hover events |
+| `client/src/features/analysis/components/EvidenceChart.tsx` | Add click handler, hover events |
 | `client/src/features/analysis/components/EvidenceContent.tsx` | Linked highlight via selection context |
 | `client/src/features/analysis/components/RightInspectPanel.tsx` | Receive and display hover state |
 

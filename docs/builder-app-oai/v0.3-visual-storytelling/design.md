@@ -116,6 +116,42 @@ Rule:
 - During `discovery`, `planning`, and `running`, full evidence renders in the
   inspect panel only. Story-card inline evidence is a completed-story narrative
   surface, not a live duplicate of the inspect panel.
+- Chart rendering uses Recharts rather than hand-rolled SVG/HTML so Cartesian
+  charts have complete axes, ticks, gridlines, tooltips, and accessible active
+  mark states.
+
+## Recharts Renderer Standard
+
+The renderer should keep the existing `EvidenceChart` entry point but replace
+its internals with Recharts primitives. This limits integration churn in
+`EvidenceContent` while fixing the current visual quality gaps.
+
+Required behavior:
+
+1. Cartesian charts render x/y axes, readable ticks, gridlines, labels, and
+   responsive tick reduction. Encoded time fields such as `yearmonth`,
+   `yyyymm`, `month`, `week`, and `period` are treated as ordered dimensions,
+   not scatter x values.
+2. Mixed-unit trend results use a dual-axis combo chart: count/volume metrics
+   render as bars on the left axis and percentage/rate metrics render as lines
+   on the right axis.
+3. Combo charts with a breakdown dimension preserve category grain. Repeated
+   x values collapse into one axis bucket, but each `colorField` value renders
+   its own count/volume bar series and percentage/rate line series. Values are
+   aggregated only when multiple rows share the same `(xField, colorField)`
+   key.
+4. Every chart exposes a tooltip on hover/focus with exact values and series
+   labels.
+5. Multi-series charts support legend toggling without reflowing the card.
+   Legend and tooltip markers encode mark type as well as color, so combo
+   charts can reuse category colors while still distinguishing bars from lines.
+6. Missing category-metric combinations remain missing: bars are absent, lines
+   break at missing points, and tooltips do not fill absent values from another
+   category in the same x bucket.
+7. Hovering or focusing a chart mark highlights the matching table row; clicking
+   a mark selects it for a user-confirmed drill-down prompt.
+8. Table fallback and CSV download remain available for every chart. Rendering
+   failures fall back to the table without blocking the story.
 
 ## Data Contract
 
@@ -165,7 +201,15 @@ Goal:
 Key rules:
 
 - Detect charts only for read-oriented SQL result tables.
-- Do not chart metadata, schema listings, or single-value outputs.
+- Do not chart metadata, schema listings, single-value outputs, identifier-only
+  fields, or high-cardinality dimensions that cannot produce a readable axis.
+- Prefer line charts for ordered temporal dimensions, grouped bar charts for
+  categorical comparisons with a second categorical breakdown, pie charts only
+  for small single-level part-to-whole outputs with unique labels, and scatter
+  only for true numeric-vs-numeric relationship questions.
+- Prefer dual-axis combo charts when an ordered or categorical dimension has
+  both count/volume fields and percentage/rate fields. Do not stack
+  percentage/rate metrics.
 - If spec invalid or render fails, fallback to table silently.
 
 Narrative outcome in Phase 1:
@@ -173,6 +217,8 @@ Narrative outcome in Phase 1:
 - Completed stories include visible evidence in the card, not just inspect
   panel.
 - Analyst can see claim-supporting data shape quickly.
+- Analysts can read chart coordinates and inspect exact values without dropping
+  to the fallback table.
 
 ## Phase 2 Design: Model-Guided Narrative Visuals
 

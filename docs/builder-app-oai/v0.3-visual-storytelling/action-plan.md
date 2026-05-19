@@ -29,7 +29,9 @@ Workstream B: Visualization Pipeline
 - Shared evidence parsing
 - Chart spec contract
 - Heuristic chart detection
-- Chart rendering + table fallback
+- Recharts rendering + complete coordinate axes
+- Tooltip, legend, mark selection, and table-highlight interactions
+- Chart/table fallback
 
 Workstream C: Agent And Tooling
 
@@ -63,19 +65,53 @@ Acceptance:
 
 Goal:
 
-- Deliver frontend-only chart evidence from existing SQL results.
+- Deliver frontend-only Recharts evidence from existing SQL results, fixing
+  missing coordinate axes and adding basic chart interaction.
 
 Scope:
 
 1. Extract shared parser utilities from `EvidenceContent.tsx`.
 2. Add `ChartSpec` and `chartSpec?` in analysis types.
-3. Add chart detection heuristics and chart rendering components.
-4. Keep table/CSV fallback for all chart evidence.
-5. Ensure inspect panel and story card stay consistent.
+3. Add `recharts` with `pnpm add recharts`.
+4. Refactor `EvidenceChart.tsx` from hand-rolled SVG/HTML to Recharts while
+   keeping the existing component boundary.
+5. Add full x/y axes, ticks, gridlines, labels, and responsive tick reduction
+   for bar, line, and scatter charts.
+6. Improve chart detection so `yearmonth`, `yyyymm`, `month`, `week`,
+   `period`, and similar fields become ordered temporal/category dimensions
+   instead of scatter axes.
+7. Add dual-axis combo charts for mixed count/volume plus percentage/rate
+   trend results, preserving `colorField` categories as separate bar/line
+   series and aggregating only duplicate `(xField, colorField)` rows.
+8. Add tooltip, legend toggle, active mark styling, keyboard focus labels, and
+   chart-to-table row highlight.
+9. Keep table/CSV fallback for all chart evidence.
+10. Ensure inspect panel and story card stay consistent.
 
 Acceptance:
 
-- Bar, line, pie, and scatter render for valid shapes.
+- Bar, line, pie, and scatter render for valid shapes using Recharts.
+- Cartesian charts show readable coordinates: x ticks, y ticks, gridlines, and
+  formatted labels in both story card and Inspect panel.
+- `yearmonth` trend fixtures render as line charts, not scatter plots.
+- Mixed `total_records` + `achieved_pct` fixtures render as a dual-axis combo:
+  bars for counts on the left axis and percentage lines on the right axis.
+- Duplicate `yearmonth` rows collapse into one x-axis bucket while preserving
+  each breakdown category as matching count-bar and percentage-line series.
+- A fixture with `mha_sku_key_type` values `''`, `CIO`, and `Subbrand*PACK`
+  renders three `total_records` bar series and three `achieved_pct` line
+  series.
+- A categorical fixture with `channel × mha_sku_key_type`, `total_records`,
+  and `achieved_pct` renders as a grouped bar plus line combo, not a pie chart.
+- Pie charts require a single categorical dimension with unique labels; repeated
+  x labels or a second categorical breakdown fall back to bar/combo rendering.
+- Legend and tooltip markers distinguish bar series from line series even when
+  category colors are shared across metrics.
+- Missing category-metric combinations are not backfilled in combo charts:
+  absent bars stay absent, lines break at missing points, and tooltips omit
+  missing values rather than borrowing another category's value.
+- Hover/focus shows exact values; legend toggles series; active marks highlight
+  matching table rows.
 - Metadata/schema/single-value outputs remain non-chart.
 - Replayed executions render same chart decisions deterministically.
 
@@ -154,8 +190,10 @@ Technical criteria:
 1. Chart rendering is backward compatible with old execution events.
 2. Invalid chart specs fallback to table.
 3. Parser behavior is shared between chart and table paths.
-4. `pnpm lint` and `pnpm build:typecheck` pass for client.
-5. Python test suite additions pass for runtime/tooling changes.
+4. Recharts tooltips, axes, legends, and active marks work in both story-card
+   inline evidence and right Inspect evidence.
+5. `pnpm lint` and `pnpm build:typecheck` pass for client.
+6. Python test suite additions pass for runtime/tooling changes.
 
 ## Golden Conversation Review Loop
 
