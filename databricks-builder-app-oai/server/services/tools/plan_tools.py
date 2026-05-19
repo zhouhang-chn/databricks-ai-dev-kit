@@ -159,6 +159,9 @@ def create_plan_tools(run_state: AgentToolRunState | None = None) -> list:
     Call this exactly once when all plan steps are complete. This is the
     terminal action of the run — do not run additional tools afterward.
     Persist any approved project-file updates BEFORE calling submit_conclusion.
+    Visualization specs should describe the analytical purpose and main-story
+    placement. Use display_in_story=True only for charts that directly support
+    the conclusion.
     """
     if state['conclusion_submitted']:
       return {

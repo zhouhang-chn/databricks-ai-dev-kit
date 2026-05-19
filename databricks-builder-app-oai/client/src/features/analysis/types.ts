@@ -25,6 +25,9 @@ export interface ChartSpec {
 
 export interface StoryVisualization {
   evidenceId?: string;
+  sourceTitle?: string;
+  displayInStory?: boolean;
+  displayOrder?: number;
   chartSpec: ChartSpec;
 }
 
@@ -107,6 +110,8 @@ export interface EvidenceBlock {
   toolName?: string;
   toolInput?: string;
   chartSpec?: ChartSpec;
+  displayInStory?: boolean;
+  displayOrder?: number;
 }
 
 export interface AnalysisStep {

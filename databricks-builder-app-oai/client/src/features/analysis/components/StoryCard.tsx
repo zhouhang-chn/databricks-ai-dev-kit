@@ -131,6 +131,14 @@ function selectInlineEvidence(story: AnalysisStory): { blocks: EvidenceBlock[]; 
   const source = narrativeFirst.length > 0 ? narrativeFirst : successful;
   const nonEmpty = source.filter((block) => !isEmptyEvidenceBlock(block));
   const candidates = nonEmpty.length > 0 ? nonEmpty : source;
+  const storyDirected = candidates
+    .filter((block) => block.displayInStory)
+    .sort((a, b) => (a.displayOrder ?? Number.MAX_SAFE_INTEGER) - (b.displayOrder ?? Number.MAX_SAFE_INTEGER));
+
+  if (storyDirected.length > 0) {
+    const blocks = storyDirected.slice(0, INLINE_EVIDENCE_LIMIT);
+    return { blocks, hiddenCount: Math.max(0, source.length - blocks.length) };
+  }
 
   const ranked = candidates
     .map((block, idx) => {

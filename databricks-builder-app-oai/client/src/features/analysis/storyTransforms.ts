@@ -256,6 +256,19 @@ function normalizeVisualizationEntry(value: unknown): StoryVisualization | null 
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const evidenceRaw = record.evidenceId ?? record.evidence_id ?? record.primary_evidence_id;
+  const sourceTitle = asNonEmptyString(
+    record.sourceTitle
+    ?? record.source_title
+    ?? record.evidenceTitle
+    ?? record.evidence_title
+    ?? record.queryPurpose
+    ?? record.query_purpose
+    ?? record.purpose
+  );
+  const displayInStory = typeof (record.displayInStory ?? record.display_in_story) === 'boolean'
+    ? Boolean(record.displayInStory ?? record.display_in_story)
+    : undefined;
+  const displayOrder = asOptionalNumber(record.displayOrder ?? record.display_order ?? record.order);
   const specInput = record.chartSpec && typeof record.chartSpec === 'object'
     ? record.chartSpec as Record<string, unknown>
     : record;
@@ -298,6 +311,9 @@ function normalizeVisualizationEntry(value: unknown): StoryVisualization | null 
 
   return {
     evidenceId: typeof evidenceRaw === 'string' ? evidenceRaw : undefined,
+    sourceTitle,
+    displayInStory,
+    displayOrder,
     chartSpec,
   };
 }
@@ -320,6 +336,15 @@ function asNonEmptyString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function asOptionalNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
 }
 
 function asStringList(value: unknown): string[] {
@@ -399,11 +424,16 @@ function applyVisualizationsToEvidence(
   let changed = false;
 
   for (const visualization of visualizations) {
+    const sourceTitle = visualization.sourceTitle;
     const candidateIndexes = visualization.evidenceId
       ? nextEvidence.map((block, index) => ({ block, index }))
           .filter(({ block }) => block.id === visualization.evidenceId)
           .map(({ index }) => index)
-      : nextEvidence.map((_, index) => index);
+      : sourceTitle
+        ? nextEvidence.map((block, index) => ({ block, index }))
+            .filter(({ block }) => titleMatches(block.title, sourceTitle))
+            .map(({ index }) => index)
+        : nextEvidence.map((_, index) => index);
 
     for (const index of candidateIndexes) {
       const block = nextEvidence[index];
@@ -417,6 +447,8 @@ function applyVisualizationsToEvidence(
         ...block,
         type: 'chart',
         chartSpec: visualization.chartSpec,
+        displayInStory: visualization.displayInStory ?? true,
+        displayOrder: visualization.displayOrder,
       };
       changed = true;
       break;
@@ -429,6 +461,17 @@ function applyVisualizationsToEvidence(
     evidence: nextEvidence,
     updatedAt: nowIso(),
   };
+}
+
+function titleMatches(blockTitle: string, sourceTitle: string): boolean {
+  const normalizedBlock = normalizeComparableTitle(blockTitle);
+  const normalizedSource = normalizeComparableTitle(sourceTitle);
+  if (!normalizedBlock || !normalizedSource) return false;
+  return normalizedBlock.includes(normalizedSource) || normalizedSource.includes(normalizedBlock);
+}
+
+function normalizeComparableTitle(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 function detectNarrativeContradiction(story: AnalysisStory, insight?: string): boolean {

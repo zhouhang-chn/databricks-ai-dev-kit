@@ -41,7 +41,9 @@ export function detectChartSpec(
   const xField =
     temporal[0]?.name
     ?? categorical.find((p) => p.distinctValues > 1 && p.distinctValues <= 60)?.name
-    ?? tabular.columns[0];
+    ?? undefined;
+
+  if (!xField) return undefined;
 
   const yFields = numeric
     .map((p) => p.name)

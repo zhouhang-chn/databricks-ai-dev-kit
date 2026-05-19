@@ -485,6 +485,9 @@ plan, use `op="revise"` instead.
        visualizations=[                                                   # optional, preferred
          {{
            "evidence_id": "<evidence block id to attach>",               # optional
+           "source_title": "<SQL purpose/comment or evidence title>",     # optional, use when evidence_id is unknown
+           "display_in_story": true,                                      # true for 1-3 charts that support the main claim
+           "display_order": 1,                                            # order in the analysis story card
            "chart_type": "line|bar|pie|scatter",
            "x_field": "<column name>",
            "y_fields": ["<column name>", ...],
@@ -507,6 +510,23 @@ plan, use `op="revise"` instead.
    the recommendation.
    Prefer `visualizations` for chart instructions. `__chart_spec__` text blocks
    are legacy compatibility only and should not be the primary path.
+
+   Visualization selection rules:
+   - Decide the purpose of each SQL result before charting it. Chart only
+     evidence that directly supports the conclusion or an important caveat.
+   - Use `display_in_story=true` only for the 1-3 charts that should appear in
+     the middle analysis story card. Leave secondary or diagnostic results out
+     of the main story; they remain inspectable in the Evidence panel.
+   - When you write SQL that may need a final chart, put a short first-line SQL
+     comment describing the query purpose, then reuse that phrase as
+     `source_title` in the visualization spec if `evidence_id` is unavailable.
+   - Choose axes semantically: `x_field` should normally be time, category,
+     segment, cohort, or comparison group. Do not use calculated measures such
+     as counts, percentages, rates, averages, baselines, deltas, or scores as
+     the x-axis unless the chart is explicitly a scatter/correlation chart.
+   - Put measured quantities in `y_fields`; for mixed units, choose a combo-
+     friendly spec such as bars for volume/count fields and lines for rates or
+     percentages.
 
    **Self-check before this call:** Have you already submitted a
    conclusion for this run? If yes, **STOP** — do not call anything.

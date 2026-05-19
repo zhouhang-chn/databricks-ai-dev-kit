@@ -20,6 +20,8 @@ Follow-up suggestions come from the terminal `submit_conclusion.next_steps` payl
 
 SQL schema checks are conversation-aware. The runtime still blocks analytical SQL over configured project tables when no schema is known, but a successful prior `get_table_stats_and_schema`, `DESCRIBE`, or `SHOW COLUMNS` event in the same conversation seeds the next run so repeated follow-up questions do not re-inspect the same table.
 
+Analysis visualizations are model-directed when a conclusion includes `visualizations`. The middle story card prioritizes specs marked `display_in_story`, while the Inspect panel retains secondary evidence. Auto-detected charts are conservative fallbacks and avoid measure-only result sets where a calculated count/rate would become the x-axis.
+
 ## Local Development
 
 ```bash
