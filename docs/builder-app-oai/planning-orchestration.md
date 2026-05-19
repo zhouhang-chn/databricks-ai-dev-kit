@@ -232,6 +232,14 @@ The `StoryCard` activity section is replaced by a stepper. Rules:
    - When `synthesis.appended` fires, the stepper collapses to a single
      "Worked through N steps" row that expands on click. The conclusion
      summary + highlights chips replace it as the primary content.
+7. **Evidence is inspect-first during execution.**
+   - While a story is still streaming (`discovery`, `planning`, or `running`),
+     raw evidence blocks and intermediate visualizations render only in
+     `RightInspectPanel`. The main story card stays focused on the stepper,
+     findings, and synthesis state.
+   - After streaming ends, the story card may render the selected inline
+     evidence summary for the completed narrative; the right inspect panel
+     remains the full evidence/detail surface.
 
 `RightInspectPanel` keeps the evidence drawer (raw tool payloads) but loses
 its own duplicate plan section — there's only one plan, in the stepper.

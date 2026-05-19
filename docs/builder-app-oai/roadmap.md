@@ -44,7 +44,7 @@
 **Why now:** v0.2 produces tables, conclusions, and next moves; analysts still hand-build charts elsewhere. Storytelling is what turns analysis into a decision.
 
 **Scope:**
-- **Focus on Analysis Story Panel**: Charts are rendered directly within the main analysis story flow (rather than just the right inspect panel), making visualization a critical part of the core narrative.
+- **Focus on Analysis Story Panel**: Charts are rendered directly within the completed analysis story flow (rather than only the right inspect panel), making visualization a critical part of the core narrative. During execution, intermediate evidence and visualizations remain in Inspect so the running story card stays focused on the plan.
 - **Phased implementation based on `data-visualization.md`**:
   - **Phase 1**: Client-side chart detection (Recharts) on SQL results using heuristics (no backend changes).
   - **Phase 2**: Model-guided visualization using `__chart_spec__` JSON blocks in agent responses for custom types and insight annotations.

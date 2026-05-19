@@ -62,8 +62,11 @@ Question
 
 UI principle:
 
-- Evidence must appear before final recommendation.
+- For completed stories, evidence must appear before final recommendation.
 - Primary evidence should be visually distinct from secondary evidence.
+- While a story is executing, evidence and intermediate visualizations stay in
+  the right inspect panel; the story card should remain focused on the running
+  plan and current findings.
 
 ## Narrative Voice And Confidence Policy
 
@@ -97,7 +100,7 @@ flowchart TD
   Parse["Shared parser: evidenceData.ts"]
   Detect["chartDetection.ts or model spec"]
   Evidence["EvidenceBlock + chartSpec?"]
-  Story["StoryCard inline evidence"]
+  Story["StoryCard inline evidence after streaming"]
   Inspect["RightInspectPanel full evidence"]
   Conclusion["submit_conclusion narrative"]
 
@@ -110,6 +113,9 @@ flowchart TD
 Rule:
 
 - One parser for both table rendering and chart detection.
+- During `discovery`, `planning`, and `running`, full evidence renders in the
+  inspect panel only. Story-card inline evidence is a completed-story narrative
+  surface, not a live duplicate of the inspect panel.
 
 ## Data Contract
 
@@ -164,7 +170,8 @@ Key rules:
 
 Narrative outcome in Phase 1:
 
-- Story includes visible evidence in the card, not just inspect panel.
+- Completed stories include visible evidence in the card, not just inspect
+  panel.
 - Analyst can see claim-supporting data shape quickly.
 
 ## Phase 2 Design: Model-Guided Narrative Visuals

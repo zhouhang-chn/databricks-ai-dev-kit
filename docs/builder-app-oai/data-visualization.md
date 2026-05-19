@@ -40,7 +40,10 @@ context           ← metrics, dimensions, filters, conversation
 
 Evidence blocks carry the raw data behind the conclusion. The conclusion
 interprets the evidence. Next moves extend the story. The inspect panel
-shows trace details and evidence drilldowns.
+shows trace details and evidence drilldowns. During live execution, evidence
+and intermediate visualizations are inspect-panel only so the story card stays
+focused on the running plan. Inline story-card evidence appears after the run
+leaves the streaming states and the narrative can use it as final support.
 
 Today, all evidence blocks render as:
 
@@ -219,10 +222,13 @@ backend changes.
 ### What It Delivers to the Story
 
 After Phase 1, a story that runs `execute_sql` and gets back a table of
-revenue by region will automatically show a bar chart above the table
+revenue by region can automatically show a bar chart above the table
 instead of requiring the analyst to eyeball the numbers. A time-series
-query will show a line chart. The analyst can always toggle to the table
-for exact values.
+query can show a line chart. While the run is still executing, those evidence
+blocks and charts live in the right inspect panel. Once the run is no longer
+streaming, the story card can surface the selected inline evidence as part of
+the completed narrative. The analyst can always toggle to the table for exact
+values.
 
 The improvement is in the *evidence section* of the story: evidence
 blocks that previously forced the analyst to read raw numbers now offer a

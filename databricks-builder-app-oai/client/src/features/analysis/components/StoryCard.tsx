@@ -476,6 +476,7 @@ export function StoryCard({
   const showStepper = !!plan;
   const showScoping = !plan && isStreaming;
   const inlineEvidence = useMemo(() => selectInlineEvidence(story), [story]);
+  const showInlineEvidence = !isStreaming && inlineEvidence.blocks.length > 0;
 
   return (
     <article
@@ -546,7 +547,7 @@ export function StoryCard({
         </section>
       )}
 
-      {inlineEvidence.blocks.length > 0 && (
+      {showInlineEvidence && (
         <section
           className="mt-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/20 p-3"
           onClick={(e) => e.stopPropagation()}

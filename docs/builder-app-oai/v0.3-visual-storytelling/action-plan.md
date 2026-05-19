@@ -10,7 +10,8 @@ Objective:
 Release gates:
 
 1. Story-first gate: stakeholder can decide from story card in under 60s.
-2. Evidence gate: chart/table evidence is inline with reliable fallback.
+2. Evidence gate: chart/table evidence is inline for completed stories with
+   reliable fallback; during execution, evidence remains in Inspect.
 3. Trust gate: confidence and caveat policy is enforced.
 4. Replay gate: persisted executions reproduce narrative visuals consistently.
 
@@ -54,6 +55,8 @@ Scope:
 Acceptance:
 
 - Story card displays claim + evidence + recommended next step in a single flow.
+- Running stories keep intermediate evidence and visualizations in the right
+  Inspect panel instead of duplicating them in the story card.
 - At least 5 golden runs score >= 6/12 on storytelling rubric.
 
 ## Milestone 2: Visual Evidence Beta
@@ -141,7 +144,7 @@ Acceptance:
 Story-first criteria:
 
 1. Clear decision claim exists in every completed story.
-2. Primary evidence is visible inline in story card.
+2. Primary evidence is visible inline in story card after execution completes.
 3. Caveat and confidence are explicit when uncertainty exists.
 4. Recommended next step is concrete, not generic.
 5. Story quality rubric score >= 8/12 with no zero in core dimensions.
