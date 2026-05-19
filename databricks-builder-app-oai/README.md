@@ -16,6 +16,8 @@ OPENAI_AGENTS_DISABLE_TRACING=1
 
 `deepseek-v4-pro` is used for agent work. `deepseek-v4-flash` is used for cheaper metadata tasks such as title generation.
 
+Follow-up suggestions come from the terminal `submit_conclusion.next_steps` payload. The app does not run a separate post-response Next Moves generator, which avoids an extra model call and keeps the visible follow-ups consistent with the final synthesis.
+
 ## Local Development
 
 ```bash

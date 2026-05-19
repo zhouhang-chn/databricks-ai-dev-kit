@@ -7,7 +7,6 @@ import {
   Circle,
   FileText,
   Loader2,
-  Pin,
   RotateCcw,
   Search,
   Sparkles,
@@ -18,7 +17,6 @@ import remarkGfm from 'remark-gfm';
 import type {
   AnalysisStory,
   EvidenceBlock,
-  NextMove,
   PlanRevision,
   PlanStep,
   ToolCallSummary,
@@ -64,24 +62,6 @@ function StatusBadge({ status }: { status: AnalysisStory['status'] }) {
       )}
       {label}
     </span>
-  );
-}
-
-function NextMoveButton({
-  move,
-  onSelect,
-}: {
-  move: NextMove;
-  onSelect: (move: NextMove) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(move)}
-      className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-left text-xs text-[var(--color-text-primary)] hover:border-[var(--color-accent-primary)]/40 hover:text-[var(--color-accent-primary)] transition-colors"
-    >
-      {move.label}
-    </button>
   );
 }
 
@@ -457,14 +437,12 @@ export function StoryCard({
   story,
   isActive,
   onSelect,
-  onNextMove,
   onRetry,
   retryDisabled,
 }: {
   story: AnalysisStory;
   isActive: boolean;
   onSelect: (storyId: string) => void;
-  onNextMove: (move: NextMove) => void;
   onRetry: (story: AnalysisStory) => void;
   retryDisabled: boolean;
 }) {
@@ -596,19 +574,6 @@ export function StoryCard({
         )}
       </section>
 
-      {story.nextMoves.length > 0 && !story.failure?.retryable && (
-        <section className="mt-6 border-t border-[var(--color-border)]/60 pt-4">
-          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-[var(--color-text-muted)]">
-            <Pin className="h-3.5 w-3.5" />
-            Next Moves
-          </div>
-          <div className="grid gap-2 sm:grid-cols-3">
-            {story.nextMoves.slice(0, 3).map((move) => (
-              <NextMoveButton key={move.id} move={move} onSelect={onNextMove} />
-            ))}
-          </div>
-        </section>
-      )}
     </article>
   );
 }

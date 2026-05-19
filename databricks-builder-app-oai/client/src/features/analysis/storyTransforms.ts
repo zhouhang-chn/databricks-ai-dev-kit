@@ -175,32 +175,6 @@ function cleanAssistantText(text?: string): string | undefined {
   return cleaned.trim() || text;
 }
 
-function defaultNextMoves(question: string): NextMove[] {
-  return [
-    {
-      id: makeId('move-explain'),
-      label: 'Explain evidence',
-      prompt: `Explain the evidence and assumptions behind this result: ${question}`,
-      actionType: 'explain',
-      source: 'heuristic',
-    },
-    {
-      id: makeId('move-drill'),
-      label: 'Drill down',
-      prompt: `Drill down into the most important segment or dimension for: ${question}`,
-      actionType: 'drill',
-      source: 'heuristic',
-    },
-    {
-      id: makeId('move-validate'),
-      label: 'Validate',
-      prompt: `Validate the data sources, caveats, and confidence for: ${question}`,
-      actionType: 'validate',
-      source: 'heuristic',
-    },
-  ];
-}
-
 function cleanFailureMessage(message: string): string {
   return message.replace(/^error:\s*/i, '').trim();
 }
@@ -515,7 +489,7 @@ export function createAnalysisStory(args: {
     conclusionText,
     evidence: [],
     trace: [],
-    nextMoves: status === 'done' ? defaultNextMoves(args.question) : [],
+    nextMoves: [],
     context: {
       conversationId: args.conversationId,
       messageIds: args.messageIds || [],
@@ -857,7 +831,7 @@ export function reduceAnalysisEvent(
               : (story.conclusion?.nextSteps || []),
           },
           narrative,
-          nextMoves: story.nextMoves.length > 0 ? story.nextMoves : defaultNextMoves(story.question),
+          nextMoves: story.nextMoves,
           updatedAt: nowIso(),
         };
 
@@ -934,7 +908,6 @@ export function reduceAnalysisEvent(
       return updateStory(stories, event.storyId, (story) => ({
         ...story,
         status: story.status === 'error' ? 'error' : 'done',
-        nextMoves: story.nextMoves.length > 0 ? story.nextMoves : defaultNextMoves(story.question),
         updatedAt: nowIso(),
       }));
     case 'story.failed':

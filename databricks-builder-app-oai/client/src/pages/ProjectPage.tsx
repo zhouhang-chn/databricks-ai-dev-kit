@@ -35,7 +35,7 @@ import {
   storiesFromMessages,
   storyEventsFromStreamEvent,
 } from '@/features/analysis/storyTransforms';
-import type { AnalysisEvent, AnalysisStory, NextMove } from '@/features/analysis/types';
+import type { AnalysisEvent, AnalysisStory } from '@/features/analysis/types';
 import {
   createConversation,
   fetchClusters,
@@ -1846,11 +1846,6 @@ export default function ProjectPage() {
       ]
   ), [runRole]);
 
-  const handleNextMove = useCallback((move: NextMove) => {
-    setInput(move.prompt);
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }, []);
-
   const handleRetryStory = useCallback((story: AnalysisStory) => {
     void submitMessage(story.question, { clearInput: false });
   }, [submitMessage]);
@@ -2002,7 +1997,6 @@ export default function ProjectPage() {
                     stories={analysisStories}
                     activeStoryId={activeStoryId}
                     onSelectStory={setActiveStoryId}
-                    onNextMove={handleNextMove}
                     onRetryStory={handleRetryStory}
                     retryDisabled={isStreamingHere}
                     emptyTitle={runRole === 'user_preview' ? 'What would a user ask?' : 'What can I help you build?'}

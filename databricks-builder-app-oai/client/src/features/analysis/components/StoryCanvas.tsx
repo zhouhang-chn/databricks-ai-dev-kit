@@ -1,12 +1,11 @@
 import { Sparkles } from 'lucide-react';
 import { StoryCard } from '@/features/analysis/components/StoryCard';
-import type { AnalysisStory, NextMove } from '@/features/analysis/types';
+import type { AnalysisStory } from '@/features/analysis/types';
 
 export function StoryCanvas({
   stories,
   activeStoryId,
   onSelectStory,
-  onNextMove,
   onRetryStory,
   retryDisabled,
   emptyTitle,
@@ -17,7 +16,6 @@ export function StoryCanvas({
   stories: AnalysisStory[];
   activeStoryId?: string;
   onSelectStory: (storyId: string) => void;
-  onNextMove: (move: NextMove) => void;
   onRetryStory: (story: AnalysisStory) => void;
   retryDisabled: boolean;
   emptyTitle: string;
@@ -79,7 +77,6 @@ export function StoryCanvas({
             story={story}
             isActive={story.id === activeStoryId}
             onSelect={onSelectStory}
-            onNextMove={onNextMove}
             onRetry={onRetryStory}
             retryDisabled={retryDisabled}
           />

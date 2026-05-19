@@ -24,12 +24,6 @@ from ..services.active_stream import get_stream_manager
 from ..services.agent import get_project_directory, stream_agent_response
 from ..services.backup_manager import mark_for_backup
 from ..services.logging_utils import ensure_logger_active
-from ..services.next_moves import (
-    NextMoveContext,
-    NextMoveTraceStep,
-    generate_next_moves,
-    summarize_evidence_content,
-)
 from ..services.storage import ConversationStorage, ProjectStorage
 from ..services.title_generator import generate_title_async
 from ..services.user import get_current_token, get_current_user, get_workspace_url
@@ -45,27 +39,6 @@ SSE_WINDOW_SECONDS = 50
 def sse_event(data: dict) -> str:
     """Format data as SSE event."""
     return f'data: {json.dumps(data)}\n\n'
-
-
-def _recent_messages_for_next_moves(conversation, latest_message: str) -> list[dict[str, str]]:
-    """Build a compact recent-message list without exposing database models."""
-    messages = []
-    for message in list(getattr(conversation, 'messages', []) or [])[-6:]:
-        role = getattr(message, 'role', '')
-        content = getattr(message, 'content', '')
-        if role and content:
-            messages.append({'role': str(role), 'content': str(content)[:1000]})
-    messages.append({'role': 'user', 'content': latest_message[:1000]})
-    return messages
-
-
-def _project_context_section(project_context: dict, key: str) -> dict:
-    """Return a dict section from the project context settings."""
-    settings = project_context.get('settings')
-    if not isinstance(settings, dict):
-        return {}
-    section = settings.get(key)
-    return section if isinstance(section, dict) else {}
 
 
 def _synthesis_summary_from_event(event: dict[str, Any]) -> str:
@@ -302,10 +275,7 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
         error_message: Optional[str] = None
         received_deltas = False  # Track if we received streaming deltas
         tool_started_at: dict[str, float] = {}
-        trace_steps: list[NextMoveTraceStep] = []
-        trace_steps_by_tool_id: dict[str, NextMoveTraceStep] = {}
         tool_calls_by_id: dict[str, dict[str, Any]] = {}
-        evidence_summaries: list[str] = []
         synthesis_summary: Optional[str] = None
 
         try:
@@ -371,15 +341,8 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                     tool_id = str(event.get('tool_id', ''))
                     tool_name = event.get('tool_name', '')
                     tool_input = event.get('tool_input', {})
-                    trace_step = NextMoveTraceStep(
-                        tool_name=str(tool_name or 'tool'),
-                        status='running',
-                        summary=summarize_evidence_content(tool_input),
-                    )
-                    trace_steps.append(trace_step)
                     if tool_id:
                         tool_started_at[tool_id] = time.time()
-                        trace_steps_by_tool_id[tool_id] = trace_step
                         tool_calls_by_id[tool_id] = {
                             'tool_name': str(tool_name or 'tool'),
                             'tool_input': tool_input,
@@ -409,13 +372,6 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                     is_error = event.get('is_error', False)
                     started = tool_started_at.pop(tool_use_id, None)
                     duration_ms = int((time.time() - started) * 1000) if started else None
-                    summary = summarize_evidence_content(content, is_error=bool(is_error))
-                    evidence_summaries.append(summary)
-                    trace_step = trace_steps_by_tool_id.pop(tool_use_id, None)
-                    if trace_step:
-                        trace_step.status = 'error' if is_error else 'done'
-                        trace_step.summary = summary
-                        trace_step.duration_ms = duration_ms
 
                     # Detect cascade failure pattern - "Stream closed" errors indicate
                     # the internal tool connection is broken.
@@ -527,46 +483,6 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
             emit({'type': 'error', 'error': error_message})
 
         answer_text = _answer_text_for_run(final_text, synthesis_summary)
-
-        if not stream.is_cancelled:
-            try:
-                next_move_generation = await generate_next_moves(
-                    NextMoveContext(
-                        project_id=body.project_id,
-                        conversation_id=conversation_id,
-                        execution_id=stream.execution_id,
-                        story_id=story_id,
-                        run_role=run_role,
-                        project_type=str(project_context.get('project_type') or ''),
-                        project_status=str(project_context.get('status') or ''),
-                        release_id=str(project_context.get('release_id') or ''),
-                        question=body.message,
-                        answer=answer_text,
-                        error=error_message,
-                        recent_messages=_recent_messages_for_next_moves(
-                            conversation,
-                            body.message,
-                        ),
-                        trace_steps=trace_steps,
-                        evidence_summaries=evidence_summaries,
-                        effective_resources=dict(
-                            project_context.get('effective_resources') or {}
-                        ),
-                        semantic_context=_project_context_section(project_context, 'semantics'),
-                        workflow_context=_project_context_section(project_context, 'workflows'),
-                        memory_context=_project_context_section(project_context, 'memory'),
-                    )
-                )
-                emit({
-                    'type': 'next_moves.updated',
-                    'moves': [
-                        move.to_event_dict()
-                        for move in next_move_generation.moves
-                    ],
-                    **next_move_generation.event_metadata(),
-                })
-            except Exception as e:
-                logger.warning('Failed to generate next moves: %s', e, exc_info=True)
 
         # Save messages to storage after stream completes (if not cancelled)
         if not stream.is_cancelled:

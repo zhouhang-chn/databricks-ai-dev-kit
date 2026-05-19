@@ -39,7 +39,7 @@ def test_answer_text_uses_streamed_text_without_synthesis():
 
 
 def test_answer_text_falls_back_to_structured_synthesis():
-  """A submit_conclusion-only run still gets persisted and sent to Next Moves."""
+  """A submit_conclusion-only run still gets persisted as the answer."""
   answer = _answer_text_for_run('', 'Structured summary')
 
   assert answer == 'Structured summary'

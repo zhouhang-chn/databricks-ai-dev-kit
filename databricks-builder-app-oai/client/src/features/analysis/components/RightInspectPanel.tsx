@@ -49,7 +49,7 @@ export function RightInspectPanel({
 
         {!story ? (
           <div className="rounded-lg border border-dashed border-[var(--color-border)] p-4 text-sm text-[var(--color-text-muted)]">
-            Select a story to inspect evidence, context, and next moves.
+            Select a story to inspect evidence and context.
           </div>
         ) : (
           <div className="space-y-6">
