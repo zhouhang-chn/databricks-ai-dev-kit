@@ -270,6 +270,13 @@ visual summary.
 A new `chartDetection.ts` module examines every SQL tool result and
 classifies its columns:
 
+The shared parser must first normalize the supported SQL result envelopes into
+row-oriented records. This includes direct arrays from `execute_sql` and
+`execute_sql_multi` wrapper payloads shaped like
+`{ "results": { "0": { "status": "success", "sample_results": [...] } } }`.
+For multi-query wrappers, use the lowest `query_index` successful result with
+non-empty `sample_results`; error-only wrappers remain raw JSON/error evidence.
+
 ```typescript
 function detectChartSpec(
   toolName: string | undefined,

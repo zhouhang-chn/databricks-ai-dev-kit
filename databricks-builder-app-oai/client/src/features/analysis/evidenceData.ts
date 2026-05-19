@@ -24,6 +24,12 @@ export function asRowTable(value: unknown): RowOriented | null {
   }
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const obj = value as JsonRecord;
+    const sqlMultiRows = extractSqlMultiSampleRows(obj);
+    if (sqlMultiRows) return sqlMultiRows;
+
+    const sampleRows = rowsFromRecordsField(obj.sample_results);
+    if (sampleRows) return sampleRows;
+
     const rowsField = obj.rows ?? obj.data ?? obj.results ?? obj.records;
     if (Array.isArray(rowsField)) {
       if (Array.isArray(rowsField[0]) && Array.isArray(obj.columns)) {
@@ -61,6 +67,35 @@ export function asRowTable(value: unknown): RowOriented | null {
     }
   }
   return null;
+}
+
+function extractSqlMultiSampleRows(obj: JsonRecord): RowOriented | null {
+  const results = obj.results;
+  if (!results || typeof results !== 'object' || Array.isArray(results)) return null;
+
+  const resultRecords = Object.values(results as JsonRecord)
+    .filter((item): item is JsonRecord => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+    .sort((left, right) => getQueryIndex(left) - getQueryIndex(right));
+
+  for (const result of resultRecords) {
+    if (result.status && result.status !== 'success') continue;
+    const rows = rowsFromRecordsField(result.sample_results);
+    if (rows) return rows;
+  }
+
+  return null;
+}
+
+function rowsFromRecordsField(value: unknown): RowOriented | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  if (!value.every((item) => item && typeof item === 'object' && !Array.isArray(item))) return null;
+  const rows = value as Array<Record<string, unknown>>;
+  return { rows, columns: inferColumns(rows) };
+}
+
+function getQueryIndex(result: JsonRecord): number {
+  const index = coerceNumber(result.query_index);
+  return index === undefined ? Number.MAX_SAFE_INTEGER : index;
 }
 
 export function cellToString(value: unknown): string {

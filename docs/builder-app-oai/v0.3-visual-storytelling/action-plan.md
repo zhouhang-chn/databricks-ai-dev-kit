@@ -91,6 +91,8 @@ Scope:
 Acceptance:
 
 - Bar, line, pie, and scatter render for valid shapes using Recharts.
+- `execute_sql_multi` wrapper payloads with `results.{query}.sample_results`
+  render as chart/table evidence rather than raw JSON blocks.
 - Cartesian charts show readable coordinates: x ticks, y ticks, gridlines, and
   formatted labels in both story card and Inspect panel.
 - `yearmonth` trend fixtures render as line charts, not scatter plots.

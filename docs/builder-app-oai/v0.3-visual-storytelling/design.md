@@ -201,6 +201,9 @@ Goal:
 Key rules:
 
 - Detect charts only for read-oriented SQL result tables.
+- Normalize `execute_sql_multi` result wrappers before detection. A payload with
+  `results.{query}.sample_results` should render the first successful
+  `sample_results` table by `query_index` instead of falling back to raw JSON.
 - Do not chart metadata, schema listings, single-value outputs, identifier-only
   fields, or high-cardinality dimensions that cannot produce a readable axis.
 - Prefer line charts for ordered temporal dimensions, grouped bar charts for
