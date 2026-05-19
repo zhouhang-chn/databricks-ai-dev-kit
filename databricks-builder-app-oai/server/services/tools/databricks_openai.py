@@ -261,11 +261,17 @@ print(json.dumps({{"columns": columns, "rows": rows}}))
     catalog: str | None = None,
     schema: str | None = None,
     table_names: list[str] | str | None = None,
-    table_stat_level: str = 'SIMPLE',
+    table_stat_level: str = 'NONE',
     warehouse_id: str | None = None,
     timeout: int = 180,
   ) -> str:
-    """Get table schema/stats on the configured warehouse or cluster fallback."""
+    """Get table schema/stats on the configured warehouse or cluster fallback.
+
+    Always choose ``table_stat_level`` explicitly:
+    - ``NONE`` for schema discovery and column validation
+    - ``SIMPLE`` when row counts or basic column health are needed
+    - ``DETAILED`` when profiling needs distributions or richer statistics
+    """
     gate_error = _gate_databricks_tool('get_table_stats_and_schema')
     if gate_error:
       return gate_error
@@ -433,9 +439,9 @@ def _normalize_table_stat_level(level: str | None):
   """Coerce OpenAI/FastMCP stat-level strings into the core enum."""
   from databricks_tools_core.sql.sql_utils.models import TableStatLevel
 
-  normalized = (level or 'SIMPLE').strip().lower()
+  normalized = (level or 'NONE').strip().lower()
   if normalized not in {'none', 'simple', 'detailed'}:
-    normalized = 'simple'
+    normalized = 'none'
   return TableStatLevel(normalized)
 
 

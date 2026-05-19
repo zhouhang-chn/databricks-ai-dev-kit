@@ -125,7 +125,7 @@ cp -r ai-dev-kit/databricks-skills/databricks-agent-bricks .claude/skills/
 
 **Example:** User says "Create a sales dashboard"
 1. Claude loads `databricks-aibi-dashboards` skill → learns validation workflow
-2. Calls `get_table_stats_and_schema()` → gets schemas
+2. Calls `get_table_stats_and_schema(..., table_stat_level="NONE")` → gets schemas
 3. Calls `execute_sql()` → tests queries
 4. Calls `manage_dashboard(action="create_or_update")` → deploys
 5. Returns working dashboard URL

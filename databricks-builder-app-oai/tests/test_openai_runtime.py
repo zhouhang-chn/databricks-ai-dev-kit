@@ -832,6 +832,43 @@ def test_table_stats_marks_schema_inspected_before_sql(monkeypatch, tmp_path):
   assert result == [{'total_bdrs': 43}]
 
 
+def test_table_stats_defaults_to_none_when_level_is_omitted(monkeypatch, tmp_path):
+  """Schema inspection should be cheap unless the caller requests real stats."""
+  run_state = AgentToolRunState(project_dir=tmp_path)
+  run_state.active_step_id = 'step-1'
+  captured_table_stats_kwargs = {}
+
+  def fake_table_stats(**kwargs):
+    captured_table_stats_kwargs.update(kwargs)
+    return {
+      'catalog': 'cat',
+      'schema_name': 'sch',
+      'tables': [],
+    }
+
+  monkeypatch.setattr(
+    'databricks_tools_core.sql.table_stats.get_table_stats_and_schema',
+    fake_table_stats,
+  )
+
+  tools = create_databricks_tools(
+    default_warehouse_id='warehouse-1',
+    run_state=run_state,
+  )
+  stats = next(tool for tool in tools if tool.name == 'get_table_stats_and_schema')
+
+  _invoke_tool(
+    stats,
+    json.dumps({
+      'catalog': 'cat',
+      'schema': 'sch',
+      'table_names': ['pilot_bdr_visit_record_seg'],
+    }),
+  )
+
+  assert captured_table_stats_kwargs['table_stat_level'].value == 'none'
+
+
 def test_agent_logger_guard_writes_to_configured_file(tmp_path, monkeypatch):
   """Disabled module loggers are re-enabled and write to the app log file."""
   log_file = tmp_path / 'server.log'

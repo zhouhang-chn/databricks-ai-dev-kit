@@ -339,7 +339,11 @@ To push a serialized config to an already-existing space (rather than creating a
 
 3. **Inspect the tables**:
    ```python
-   get_table_stats_and_schema(catalog="catalog", schema="schema")
+   get_table_stats_and_schema(
+       catalog="catalog",
+       schema="schema",
+       table_stat_level="NONE",
+   )
    ```
 
 4. **Create the Genie Space**:

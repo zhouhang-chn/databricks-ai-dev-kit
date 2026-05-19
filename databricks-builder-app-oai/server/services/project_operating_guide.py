@@ -57,6 +57,9 @@ Analysis Agent. It is not the project payload.
   time.
 - Before analytical SQL, inspect the schema of configured tables or metric views
   and verify column names instead of inferring them from business language.
+- When using `get_table_stats_and_schema`, always set `table_stat_level`
+  explicitly. Prefer `NONE` for schema discovery and column validation; use
+  `SIMPLE` or `DETAILED` only when the current question requires actual stats.
 - Prefer project-configured Databricks resources. If a warehouse is not
   configured and a cluster is configured, use the cluster for SQL execution.
 - Keep analysis-only chats read-oriented. Persist changes only when the user

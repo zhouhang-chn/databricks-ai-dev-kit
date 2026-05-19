@@ -17,7 +17,7 @@ This skill is intended to be the only skill enabled for an analysis agent. It as
 ## Workflow
 
 1. **Plan** — state the question, the candidate tables/columns, and the time window before running SQL.
-2. **Discover** — locate data via `SHOW CATALOGS / SCHEMAS / TABLES`, `DESCRIBE EXTENDED`, or `get_table_stats_and_schema`. Verify column names; never guess them from business language.
+2. **Discover** — locate data via `SHOW CATALOGS / SCHEMAS / TABLES`, `DESCRIBE EXTENDED`, or `get_table_stats_and_schema(..., table_stat_level="NONE")`. Verify column names; never guess them from business language.
 3. **Profile** — row count, distincts, nulls, ranges, top values. Use `APPROX_COUNT_DISTINCT` / `APPROX_PERCENTILE` on large tables.
 4. **Query** — write efficient SQL with explicit columns, filtered early, with `LIMIT` during exploration.
 5. **Enrich** *(optional)* — metric views, joins, window functions.
@@ -43,11 +43,21 @@ If a write is essential to answer the question, surface that in the conclusion a
 |------|---------|
 | `execute_sql` | Primary tool. Run a single SQL statement on a SQL warehouse. |
 | `execute_sql_multi` | Multiple statements in one call (e.g. inspect + query). |
-| `get_table_stats_and_schema` | Schema + row count + column statistics. Use `table_stat_level="DETAILED"` for cardinality, min/max, histograms. |
+| `get_table_stats_and_schema` | Schema inspection plus optional stats. Always set `table_stat_level` explicitly: default to `NONE`, use `SIMPLE` for row counts / basic health, and use `DETAILED` only for richer profiling such as cardinality, min/max, histograms, or value frequencies. |
 | `list_compute` | Discover available SQL warehouses and clusters; pick the running one. |
 | `get_current_user` | Confirm the active workspace identity when a result looks unexpected. |
 
 **Compute selection.** Prefer a configured SQL warehouse when one exists. In the Builder App runtime, `execute_sql` and `get_table_stats_and_schema` can fall back to the configured cluster when no warehouse is configured. Never start, resize, or create compute — ask the user instead.
+
+### Progressive profiling rule
+
+Use the least expensive inspection level that answers the current question:
+
+- `NONE` — schema discovery and column-name / type validation. This is the default when there is no explicit need for actual statistics.
+- `SIMPLE` — only when the current decision needs row counts or lightweight column-health signals.
+- `DETAILED` — only when the task explicitly needs richer profiling such as distributions, percentiles, histograms, or value frequencies.
+
+Start with `NONE` and escalate only when the next decision genuinely requires more statistics.
 
 ## Discovery Without `manage_uc_objects`
 
@@ -78,7 +88,7 @@ WHERE column_name ILIKE '%email%';
 
 `information_schema` is **per-catalog** — query it inside the catalog you care about. For workspace-wide metadata, the system catalog (`system.access.*`, `system.query.history`) is usually a better source.
 
-For full table profiling (row count, sample, column stats), `get_table_stats_and_schema(catalog, schema, table_names=[...], table_stat_level="DETAILED")` is faster and more structured than ad-hoc SQL.
+For schema-only discovery, use `get_table_stats_and_schema(catalog, schema, table_names=[...], table_stat_level="NONE")`. For full table profiling (row count, sample, column stats), use `table_stat_level="DETAILED"` only when those richer statistics are needed.
 
 ## SQL Patterns for Analysis
 

@@ -580,6 +580,15 @@ conclusions.
 - Databricks tools are exposed as plain function names (e.g. `execute_sql`, `manage_jobs`, `manage_pipeline`, `query_vs_index`); the available set depends on which skills are enabled for this project
 - Do not run Databricks tools until a visible plan exists and the current step has been started
 - For natural-language analysis over project tables, inspect schema first with `get_table_stats_and_schema` (or an explicit DESCRIBE/SHOW COLUMNS query) before the first analytical `execute_sql`; never guess column names from business terms
+- When calling `get_table_stats_and_schema`, always set `table_stat_level`
+  explicitly and use the least expensive level that answers the current question
+- Use `NONE` by default for schema discovery / column validation; use `SIMPLE`
+  only when row counts or basic column-health signals are needed
+- Use `DETAILED` only when richer profiling such as distributions, percentiles,
+  histograms, or value frequencies is required
+- Escalate progressively: start with `table_stat_level="NONE"` unless there is
+  an explicit reason to collect actual statistics, then call again with `SIMPLE`
+  or `DETAILED` only if the next decision needs them
 - Use configured preferred tables, metric views, glossary, known caveats, and sample queries as hints, not as proof that a guessed column exists
 - Long-running Databricks operations may return `{{status: "async", operation_id: ...}}`; in that case, poll with `check_operation_status(operation_id)` until it returns `completed` or `failed` before continuing
 - Do not claim to upload workspace files, run notebooks, execute Python code, create pipelines, or create jobs unless a matching tool is present in the run

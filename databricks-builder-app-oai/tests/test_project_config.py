@@ -154,3 +154,13 @@ def test_system_prompt_renders_project_operating_guide_snapshot():
   assert 'Project Operating Guide Snapshot (AGENTS.md)' in prompt
   assert 'project-local mechanism guidance, not project payload' in prompt
   assert 'Validate schemas before SQL' in prompt
+
+
+def test_system_prompt_prefers_none_for_schema_only_inspection():
+  """Schema inspection guidance should choose the least expensive stat level."""
+  prompt = get_system_prompt(enabled_skills=[])
+
+  assert 'always set `table_stat_level`' in prompt
+  assert 'use the least expensive level that answers the current question' in prompt
+  assert '`NONE` by default for schema discovery / column validation' in prompt
+  assert 'start with `table_stat_level="NONE"`' in prompt

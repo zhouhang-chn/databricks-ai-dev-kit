@@ -185,7 +185,8 @@ class AgentToolRunState:
       'missing_schema_for_tables': sorted(set(missing)),
       'required_action': (
         'Call get_table_stats_and_schema for the table with table_stat_level="NONE" '
-        'or "SIMPLE", then retry the SQL using the returned column names.'
+        'unless the next decision explicitly needs actual stats, then retry the SQL '
+        'using the returned column names.'
       ),
     }
 
