@@ -1,3 +1,27 @@
+FROM python:3.12-slim AS builder
+
+RUN apt-get -o Acquire::Retries=5 update \
+  && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+    ca-certificates \
+    gcc \
+    libc6-dev \
+    pkg-config \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY databricks-tools-core ./databricks-tools-core
+COPY databricks-mcp-server ./databricks-mcp-server
+COPY databricks-builder-app-oai ./databricks-builder-app-oai
+
+WORKDIR /app/databricks-builder-app-oai
+
+RUN python -m pip install --no-cache-dir --upgrade pip \
+  && pip wheel --no-cache-dir --wheel-dir /wheels \
+    ../databricks-tools-core \
+    ../databricks-mcp-server \
+    .
+
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -6,8 +30,8 @@ ENV ENV=development
 ENV BACKEND_PORT=8000
 ENV PROJECTS_BASE_DIR=/app/databricks-builder-app-oai/projects
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=5 update \
+  && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
     ca-certificates \
     curl \
     dnsutils \
@@ -15,18 +39,15 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY databricks-tools-core ./databricks-tools-core
-COPY databricks-mcp-server ./databricks-mcp-server
+COPY --from=builder /wheels /wheels
+RUN python -m pip install --no-cache-dir --upgrade pip \
+  && pip install --no-cache-dir --no-index --find-links=/wheels databricks-builder-app-oai \
+  && rm -rf /wheels
+
 COPY databricks-skills ./databricks-skills
 COPY databricks-builder-app-oai ./databricks-builder-app-oai
 
 WORKDIR /app/databricks-builder-app-oai
-
-RUN python -m pip install --no-cache-dir --upgrade pip \
-  && pip install --no-cache-dir \
-    ../databricks-tools-core \
-    ../databricks-mcp-server \
-    .
 
 RUN mkdir -p projects logs skills
 
