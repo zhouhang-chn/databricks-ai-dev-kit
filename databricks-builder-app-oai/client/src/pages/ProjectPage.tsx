@@ -72,6 +72,7 @@ import { cn } from '@/lib/utils';
 
 
 interface ActiveStream {
+  conversationId?: string;
   fullText: string;
   todos: TodoItem[];
   tools: string[];
@@ -816,7 +817,7 @@ export default function ProjectPage() {
   const [projectSettingPath, setProjectSettingPath] = useState<string | null>(null);
   const [projectSettingValidation, setProjectSettingValidation] =
     useState<ProjectSettingValidationResult | null>(null);
-  const [, setConversations] = useState<Conversation[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [analysisStories, setAnalysisStories] = useState<AnalysisStory[]>([]);
@@ -847,6 +848,7 @@ export default function ProjectPage() {
   const [isResizingRight, setIsResizingRight] = useState(false);
   const [isChatMenuOpen, setIsChatMenuOpen] = useState(false);
   const [isRenameOpen, setIsRenameOpen] = useState(false);
+  const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const chatMenuRef = useRef<HTMLDivElement>(null);
 
   // Close the "..." menu when clicking outside.
@@ -962,11 +964,17 @@ export default function ProjectPage() {
   const reconnectAttemptedRef = useRef<string | null>(null);
   const currentConvIdRef = useRef<string | undefined>(undefined);
   const messageToolsRef = useRef<Record<string, string[]>>({});
+  const conversationLoadSeqRef = useRef(0);
   // Per-conversation streaming data (supports concurrent streams)
   const allStreamsRef = useRef<Record<string, ActiveStream>>({});
 
-  // Keep currentConvIdRef in sync with state
-  useEffect(() => { currentConvIdRef.current = currentConversation?.id; }, [currentConversation?.id]);
+  // Keep currentConvIdRef in sync with loaded state. During URL-driven switches
+  // the ref is set before the conversation payload has finished loading.
+  useEffect(() => {
+    if (currentConversation?.id) {
+      currentConvIdRef.current = currentConversation.id;
+    }
+  }, [currentConversation?.id]);
   useEffect(() => { messageToolsRef.current = messageTools; }, [messageTools]);
 
   // Clear input when switching conversations
@@ -984,71 +992,87 @@ export default function ProjectPage() {
     }
   }, [searchParams]);
 
-  const syncStoriesFromMessages = useCallback((nextMessages: Message[]) => {
-    setAnalysisStories(prev => {
-      const dbStories = storiesFromMessages({ messages: nextMessages, messageTools: messageToolsRef.current });
-      if (prev.length === 0) return dbStories;
+  const storiesForMessages = useCallback((nextMessages: Message[]) => (
+    storiesFromMessages({ messages: nextMessages, messageTools: messageToolsRef.current })
+  ), []);
 
-      const storyMessageIds = (story: AnalysisStory): string[] => story.context.messageIds || [];
-      const hasSharedMessageId = (left: AnalysisStory, right: AnalysisStory): boolean => {
-        const rightIds = new Set(storyMessageIds(right));
-        return storyMessageIds(left).some((id) => rightIds.has(id));
+  const storiesForConversation = useCallback((conversationId: string, nextMessages: Message[]) => {
+    const dbStories = storiesForMessages(nextMessages);
+    const liveStories = (allStreamsRef.current[conversationId]?.stories || [])
+      .filter((story) => !story.conversationId || story.conversationId === conversationId);
+
+    if (liveStories.length === 0) return dbStories;
+
+    const storyMessageIds = (story: AnalysisStory): string[] => story.context.messageIds || [];
+    const hasSharedMessageId = (left: AnalysisStory, right: AnalysisStory): boolean => {
+      const rightIds = new Set(storyMessageIds(right));
+      return storyMessageIds(left).some((id) => rightIds.has(id));
+    };
+    const isUnfinished = (story: AnalysisStory): boolean => (
+      story.status !== 'done' && story.status !== 'error'
+    );
+    const sameQuestionAndConversation = (left: AnalysisStory, right: AnalysisStory): boolean => (
+      left.conversationId === right.conversationId
+      && left.question.trim() === right.question.trim()
+    );
+    const findLiveMatch = (dbStory: AnalysisStory): AnalysisStory | undefined => (
+      liveStories.find((liveStory) => liveStory.id === dbStory.id)
+      || liveStories.find((liveStory) => hasSharedMessageId(liveStory, dbStory))
+      || (isUnfinished(dbStory)
+        ? liveStories.find((liveStory) => isUnfinished(liveStory) && sameQuestionAndConversation(liveStory, dbStory))
+        : undefined)
+    );
+
+    const matchedLiveIds = new Set<string>();
+    const mergedDbStories = dbStories.map((dbStory) => {
+      const match = findLiveMatch(dbStory);
+      if (!match) return dbStory;
+      matchedLiveIds.add(match.id);
+      return {
+        ...dbStory,
+        plan: match.plan || dbStory.plan,
+        trace: match.trace.length > dbStory.trace.length ? match.trace : dbStory.trace,
+        evidence: match.evidence.length > dbStory.evidence.length ? match.evidence : dbStory.evidence,
+        conclusion: match.conclusion || dbStory.conclusion,
+        conclusionText: match.conclusionText || dbStory.conclusionText,
+        nextMoves: match.nextMoves.length > dbStory.nextMoves.length ? match.nextMoves : dbStory.nextMoves,
+        status: match.status === 'running' || match.status === 'planning' ? match.status : dbStory.status,
       };
-      const isUnfinished = (story: AnalysisStory): boolean => (
-        story.status !== 'done' && story.status !== 'error'
-      );
-      const sameQuestionAndConversation = (left: AnalysisStory, right: AnalysisStory): boolean => (
-        left.conversationId === right.conversationId
-        && left.question.trim() === right.question.trim()
-      );
-      const findLiveMatch = (dbStory: AnalysisStory): AnalysisStory | undefined => {
-        const exact = prev.find((liveStory) => liveStory.id === dbStory.id);
-        if (exact) return exact;
-
-        const byMessageId = prev.find((liveStory) => hasSharedMessageId(liveStory, dbStory));
-        if (byMessageId) return byMessageId;
-
-        // Only use text matching to bridge a temporary live story to a newly
-        // persisted, unfinished user turn. Repeated identical questions must
-        // not merge a new running story into an older completed DB story.
-        if (!isUnfinished(dbStory)) return undefined;
-        return prev.find((liveStory) => (
-          isUnfinished(liveStory) && sameQuestionAndConversation(liveStory, dbStory)
-        ));
-      };
-
-      // 1. Process dbStories and merge with matching live stories
-      const matchedLiveIds = new Set<string>();
-      const updatedDbStories = dbStories.map(dbStory => {
-        const match = findLiveMatch(dbStory);
-
-        if (match) {
-          matchedLiveIds.add(match.id);
-          return {
-            ...dbStory,
-            // Preserve rich state from live match
-            plan: match.plan || dbStory.plan,
-            trace: match.trace.length > dbStory.trace.length ? match.trace : dbStory.trace,
-            evidence: match.evidence.length > dbStory.evidence.length ? match.evidence : dbStory.evidence,
-            conclusion: match.conclusion || dbStory.conclusion,
-            conclusionText: match.conclusionText || dbStory.conclusionText,
-            nextMoves: match.nextMoves.length > dbStory.nextMoves.length ? match.nextMoves : dbStory.nextMoves,
-            status: match.status === 'running' || match.status === 'planning' ? match.status : dbStory.status,
-          };
-        }
-        return dbStory;
-      });
-
-      // 2. Preserve "live" stories that weren't matched in dbStories
-      // These are stories currently running or streaming that haven't been saved to DB yet
-      const orphanedLiveStories = prev.filter(liveStory => 
-        liveStory.conversationId === currentConvIdRef.current &&
-        !matchedLiveIds.has(liveStory.id) && 
-        (liveStory.status === 'running' || liveStory.status === 'planning' || liveStory.trace.length > 0)
-      );
-
-      return [...updatedDbStories, ...orphanedLiveStories];
     });
+    const orphanedLiveStories = liveStories.filter((liveStory) => (
+      !matchedLiveIds.has(liveStory.id)
+      && (liveStory.status === 'running' || liveStory.status === 'planning' || liveStory.trace.length > 0)
+    ));
+
+    return [...mergedDbStories, ...orphanedLiveStories];
+  }, [storiesForMessages]);
+
+  const applyConversationState = useCallback((conv: Conversation) => {
+    const nextMessages = conv.messages || [];
+    currentConvIdRef.current = conv.id;
+    setCurrentConversation(conv);
+    setMessages(nextMessages);
+    setAnalysisStories(storiesForConversation(conv.id, nextMessages));
+    setActiveStoryId(undefined);
+  }, [storiesForConversation]);
+
+  const clearConversationCanvas = useCallback(() => {
+    setMessages([]);
+    setAnalysisStories([]);
+    setActiveStoryId(undefined);
+    setStreamingText('');
+    setTodos([]);
+    setIsReconnecting(false);
+    setActiveExecutionId(null);
+    setInput('');
+  }, []);
+
+  const isStreamForeground = useCallback((stream: ActiveStream | undefined) => {
+    if (!stream) return false;
+    const selectedConversationId = currentConvIdRef.current;
+    return stream.conversationId
+      ? stream.conversationId === selectedConversationId
+      : !selectedConversationId;
   }, []);
 
   const applyStoryEvents = useCallback((stream: ActiveStream | undefined, events: AnalysisEvent[]) => {
@@ -1058,11 +1082,13 @@ export default function ProjectPage() {
       (nextStories, event) => reduceAnalysisEvent(nextStories, event),
       stream.stories
     );
-    setAnalysisStories((prev) => events.reduce(
-      (nextStories, event) => reduceAnalysisEvent(nextStories, event),
-      prev
-    ));
-  }, []);
+    if (isStreamForeground(stream)) {
+      setAnalysisStories((prev) => events.reduce(
+        (nextStories, event) => reduceAnalysisEvent(nextStories, event),
+        prev
+      ));
+    }
+  }, [isStreamForeground]);
 
   const applyStoryStreamEvent = useCallback((stream: ActiveStream | undefined, event: Record<string, unknown>) => {
     if (!stream?.storyId) return;
@@ -1074,12 +1100,15 @@ export default function ProjectPage() {
     if (!projectId) return;
 
     const loadData = async () => {
+      const loadSeq = conversationLoadSeqRef.current + 1;
+      conversationLoadSeqRef.current = loadSeq;
       try {
         setIsLoading(true);
+        setLoadingConversationId(null);
         // Clear old conversation state immediately
-        setMessages([]);
-        setAnalysisStories([]);
-        setActiveStoryId(undefined);
+        currentConvIdRef.current = undefined;
+        setCurrentConversation(null);
+        clearConversationCanvas();
         const [projectData, projectSettingData, conversationsData, clustersData, warehousesData] = await Promise.all([
           fetchProject(projectId),
           fetchProjectSetting(projectId).catch(() => null),
@@ -1102,12 +1131,14 @@ export default function ProjectPage() {
         const targetConv = urlConvId 
           ? conversationsData.find(c => c.id === urlConvId) || conversationsData[0]
           : conversationsData[0];
+        if (urlConvId && targetConv && targetConv.id !== urlConvId) {
+          navigate(`/projects/${projectId}?conversationId=${targetConv.id}`, { replace: true });
+        }
 
         if (targetConv) {
           const conv = await fetchConversation(projectId, targetConv.id);
-          setCurrentConversation(conv);
-          setMessages(conv.messages || []);
-          syncStoriesFromMessages(conv.messages || []);
+          if (conversationLoadSeqRef.current !== loadSeq) return;
+          applyConversationState(conv);
           setSelectedClusterId(resolveClusterId(conv, projectData, clustersData));
           setSelectedWarehouseId(resolveWarehouseId(conv, projectData, warehousesData));
           setDefaultCatalog(resolveDefaultCatalog(conv, projectData));
@@ -1115,8 +1146,10 @@ export default function ProjectPage() {
           setWorkspaceFolder(resolveWorkspaceFolder(conv, projectData, user, projectId));
           setMlflowExperimentName(resolveMlflowExperimentName(projectData));
         } else {
-          setAnalysisStories([]);
-          setActiveStoryId(undefined);
+          if (conversationLoadSeqRef.current !== loadSeq) return;
+          currentConvIdRef.current = undefined;
+          setCurrentConversation(null);
+          clearConversationCanvas();
           setSelectedClusterId(resolveClusterId(null, projectData, clustersData));
           setSelectedWarehouseId(resolveWarehouseId(null, projectData, warehousesData));
           setDefaultCatalog(resolveDefaultCatalog(null, projectData));
@@ -1129,37 +1162,79 @@ export default function ProjectPage() {
         toast.error('Failed to load project');
         navigate('/');
       } finally {
-        setIsLoading(false);
+        if (conversationLoadSeqRef.current === loadSeq) {
+          setIsLoading(false);
+        }
       }
     };
 
     loadData();
-  }, [projectId, navigate, user, syncStoriesFromMessages]);
+  }, [projectId, navigate, user, applyConversationState, clearConversationCanvas]);
 
   // Handle conversation changes via URL
   useEffect(() => {
     const urlConvId = searchParams.get('conversationId');
-    if (urlConvId && urlConvId !== currentConversation?.id && projectId) {
-      const switchConv = async () => {
-        try {
-          const conv = await fetchConversation(projectId, urlConvId);
-          setCurrentConversation(conv);
-          setMessages(conv.messages || []);
-          syncStoriesFromMessages(conv.messages || []);
-          // Clear streaming UI
-          setStreamingText('');
-          setTodos([]);
-        } catch (error) {
-          console.error('Failed to switch conversation:', error);
+    if (!projectId || !urlConvId || urlConvId === currentConvIdRef.current) return;
+
+    const loadSeq = conversationLoadSeqRef.current + 1;
+    conversationLoadSeqRef.current = loadSeq;
+    const knownConversation = conversations.find((conv) => conv.id === urlConvId);
+    currentConvIdRef.current = urlConvId;
+    setLoadingConversationId(urlConvId);
+    setCurrentConversation({
+      ...(knownConversation || {}),
+      id: urlConvId,
+      project_id: projectId,
+      title: knownConversation?.title || 'New Chat',
+      created_at: knownConversation?.created_at || null,
+      messages: [],
+    });
+    clearConversationCanvas();
+
+    const switchConv = async () => {
+      try {
+        const conv = await fetchConversation(projectId, urlConvId);
+        if (conversationLoadSeqRef.current !== loadSeq || currentConvIdRef.current !== urlConvId) return;
+        applyConversationState(conv);
+        if (project) {
+          setSelectedClusterId(resolveClusterId(conv, project, clusters));
+          setSelectedWarehouseId(resolveWarehouseId(conv, project, warehouses));
+          setDefaultCatalog(resolveDefaultCatalog(conv, project));
+          setDefaultSchema(resolveDefaultSchema(conv, project, userDefaultSchema));
+          setWorkspaceFolder(resolveWorkspaceFolder(conv, project, user, projectId));
+          setMlflowExperimentName(resolveMlflowExperimentName(project));
         }
-      };
-      switchConv();
-    }
-  }, [projectId, searchParams, currentConversation?.id, syncStoriesFromMessages]);
+      } catch (error) {
+        console.error('Failed to switch conversation:', error);
+      } finally {
+        if (conversationLoadSeqRef.current === loadSeq && currentConvIdRef.current === urlConvId) {
+          setLoadingConversationId(null);
+        }
+      }
+    };
+    switchConv();
+  }, [
+    projectId,
+    searchParams,
+    conversations,
+    project,
+    clusters,
+    warehouses,
+    user,
+    userDefaultSchema,
+    applyConversationState,
+    clearConversationCanvas,
+  ]);
 
   // Check for active execution when conversation loads and reconnect if needed
   useEffect(() => {
-    if (!projectId || !currentConversation?.id || isLoading || allStreamsRef.current[currentConversation.id]) return;
+    if (
+      !projectId
+      || !currentConversation?.id
+      || isLoading
+      || loadingConversationId === currentConversation.id
+      || allStreamsRef.current[currentConversation.id]
+    ) return;
 
     // Skip if we've already checked this conversation
     if (reconnectAttemptedRef.current === currentConversation.id) return;
@@ -1171,7 +1246,7 @@ export default function ProjectPage() {
 
         const reconConvId = currentConversation.id;
         let reconnectStory: AnalysisStory | undefined;
-        let initialStories = analysisStories;
+        let initialStories = storiesForMessages(currentConversation.messages || []);
 
         // 1. Create reconnect story if needed
         if (active && active.status === 'running') {
@@ -1208,6 +1283,7 @@ export default function ProjectPage() {
         }
 
         // 3. Update state with replayed data
+        if (currentConvIdRef.current !== reconConvId) return;
         setAnalysisStories(initialStories);
 
         if (active && active.status === 'running' && reconnectStory) {
@@ -1216,6 +1292,7 @@ export default function ProjectPage() {
           // Initialize stream.stories with the replayed state so reduceAnalysisEvent 
           // can find the story and apply live updates correctly
           allStreamsRef.current[reconConvId] = {
+            conversationId: reconConvId,
             fullText: '',
             todos: [],
             tools: [],
@@ -1239,7 +1316,7 @@ export default function ProjectPage() {
             onEvent: (event) => {
               const type = event.type as string;
               const stream = allStreamsRef.current[reconConvId];
-              const isForeground = currentConvIdRef.current === reconConvId;
+              const isForeground = isStreamForeground(stream);
               applyStoryStreamEvent(stream, event);
 
               if (type === 'text_delta') {
@@ -1307,7 +1384,16 @@ export default function ProjectPage() {
     };
 
     checkAndReconnect();
-  }, [projectId, currentConversation, isLoading, applyStoryEvents, applyStoryStreamEvent]);
+  }, [
+    projectId,
+    currentConversation,
+    isLoading,
+    loadingConversationId,
+    storiesForMessages,
+    isStreamForeground,
+    applyStoryEvents,
+    applyStoryStreamEvent,
+  ]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -1364,6 +1450,7 @@ export default function ProjectPage() {
       setDefaultSchema(resolveDefaultSchema(conv, project, userDefaultSchema));
       setWorkspaceFolder(resolveWorkspaceFolder(conv, project, user, projectId));
       setMlflowExperimentName(resolveMlflowExperimentName(project));
+      navigate(`/projects/${projectId}?conversationId=${conv.id}`);
       inputRef.current?.focus();
     } catch (error) {
       console.error('Failed to create conversation:', error);
@@ -1414,6 +1501,7 @@ export default function ProjectPage() {
     const effectiveConvId = convId || '';
     let streamKey = effectiveConvId;
     allStreamsRef.current[streamKey] = {
+      conversationId: convId || undefined,
       fullText: '',
       todos: [],
       tools: [],
@@ -1445,12 +1533,12 @@ export default function ProjectPage() {
         onExecutionId: (executionId) => {
           const stream = allStreamsRef.current[streamKey];
           if (stream) stream.executionId = executionId;
-          if (currentConvIdRef.current === streamKey) setActiveExecutionId(executionId);
+          if (isStreamForeground(stream)) setActiveExecutionId(executionId);
         },
         onEvent: (event) => {
           const type = event.type as string;
           const stream = allStreamsRef.current[streamKey];
-          const isForeground = currentConvIdRef.current === streamKey;
+          const isForeground = isStreamForeground(stream);
 
           if (type === 'conversation.created') {
             const newConvId = event.conversation_id as string;
@@ -1460,12 +1548,15 @@ export default function ProjectPage() {
             delete allStreamsRef.current[streamKey];
             const oldKey = streamKey;
             streamKey = newConvId;
-            allStreamsRef.current[newConvId] = oldStream || {
-              fullText: '', activityItems: [], todos: [], tools: [],
+            const nextStream = oldStream || {
+              conversationId: newConvId,
+              fullText: '', todos: [], tools: [],
               stories: [],
               executionId: null, abortController, isReconnecting: false,
               pendingMessages: [],
             };
+            nextStream.conversationId = newConvId;
+            allStreamsRef.current[newConvId] = nextStream;
             conversationId = newConvId;
 
             // CRITICAL: Update the conversation_id of any temporary messages so they don't disappear
@@ -1485,14 +1576,15 @@ export default function ProjectPage() {
             // Update streamingConvIds from old key to new key
             setStreamingConvIds(prev => prev.filter(id => id !== oldKey).concat(newConvId));
             // Set currentConversation immediately so UI stays consistent
-            setCurrentConversation((prev) => prev ?? {
+            currentConvIdRef.current = newConvId;
+            setCurrentConversation({
               id: newConvId,
               project_id: projectId,
               title: 'New Chat',
               created_at: new Date().toISOString(),
-              conversation_count: 0,
-            } as unknown as Conversation);
-            currentConvIdRef.current = newConvId;
+              messages: [],
+            });
+            navigate(`/projects/${projectId}?conversationId=${newConvId}`, { replace: true });
             fetchConversations(projectId).then(setConversations);
           } else if (type === 'text_delta') {
             applyStoryStreamEvent(stream, event);
@@ -1527,9 +1619,9 @@ export default function ProjectPage() {
             if (errorMsg === 'Stream closed' || errorMsg.includes('Stream closed')) {
               errorMsg = 'Execution interrupted: The operation took too long or the connection was lost. Operations exceeding 50 seconds may be interrupted. Check backend logs for details.';
             }
-            toast.error(errorMsg, { duration: 8000 });
+            if (isForeground) toast.error(errorMsg, { duration: 8000 });
           } else if (type === 'cancelled') {
-            toast.info('Generation stopped');
+            if (isForeground) toast.info('Generation stopped');
           } else if (type === 'todos') {
             applyStoryStreamEvent(stream, event);
             const todoItems = event.todos as TodoItem[];
@@ -1556,21 +1648,23 @@ export default function ProjectPage() {
           console.error('Stream error:', error);
           const errorMessage = error.message || 'Failed to get response';
           const stream = allStreamsRef.current[streamKey];
+          const wasForeground = isStreamForeground(stream);
           if (stream?.storyId) {
             applyStoryEvents(stream, [{ type: 'story.failed', storyId: stream.storyId, error: errorMessage }]);
           }
           delete allStreamsRef.current[streamKey];
           setStreamingConvIds(prev => prev.filter(id => id !== streamKey));
-          if (currentConvIdRef.current === streamKey) {
+          if (wasForeground) {
             setStreamingText('');
             setActiveExecutionId(null);
             setTodos([]);
           }
-          toast.error(errorMessage, { duration: 8000 });
+          if (wasForeground) toast.error(errorMessage, { duration: 8000 });
         },
         onDone: async () => {
           const finalStreamKey = streamKey;
           const stream = allStreamsRef.current[finalStreamKey];
+          const wasForeground = isStreamForeground(stream);
           const tools = stream?.tools || [];
           if (stream?.storyId) {
             applyStoryEvents(stream, [{ type: 'story.completed', storyId: stream.storyId }]);
@@ -1587,7 +1681,7 @@ export default function ProjectPage() {
               is_error: false,
             };
             // Only update messages if user is viewing this conversation
-            if (currentConvIdRef.current === finalStreamKey) {
+            if (wasForeground) {
               setMessages((prev) => [...prev, assistantMessage]);
             }
             if (tools.length > 0) {
@@ -1599,7 +1693,7 @@ export default function ProjectPage() {
           delete allStreamsRef.current[finalStreamKey];
           setStreamingConvIds(prev => prev.filter(id => id !== finalStreamKey));
 
-          if (currentConvIdRef.current === finalStreamKey) {
+          if (wasForeground) {
             setStreamingText('');
             setActiveExecutionId(null);
             setTodos([]);
@@ -1608,7 +1702,7 @@ export default function ProjectPage() {
           // Fetch full conversation to get updated title and messages
           if (conversationId) {
             const conv = await fetchConversation(projectId, conversationId);
-            if (currentConvIdRef.current === finalStreamKey) {
+            if (currentConvIdRef.current === conversationId) {
               setCurrentConversation(conv);
             }
             fetchConversations(projectId).then(setConversations);
@@ -1621,15 +1715,16 @@ export default function ProjectPage() {
       if (error instanceof Error && error.name === 'AbortError') return;
       console.error('Failed to send message:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
-      toast.error(errorMessage, { duration: 8000 });
       // Clean up stream on error
       const stream = allStreamsRef.current[streamKey];
+      const wasForeground = isStreamForeground(stream);
+      if (wasForeground) toast.error(errorMessage, { duration: 8000 });
       if (stream?.storyId) {
         applyStoryEvents(stream, [{ type: 'story.failed', storyId: stream.storyId, error: errorMessage }]);
       }
       delete allStreamsRef.current[streamKey];
       setStreamingConvIds(prev => prev.filter(id => id !== streamKey));
-      if (currentConvIdRef.current === streamKey) {
+      if (wasForeground) {
         setStreamingText('');
         setActiveExecutionId(null);
         setTodos([]);
@@ -1647,6 +1742,8 @@ export default function ProjectPage() {
     runRole,
     applyStoryEvents,
     applyStoryStreamEvent,
+    isStreamForeground,
+    navigate,
   ]);
 
   const handleSendMessage = useCallback(async () => {
@@ -1861,7 +1958,9 @@ export default function ProjectPage() {
   }, []);
 
   // Only show streaming UI if viewing a conversation that is actively streaming
-  const isStreamingHere = streamingConvIds.includes(currentConversation?.id || '');
+  const selectedConversationId = currentConversation?.id || currentConvIdRef.current || '';
+  const isStreamingHere = streamingConvIds.includes(selectedConversationId);
+  const isConversationLoading = Boolean(loadingConversationId);
 
   if (isLoading) {
     return (
@@ -2044,7 +2143,7 @@ export default function ProjectPage() {
                         rows={1}
                         className="w-full resize-none bg-transparent px-5 pt-4 pb-14 text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                         style={{ maxHeight: 200 }}
-                        disabled={isStreamingHere}
+                        disabled={isStreamingHere || isConversationLoading}
                       />
                       <div className="absolute bottom-3 left-5 right-3 flex items-center justify-between">
                         <span className="text-[11px] text-[var(--color-text-muted)]/40 select-none">
@@ -2061,7 +2160,7 @@ export default function ProjectPage() {
                         ) : (
                           <button
                             onClick={handleSendMessage}
-                            disabled={!input.trim()}
+                            disabled={!input.trim() || isConversationLoading}
                             className={cn(
                               'flex items-center justify-center h-9 w-9 rounded-xl transition-all',
                               input.trim()
