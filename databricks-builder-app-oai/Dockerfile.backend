@@ -1,12 +1,30 @@
 FROM python:3.12-slim AS builder
 
-RUN apt-get -o Acquire::Retries=5 update \
-  && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+ARG DEBIAN_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian
+ARG DEBIAN_SECURITY_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian-security
+
+RUN set -eux; \
+  if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+    sed -i \
+      -e "s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+      -e "s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+      -e "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+      /etc/apt/sources.list.d/debian.sources; \
+  fi; \
+  if [ -f /etc/apt/sources.list ]; then \
+    sed -i \
+      -e "s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+      -e "s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+      -e "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+      /etc/apt/sources.list; \
+  fi; \
+  apt-get -o Acquire::Retries=5 update; \
+  apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
     ca-certificates \
     gcc \
     libc6-dev \
-    pkg-config \
-  && rm -rf /var/lib/apt/lists/*
+    pkg-config; \
+  rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -24,18 +42,36 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
 
 FROM python:3.12-slim
 
+ARG DEBIAN_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian
+ARG DEBIAN_SECURITY_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian-security
+
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV ENV=development
 ENV BACKEND_PORT=8000
 ENV PROJECTS_BASE_DIR=/app/databricks-builder-app-oai/projects
 
-RUN apt-get -o Acquire::Retries=5 update \
-  && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+RUN set -eux; \
+  if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+    sed -i \
+      -e "s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+      -e "s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+      -e "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+      /etc/apt/sources.list.d/debian.sources; \
+  fi; \
+  if [ -f /etc/apt/sources.list ]; then \
+    sed -i \
+      -e "s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+      -e "s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+      -e "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+      /etc/apt/sources.list; \
+  fi; \
+  apt-get -o Acquire::Retries=5 update; \
+  apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
     ca-certificates \
     curl \
-    dnsutils \
-  && rm -rf /var/lib/apt/lists/*
+    dnsutils; \
+  rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
