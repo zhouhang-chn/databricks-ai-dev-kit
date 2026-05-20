@@ -44,11 +44,20 @@ def default_project_settings() -> dict[str, Any]:
     },
     'semantics': {
       'metric_views': [],
+      'metric_view_context': {
+        'discovery_sources': {},
+        'metric_views': [],
+      },
       'preferred_tables': [],
       'deprecated_tables': [],
       'glossary': {},
       'sample_queries': [],
       'known_caveats': [],
+    },
+    'scenario_onboarding': {
+      'analysis_requirements': [],
+      'semantic_gap_analysis': [],
+      'readiness_summary': {},
     },
     'agent_policy': {
       'mode': 'build_with_approval',
@@ -216,15 +225,17 @@ def build_project_context(
   settings, settings_source = get_project_settings_for_run(project, run_role=run_role)
   normalized_role = run_role or 'developer'
   if normalized_role in USER_PREVIEW_ROLES:
-    settings = normalize_project_settings({
-      **settings,
-      'agent_policy': {
-        **(settings.get('agent_policy') or {}),
-        'role': normalized_role,
-        'mode': 'read_only_analysis',
-        'write_policy': 'read_only',
-      },
-    })
+    settings = normalize_project_settings(
+      {
+        **settings,
+        'agent_policy': {
+          **(settings.get('agent_policy') or {}),
+          'role': normalized_role,
+          'mode': 'read_only_analysis',
+          'write_policy': 'read_only',
+        },
+      }
+    )
 
   return {
     'id': getattr(project, 'id', None),

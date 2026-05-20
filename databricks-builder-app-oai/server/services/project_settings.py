@@ -80,14 +80,150 @@ class DatabricksResources(BaseModel):
     return _coerce_string_list(value)
 
 
+class MetricViewValidation(BaseModel):
+  """Validation metadata for one Metric View candidate."""
+
+  model_config = ConfigDict(extra='allow')
+
+  direct_sql_ref: str | None = None
+  tolerance: dict[str, Any] = Field(default_factory=dict)
+  checked_at: str | None = None
+  known_caveats: list[str] = Field(default_factory=list)
+
+  @field_validator('direct_sql_ref', 'checked_at', mode='before')
+  @classmethod
+  def _normalize_optional_string(cls, value: Any) -> str | None:
+    return _coerce_optional_string(value)
+
+  @field_validator('tolerance', mode='before')
+  @classmethod
+  def _normalize_mapping(cls, value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+  @field_validator('known_caveats', mode='before')
+  @classmethod
+  def _normalize_string_list(cls, value: Any) -> list[str]:
+    return _coerce_string_list(value)
+
+
+class MetricViewContextEntry(BaseModel):
+  """Project-level Metric View context used for semantic-layer routing."""
+
+  model_config = ConfigDict(extra='allow')
+
+  full_name: str = ''
+  status: Literal['candidate', 'validated', 'certified', 'stale', 'missing'] = 'candidate'
+  source_objects: list[str] = Field(default_factory=list)
+  grain: list[str] = Field(default_factory=list)
+  dimensions: list[str] = Field(default_factory=list)
+  measures: list[str] = Field(default_factory=list)
+  business_terms: dict[str, Any] = Field(default_factory=dict)
+  validation: MetricViewValidation | None = None
+
+  @field_validator('full_name', mode='before')
+  @classmethod
+  def _normalize_full_name(cls, value: Any) -> str:
+    return '' if value is None else str(value).strip()
+
+  @field_validator('source_objects', 'grain', 'dimensions', 'measures', mode='before')
+  @classmethod
+  def _normalize_string_list(cls, value: Any) -> list[str]:
+    return _coerce_string_list(value)
+
+  @field_validator('business_terms', mode='before')
+  @classmethod
+  def _normalize_business_terms(cls, value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+class MetricViewContext(BaseModel):
+  """Metric View discovery, status, and validation context for a project."""
+
+  model_config = ConfigDict(extra='allow')
+
+  discovery_sources: dict[str, Any] = Field(default_factory=dict)
+  metric_views: list[MetricViewContextEntry] = Field(default_factory=list)
+
+  @field_validator('discovery_sources', mode='before')
+  @classmethod
+  def _normalize_discovery_sources(cls, value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+class AnalysisRequirement(BaseModel):
+  """One derived analysis requirement from scenario onboarding."""
+
+  model_config = ConfigDict(extra='allow')
+
+  requirement_id: str = ''
+  question_examples: list[str] = Field(default_factory=list)
+  business_terms: list[str] = Field(default_factory=list)
+  grain: list[str] = Field(default_factory=list)
+  measures: list[str] = Field(default_factory=list)
+  dimensions: list[str] = Field(default_factory=list)
+  filters: list[str] = Field(default_factory=list)
+  required_assets: dict[str, Any] = Field(default_factory=dict)
+  answer_contract: dict[str, Any] = Field(default_factory=dict)
+  priority: str = 'P0'
+
+  @field_validator('requirement_id', 'priority', mode='before')
+  @classmethod
+  def _normalize_string(cls, value: Any) -> str:
+    return '' if value is None else str(value).strip()
+
+  @field_validator(
+    'question_examples',
+    'business_terms',
+    'grain',
+    'measures',
+    'dimensions',
+    'filters',
+    mode='before',
+  )
+  @classmethod
+  def _normalize_string_list(cls, value: Any) -> list[str]:
+    return _coerce_string_list(value)
+
+  @field_validator('required_assets', 'answer_contract', mode='before')
+  @classmethod
+  def _normalize_mapping(cls, value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+class SemanticGapEntry(BaseModel):
+  """Coverage finding for one analysis requirement."""
+
+  model_config = ConfigDict(extra='allow')
+
+  requirement_id: str = ''
+  existing_coverage: Literal['covered', 'partial', 'missing', 'blocked'] = 'missing'
+  gaps: list[str] = Field(default_factory=list)
+  recommended_assets: list[str] = Field(default_factory=list)
+  readiness: str = 'blocked'
+
+  @field_validator('requirement_id', 'readiness', mode='before')
+  @classmethod
+  def _normalize_string(cls, value: Any) -> str:
+    return '' if value is None else str(value).strip()
+
+  @field_validator('gaps', 'recommended_assets', mode='before')
+  @classmethod
+  def _normalize_string_list(cls, value: Any) -> list[str]:
+    return _coerce_string_list(value)
+
+
 class ProjectSetting(BaseModel):
-  """Minimal user-authored v0.2 project setting."""
+  """User-authored project setting plus optional scenario-onboarding artifacts."""
 
   model_config = ConfigDict(extra='ignore')
 
   business_background: str = ''
   analysis_notes: list[str] = Field(default_factory=list)
   databricks_resources: DatabricksResources = Field(default_factory=DatabricksResources)
+  analysis_requirements: list[AnalysisRequirement] = Field(default_factory=list)
+  semantic_gap_analysis: list[SemanticGapEntry] = Field(default_factory=list)
+  metric_view_context: MetricViewContext = Field(default_factory=MetricViewContext)
+  readiness_summary: dict[str, Any] = Field(default_factory=dict)
 
   @field_validator('business_background', mode='before')
   @classmethod
@@ -98,6 +234,11 @@ class ProjectSetting(BaseModel):
   @classmethod
   def _normalize_analysis_notes(cls, value: Any) -> list[str]:
     return _coerce_string_list(value)
+
+  @field_validator('readiness_summary', mode='before')
+  @classmethod
+  def _normalize_readiness_summary(cls, value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 class ValidationCheck(BaseModel):
@@ -238,6 +379,44 @@ def _append_string_list(
     lines.append(f'{indent}  - {_yaml_scalar(value)}')
 
 
+def _yaml_data(value: Any) -> Any:
+  """Convert Pydantic objects to plain data for YAML rendering."""
+  if isinstance(value, BaseModel):
+    return value.model_dump(mode='json', exclude_none=True)
+  if isinstance(value, list):
+    return [_yaml_data(item) for item in value]
+  if isinstance(value, dict):
+    return {key: _yaml_data(item) for key, item in value.items()}
+  return value
+
+
+def _has_yaml_content(value: Any) -> bool:
+  data = _yaml_data(value)
+  if data in (None, {}, []):
+    return False
+  if isinstance(data, dict):
+    return any(_has_yaml_content(item) for item in data.values())
+  if isinstance(data, list):
+    return any(_has_yaml_content(item) for item in data)
+  return True
+
+
+def _append_yaml_section(lines: list[str], key: str, value: Any) -> None:
+  if not _has_yaml_content(value):
+    return
+
+  data = _yaml_data(value)
+  dumped = yaml.safe_dump(
+    data,
+    allow_unicode=True,
+    default_flow_style=False,
+    sort_keys=False,
+    width=1000,
+  ).rstrip()
+  lines.extend(['', f'{key}:'])
+  lines.extend(f'  {line}' if line else '' for line in dumped.splitlines())
+
+
 def render_project_setting_yaml(setting: ProjectSetting) -> str:
   """Render a project setting as a readable YAML document."""
   resources = setting.databricks_resources
@@ -279,6 +458,10 @@ def render_project_setting_yaml(setting: ProjectSetting) -> str:
   _append_string_list(lines, 'input_volume_paths', resources.input_volume_paths)
   lines.append(f'  output_schema: {_yaml_scalar(resources.output_schema)}')
   _append_string_list(lines, 'output_volume_folders', resources.output_volume_folders)
+  _append_yaml_section(lines, 'analysis_requirements', setting.analysis_requirements)
+  _append_yaml_section(lines, 'semantic_gap_analysis', setting.semantic_gap_analysis)
+  _append_yaml_section(lines, 'metric_view_context', setting.metric_view_context)
+  _append_yaml_section(lines, 'readiness_summary', setting.readiness_summary)
   return '\n'.join(lines) + '\n'
 
 
@@ -368,8 +551,14 @@ def project_update_from_setting(setting: ProjectSetting) -> dict[str, Any]:
       },
       'semantics': {
         'metric_views': resources.input_metric_views,
+        'metric_view_context': _yaml_data(setting.metric_view_context),
         'preferred_tables': resources.input_tables,
         'known_caveats': setting.analysis_notes,
+      },
+      'scenario_onboarding': {
+        'analysis_requirements': _yaml_data(setting.analysis_requirements),
+        'semantic_gap_analysis': _yaml_data(setting.semantic_gap_analysis),
+        'readiness_summary': setting.readiness_summary,
       },
       'workflows': {
         'enabled': resources.workflows,

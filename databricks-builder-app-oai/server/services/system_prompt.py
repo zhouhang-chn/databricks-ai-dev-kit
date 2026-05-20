@@ -8,7 +8,10 @@ from .skills_manager import get_available_skills
 # Only entries whose skill is enabled will be included in the prompt.
 _SKILL_GUIDE_ENTRIES = [
   ('Generate data, synthetic data, fake data, test data', 'databricks-synthetic-data-gen'),
-  ('Pipeline, ETL, bronze/silver/gold, data transformation', 'databricks-spark-declarative-pipelines'),
+  (
+    'Pipeline, ETL, bronze/silver/gold, data transformation',
+    'databricks-spark-declarative-pipelines',
+  ),
   ('Dashboard, visualization, BI, charts', 'databricks-aibi-dashboards'),
   ('Job, workflow, schedule, automation', 'databricks-jobs'),
   ('SDK, API, Databricks client', 'databricks-python-sdk'),
@@ -32,6 +35,61 @@ def _format_project_list(values: object, *, limit: int = 8) -> str:
   if len(values) > limit:
     rendered.append(f'- ... {len(values) - limit} more')
   return '\n'.join(rendered)
+
+
+def _format_limited_inline_list(values: object, *, limit: int = 6) -> str:
+  """Render a compact comma-delimited list for Metric View context."""
+  if not isinstance(values, list) or not values:
+    return ''
+  rendered = [str(value).strip() for value in values[:limit] if value]
+  if len(values) > limit:
+    rendered.append(f'... {len(values) - limit} more')
+  return ', '.join(rendered)
+
+
+def _format_metric_view_context(metric_view_context: object, *, limit: int = 5) -> str:
+  """Render bounded Metric View status and validation context."""
+  if not isinstance(metric_view_context, dict):
+    return ''
+
+  metric_views = metric_view_context.get('metric_views')
+  if not isinstance(metric_views, list) or not metric_views:
+    return ''
+
+  rows: list[str] = []
+  for item in metric_views[:limit]:
+    if not isinstance(item, dict):
+      continue
+    full_name = str(item.get('full_name') or '').strip()
+    if not full_name:
+      continue
+    status = str(item.get('status') or 'candidate').strip()
+    grain = _format_limited_inline_list(item.get('grain'))
+    measures = _format_limited_inline_list(item.get('measures'))
+    dimensions = _format_limited_inline_list(item.get('dimensions'))
+
+    row_parts = [f'- `{full_name}`', f'status `{status}`']
+    if grain:
+      row_parts.append(f'grain: {grain}')
+    if measures:
+      row_parts.append(f'measures: {measures}')
+    if dimensions:
+      row_parts.append(f'dimensions: {dimensions}')
+
+    validation = item.get('validation')
+    if isinstance(validation, dict):
+      direct_sql_ref = validation.get('direct_sql_ref')
+      checked_at = validation.get('checked_at')
+      if direct_sql_ref:
+        row_parts.append(f'direct SQL ref: `{direct_sql_ref}`')
+      if checked_at:
+        row_parts.append(f'checked: `{checked_at}`')
+
+    rows.append('; '.join(row_parts))
+
+  if len(metric_views) > limit:
+    rows.append(f'- ... {len(metric_views) - limit} more Metric Views')
+  return '\n'.join(rows)
 
 
 def _render_project_context(project_context: dict[str, Any] | None) -> str:
@@ -71,18 +129,11 @@ def _render_project_context(project_context: dict[str, Any] | None) -> str:
   if not isinstance(governance, dict):
     governance = {}
 
-  resource_rows = [
-    f'- **{key}:** `{value}`'
-    for key, value in resources.items()
-    if value
-  ]
-  override_rows = [
-    f'- **{key}:** `{value}`'
-    for key, value in overrides.items()
-    if value
-  ]
+  resource_rows = [f'- **{key}:** `{value}`' for key, value in resources.items() if value]
+  override_rows = [f'- **{key}:** `{value}`' for key, value in overrides.items() if value]
 
   metric_views = _format_project_list(semantics.get('metric_views'))
+  metric_view_context = _format_metric_view_context(semantics.get('metric_view_context'))
   preferred_tables = _format_project_list(semantics.get('preferred_tables'))
   deprecated_tables = _format_project_list(semantics.get('deprecated_tables'))
   sample_queries = _format_project_list(semantics.get('sample_queries'), limit=5)
@@ -101,9 +152,7 @@ def _render_project_context(project_context: dict[str, Any] | None) -> str:
   policy_rows = [
     f'- **Role:** `{policy.get("role")}`' if policy.get('role') else '',
     f'- **Mode:** `{policy.get("mode")}`' if policy.get('mode') else '',
-    f'- **Write policy:** `{policy.get("write_policy")}`'
-    if policy.get('write_policy')
-    else '',
+    f'- **Write policy:** `{policy.get("write_policy")}`' if policy.get('write_policy') else '',
   ]
   policy_rows = [row for row in policy_rows if row]
 
@@ -121,11 +170,11 @@ context for this run unless the user explicitly says otherwise.
 - **Settings Source:** `{project_context.get('settings_source') or 'draft'}`
 """
   if project_context.get('description'):
-    section += f"- **Purpose:** {project_context['description']}\n"
+    section += f'- **Purpose:** {project_context["description"]}\n'
   if resource_rows:
-    section += f"\n### Effective Databricks Resources\n{chr(10).join(resource_rows)}\n"
+    section += f'\n### Effective Databricks Resources\n{chr(10).join(resource_rows)}\n'
   if override_rows:
-    section += f"\n### Conversation Overrides\n{chr(10).join(override_rows)}\n"
+    section += f'\n### Conversation Overrides\n{chr(10).join(override_rows)}\n'
   if metric_views:
     section += (
       f'\n### Preferred Metric Views\n{metric_views}\n'
@@ -133,30 +182,41 @@ context for this run unless the user explicitly says otherwise.
       'trend, and comparison questions. Use preferred tables for validation, '
       'row-level drill-down, or questions the Metric Views do not cover.\n'
     )
+  if metric_view_context:
+    section += (
+      f'\n### Metric View Context\n{metric_view_context}\n'
+      'Treat `certified` and `validated` Metric Views as the preferred path. '
+      'For `candidate`, `stale`, or `missing` Metric Views, state the status '
+      'and use a visible validation or fallback path before relying on raw tables.\n'
+    )
   if preferred_tables:
-    section += f"\n### Preferred Tables\n{preferred_tables}\n"
+    section += f'\n### Preferred Tables\n{preferred_tables}\n'
   if deprecated_tables:
-    section += f"\n### Deprecated Or Blocked Tables\nAvoid these unless the user explicitly overrides:\n{deprecated_tables}\n"
+    section += (
+      '\n### Deprecated Or Blocked Tables\n'
+      'Avoid these unless the user explicitly overrides:\n'
+      f'{deprecated_tables}\n'
+    )
   if pinned_resources:
-    section += f"\n### Pinned Resources\n{pinned_resources}\n"
+    section += f'\n### Pinned Resources\n{pinned_resources}\n'
   if sample_queries:
-    section += f"\n### Known-Good Query Patterns\n{sample_queries}\n"
+    section += f'\n### Known-Good Query Patterns\n{sample_queries}\n'
   if glossary_rows:
-    section += f"\n### Glossary\n{chr(10).join(glossary_rows)}\n"
+    section += f'\n### Glossary\n{chr(10).join(glossary_rows)}\n'
   if caveats:
-    section += f"\n### Known Caveats\n{caveats}\n"
+    section += f'\n### Known Caveats\n{caveats}\n'
   if workflow_templates:
-    section += f"\n### Available Project Workflows\n{workflow_templates}\n"
+    section += f'\n### Available Project Workflows\n{workflow_templates}\n'
   if approved_memory:
-    section += f"\n### Approved Project Memory\n{approved_memory}\n"
+    section += f'\n### Approved Project Memory\n{approved_memory}\n'
   if policy_rows:
-    section += f"\n### Agent Policy\n{chr(10).join(policy_rows)}\n"
+    section += f'\n### Agent Policy\n{chr(10).join(policy_rows)}\n'
   if governance.get('export_policy') or governance.get('retention_policy'):
     section += '\n### Governance\n'
     if governance.get('retention_policy'):
-      section += f"- **Retention:** `{governance.get('retention_policy')}`\n"
+      section += f'- **Retention:** `{governance.get("retention_policy")}`\n'
     if governance.get('export_policy'):
-      section += f"- **Export policy:** `{governance.get('export_policy')}`\n"
+      section += f'- **Export policy:** `{governance.get("export_policy")}`\n'
 
   return section
 
@@ -220,7 +280,7 @@ def get_system_prompt(
   skills_section = ''
   skill_workflow_section = ''
   if skills:
-    skill_list = '\n'.join(f"  - **{s['name']}**: {s['description']}" for s in skills)
+    skill_list = '\n'.join(f'  - **{s["name"]}**: {s["description"]}' for s in skills)
     skills_section = f"""
 ## Skills
 
@@ -287,7 +347,8 @@ Do not use or request a generic Skill tool; no such tool is exposed in this runt
 
 You are configured to use **Databricks Serverless Compute** for code execution.
 
-When you need to run Python or Scala, call `execute_code` with `compute_type="serverless"`. Use `list_compute` for inspection.
+When you need to run Python or Scala, call `execute_code` with
+`compute_type="serverless"`. Use `list_compute` for inspection.
 """
   elif cluster_id:
     cluster_section = f"""
@@ -296,7 +357,8 @@ When you need to run Python or Scala, call `execute_code` with `compute_type="se
 You have a Databricks cluster selected for code execution:
 - **Cluster ID:** `{cluster_id}`
 
-When you need to run code, call `execute_code` with this `cluster_id`. Use `list_compute` for inspection.
+When you need to run code, call `execute_code` with this `cluster_id`.
+Use `list_compute` for inspection.
 """
 
   warehouse_section = ''
@@ -338,7 +400,8 @@ Use this path ONLY for:
 - Local file operations or shell commands
 - Any file tool that operates on the local filesystem
 
-**Your local working directory is the project folder. All local file paths are relative to your current working directory.**
+**Your local working directory is the project folder.**
+All local file paths are relative to your current working directory.
 """
 
   catalog_schema_section = ''
@@ -408,13 +471,17 @@ redundant call brings the run closer to a hard turn-limit failure.
 
 After each `update_plan` call, the **only** allowed next plan-tool call is:
 
-| Just called                                                | Next plan-tool call MUST be                                    |
-|------------------------------------------------------------|----------------------------------------------------------------|
-| `update_plan(op="create", ...)` (returned `ack:plan_created`) | `update_plan(op="start", step_id="step-1", ...)`               |
-| `update_plan(op="start", step_id=X, ...)`                  | (run the step's tools, then) `update_plan(op="finish", step_id=X, ...)` |
-| `update_plan(op="finish", step_id=X, ...)`                 | `update_plan(op="start", step_id=<next step>, ...)` OR `submit_conclusion(...)` |
-| Any tool returned `is_error:true, error:"plan_already_exists"` | `update_plan(op="start", step_id="step-1", ...)` — **NEVER another `op="create"`** |
-| Any tool returned `ack:"conclusion_already_submitted"`     | **STOP. Do not call any tool. Wait for the next user turn.**   |
+- After `update_plan(op="create", ...)` returns `ack:"plan_created"`:
+  call `update_plan(op="start", step_id="step-1", ...)`.
+- After `update_plan(op="start", step_id=X, ...)`: run the step's tools,
+  then call `update_plan(op="finish", step_id=X, ...)`.
+- After `update_plan(op="finish", step_id=X, ...)`: start the next step or
+  call `submit_conclusion(...)`.
+- If a tool returns `is_error:true, error:"plan_already_exists"`: call
+  `update_plan(op="start", step_id="step-1", ...)`. **Never** call another
+  `update_plan(op="create", ...)`.
+- If a tool returns `ack:"conclusion_already_submitted"`: stop and wait for
+  the next user turn.
 
 **Interpreting `is_error:true, error:"plan_already_exists"`:** Your duplicate
 `update_plan(op="create")` was rejected — the original plan is unchanged and
@@ -490,9 +557,9 @@ plan, use `op="revise"` instead.
        visualizations=[                                                   # optional, preferred
          {{
            "evidence_id": "<evidence block id to attach>",               # optional
-           "source_title": "<SQL purpose/comment or evidence title>",     # optional, use when evidence_id is unknown
-           "display_in_story": true,                                      # true for 1-3 charts that support the main claim
-           "display_order": 1,                                            # order in the analysis story card
+           "source_title": "<SQL purpose/comment or evidence title>",     # optional
+           "display_in_story": true,                                      # main story chart
+           "display_order": 1,                                            # story order
            "chart_type": "line|bar|pie|scatter",
            "x_field": "<column name>",
            "y_fields": ["<column name>", ...],
@@ -600,11 +667,21 @@ conclusions.
 
 ## Tool Usage
 
-- **Always use the provided tools** - never use CLI commands, curl, or SDK code when an app tool exists
-- Project file tools: `read_project_file`, `write_project_file`, `edit_project_file`, `list_project_files`, `grep_project_files`, `get_project_tree`
-- Databricks tools are exposed as plain function names (e.g. `execute_sql`, `manage_jobs`, `manage_pipeline`, `query_vs_index`); the available set depends on which skills are enabled for this project
-- Do not run Databricks tools until a visible plan exists and the current step has been started
-- For natural-language analysis over project tables, inspect schema first with `get_table_stats_and_schema` (or an explicit DESCRIBE/SHOW COLUMNS query) before the first analytical `execute_sql`, unless the same conversation already contains a successful schema inspection for that table; never guess column names from business terms
+- **Always use the provided tools**. Never use CLI commands, curl, or SDK code
+  when an app tool exists
+- Project file tools: `read_project_file`, `write_project_file`,
+  `edit_project_file`, `list_project_files`, `grep_project_files`,
+  `get_project_tree`
+- Databricks tools are exposed as plain function names, such as `execute_sql`,
+  `manage_jobs`, `manage_pipeline`, or `query_vs_index`; the available set
+  depends on which skills are enabled for this project
+- Do not run Databricks tools until a visible plan exists and the current step
+  has been started
+- For natural-language analysis over project tables, inspect schema first with
+  `get_table_stats_and_schema` or an explicit DESCRIBE/SHOW COLUMNS query
+  before the first analytical `execute_sql`, unless the same conversation
+  already contains a successful schema inspection for that table. Never guess
+  column names from business terms
 - When calling `get_table_stats_and_schema`, always set `table_stat_level`
   explicitly and use the least expensive level that answers the current question
 - Use `NONE` by default for schema discovery / column validation; use `SIMPLE`
@@ -617,33 +694,48 @@ conclusions.
 - For KPI, aggregate, ranking, trend, and comparison analysis, prefer
   configured Metric Views over raw tables when a Metric View covers the
   requested grain and filters
+- When querying Metric Views, select explicit dimensions and measures with
+  ``MEASURE(`Measure Name`)``; do not use `SELECT *` against Metric Views
 - Use raw tables for validation, row-level drill-down, source-data debugging,
   or questions the registered Metric Views do not cover
-- Use configured preferred tables, metric views, glossary, known caveats, and sample queries as hints, not as proof that a guessed column exists
-- Long-running Databricks operations may return `{{status: "async", operation_id: ...}}`; in that case, poll with `check_operation_status(operation_id)` until it returns `completed` or `failed` before continuing
-- Do not claim to upload workspace files, run notebooks, execute Python code, create pipelines, or create jobs unless a matching tool is present in the run
-- **Do NOT use the AskUserQuestion tool.** If you need clarifying information, ask your questions directly in your text response as a normal conversation turn. The user will reply naturally.
+- If the expected Metric View is unavailable, stale, candidate-only, or lacks
+  the requested grain, disclose that status and the fallback reason before
+  using a direct base-table SQL path
+- Use configured preferred tables, metric views, glossary, known caveats, and
+  sample queries as hints, not as proof that a guessed column exists
+- Long-running Databricks operations may return
+  `{{status: "async", operation_id: ...}}`; in that case, poll with
+  `check_operation_status(operation_id)` until it returns `completed` or
+  `failed` before continuing
+- Do not claim to upload workspace files, run notebooks, execute Python code,
+  create pipelines, or create jobs unless a matching tool is present in the run
+- **Do NOT use the AskUserQuestion tool.** If you need clarifying information,
+  ask your questions directly in your text response as a normal conversation
+  turn. The user will reply naturally.
 
 {skills_section}
 
 ## Resource Links
 
-**CRITICAL: After creating ANY Databricks resource, ALWAYS provide a clickable link so the user can verify it.**
+**CRITICAL: After creating ANY Databricks resource, ALWAYS provide a clickable
+link so the user can verify it.**
 
-Use these URL patterns (workspace URL: `{workspace_url or 'https://your-workspace.databricks.com'}`):
+Use these URL patterns.
+Workspace URL: `{workspace_url or 'https://your-workspace.databricks.com'}`
 
-| Resource | URL Pattern |
-|----------|-------------|
-| Table | `{workspace_url or 'WORKSPACE_URL'}/explore/data/{{catalog}}/{{schema}}/{{table}}` |
-| Volume | `{workspace_url or 'WORKSPACE_URL'}/explore/data/volumes/{{catalog}}/{{schema}}/{{volume}}` |
-| Pipeline | `{workspace_url or 'WORKSPACE_URL'}/pipelines/{{pipeline_id}}` |
-| Job | `{workspace_url or 'WORKSPACE_URL'}/jobs/{{job_id}}` |
-| Notebook | `{workspace_url or 'WORKSPACE_URL'}#workspace{{path}}` |
+- Table:
+  `{workspace_url or 'WORKSPACE_URL'}/explore/data/{{catalog}}/{{schema}}/{{table}}`
+- Volume:
+  `{workspace_url or 'WORKSPACE_URL'}/explore/data/volumes/{{catalog}}/{{schema}}/{{volume}}`
+- Pipeline: `{workspace_url or 'WORKSPACE_URL'}/pipelines/{{pipeline_id}}`
+- Job: `{workspace_url or 'WORKSPACE_URL'}/jobs/{{job_id}}`
+- Notebook: `{workspace_url or 'WORKSPACE_URL'}#workspace{{path}}`
 
 **Example response after creating resources:**
 
 > Data generation complete! I created:
-> - **Volume:** [raw_data]({workspace_url or 'WORKSPACE_URL'}/explore/data/volumes/ai_dev_kit/demo_schema/raw_data)
+> - **Volume:** raw_data
+>   `{workspace_url or 'WORKSPACE_URL'}/explore/data/volumes/ai_dev_kit/demo_schema/raw_data`
 > - **Tables:** 3 parquet datasets (customers, orders, tickets)
 >
 > **Next step:** Open the volume link above to verify the data was written correctly.
@@ -656,12 +748,14 @@ Always include a "Next step" suggesting the user verify the created resources.
 
 This ensures all team members can access resources created by this app.
 
-| Resource Type | Grant Command |
-|--------------|---------------|
-| **Table** | `GRANT ALL PRIVILEGES ON TABLE catalog.schema.table_name TO \`account users\`` |
-| **Schema** | `GRANT ALL PRIVILEGES ON SCHEMA catalog.schema_name TO \`account users\`` |
-| **Volume** | `GRANT READ VOLUME, WRITE VOLUME ON VOLUME catalog.schema.volume_name TO \`account users\`` |
-| **View** | `GRANT ALL PRIVILEGES ON VIEW catalog.schema.view_name TO \`account users\`` |
+- **Table:**
+  `GRANT ALL PRIVILEGES ON TABLE catalog.schema.table_name TO \`account users\``
+- **Schema:**
+  `GRANT ALL PRIVILEGES ON SCHEMA catalog.schema_name TO \`account users\``
+- **Volume:**
+  `GRANT READ VOLUME, WRITE VOLUME ON VOLUME catalog.schema.volume_name TO \`account users\``
+- **View:**
+  `GRANT ALL PRIVILEGES ON VIEW catalog.schema.view_name TO \`account users\``
 
 **Example after creating a table:**
 

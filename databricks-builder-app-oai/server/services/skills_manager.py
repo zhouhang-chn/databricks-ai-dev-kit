@@ -17,16 +17,18 @@ logger = logging.getLogger(__name__)
 # accepts MCP gateway names like ``mcp__databricks__execute_sql`` and compares
 # their plain suffixes.
 # ---------------------------------------------------------------------------
-BASE_TOOL_NAMES = frozenset({
-  'update_plan',
-  'submit_conclusion',
-  'read_project_file',
-  'execute_sql',
-  'execute_sql_multi',
-  'get_table_stats_and_schema',
-  'check_operation_status',
-  'list_operations',
-})
+BASE_TOOL_NAMES = frozenset(
+  {
+    'update_plan',
+    'submit_conclusion',
+    'read_project_file',
+    'execute_sql',
+    'execute_sql_multi',
+    'get_table_stats_and_schema',
+    'check_operation_status',
+    'list_operations',
+  }
+)
 
 SKILL_TOOL_MAPPING: dict[str, list[str]] = {
   'databricks-analysis': [
@@ -35,6 +37,21 @@ SKILL_TOOL_MAPPING: dict[str, list[str]] = {
     'list_compute',
     'get_current_user',
   ],
+  'databricks-scenario-onboarding': [
+    'write_project_file',
+    'edit_project_file',
+    'list_project_files',
+    'grep_project_files',
+    'get_project_tree',
+    'list_sql_warehouses',
+    'get_best_sql_warehouse',
+    'list_compute',
+    'get_current_user',
+    'manage_metric_views',
+    'manage_volume_files',
+    'get_volume_folder_details',
+    'manage_workspace_files',
+  ],
   'databricks-agent-bricks': ['manage_ka', 'manage_mas'],
   'databricks-aibi-dashboards': ['manage_dashboard'],
   'databricks-genie': ['manage_genie', 'ask_genie'],
@@ -42,24 +59,37 @@ SKILL_TOOL_MAPPING: dict[str, list[str]] = {
   'databricks-model-serving': ['manage_serving_endpoint'],
   'databricks-jobs': ['manage_jobs', 'manage_job_runs'],
   'databricks-unity-catalog': [
-    'manage_uc_objects', 'manage_uc_grants', 'manage_uc_storage',
-    'manage_uc_connections', 'manage_uc_tags', 'manage_uc_security_policies',
-    'manage_uc_monitors', 'manage_uc_sharing',
-    'manage_volume_files', 'get_volume_folder_details',
+    'manage_uc_objects',
+    'manage_uc_grants',
+    'manage_uc_storage',
+    'manage_uc_connections',
+    'manage_uc_tags',
+    'manage_uc_security_policies',
+    'manage_uc_monitors',
+    'manage_uc_sharing',
+    'manage_volume_files',
+    'get_volume_folder_details',
     'manage_metric_views',
   ],
   'databricks-vector-search': [
-    'manage_vs_endpoint', 'manage_vs_index', 'manage_vs_data', 'query_vs_index',
+    'manage_vs_endpoint',
+    'manage_vs_index',
+    'manage_vs_data',
+    'query_vs_index',
   ],
   'databricks-metric-views': ['manage_metric_views'],
   # Provisioned and Autoscale Lakebase share the core database/sync/credential
   # tools.  Autoscale additionally claims branch tools.  If either skill is
   # enabled, the shared tools are available.
   'databricks-lakebase-provisioned': [
-    'manage_lakebase_database', 'manage_lakebase_sync', 'generate_lakebase_credential',
+    'manage_lakebase_database',
+    'manage_lakebase_sync',
+    'generate_lakebase_credential',
   ],
   'databricks-lakebase-autoscale': [
-    'manage_lakebase_database', 'manage_lakebase_sync', 'generate_lakebase_credential',
+    'manage_lakebase_database',
+    'manage_lakebase_sync',
+    'generate_lakebase_credential',
     'manage_lakebase_branch',
   ],
   # APX (FastAPI+React) and Python (Dash/Streamlit/etc.) share the same
@@ -97,7 +127,7 @@ def get_allowed_mcp_tools(
   prefix = 'mcp__databricks__'
   allowed = []
   for tool_name in all_tool_names:
-    plain_name = tool_name[len(prefix):] if tool_name.startswith(prefix) else tool_name
+    plain_name = tool_name[len(prefix) :] if tool_name.startswith(prefix) else tool_name
     if plain_name in allowed_plain_names:
       allowed.append(tool_name)
   return allowed
@@ -131,8 +161,10 @@ _DEPLOYED_SKILLS_DIR = _APP_ROOT / 'skills'
 # Local cache of skills within this app (copied on startup)
 APP_SKILLS_DIR = _APP_ROOT / 'skills'
 
+
 def _non_empty_dir(p: Path) -> bool:
   return p.exists() and p.is_dir() and any(p.iterdir())
+
 
 # Build an ordered list of source directories.  The first directory that
 # contains a given skill wins, so put the most-complete source first.
@@ -224,11 +256,13 @@ def get_available_skills(enabled_skills: list[str] | None = None) -> list[dict]:
             # Filter by enabled_skills if provided
             if enabled_skills is not None and name not in enabled_skills:
               continue
-            skills.append({
-              'name': name,
-              'description': description or '',
-              'path': str(skill_dir),
-            })
+            skills.append(
+              {
+                'name': name,
+                'description': description or '',
+                'path': str(skill_dir),
+              }
+            )
     except Exception as e:
       logger.warning(f'Failed to parse skill {skill_dir}: {e}')
 
@@ -282,9 +316,7 @@ def copy_skills_to_app() -> bool:
 
   # Guard against self-deletion: when every source *is* APP_SKILLS_DIR we
   # would wipe the only copy.  Skills are already in place, so skip.
-  all_same = all(
-    src.resolve() == APP_SKILLS_DIR.resolve() for src in _SKILLS_SOURCE_DIRS
-  )
+  all_same = all(src.resolve() == APP_SKILLS_DIR.resolve() for src in _SKILLS_SOURCE_DIRS)
   if all_same:
     logger.info(f'All skills sources resolve to {APP_SKILLS_DIR}, skipping copy')
     return True
@@ -299,8 +331,8 @@ def copy_skills_to_app() -> bool:
         searched = ', '.join(str(d) for d in _SKILLS_SOURCE_DIRS)
         raise SkillNotFoundError(
           f"Skill '{skill_name}' not found in any source directory. "
-          f"Searched: {searched}. "
-          f"Check ENABLED_SKILLS in your .env file."
+          f'Searched: {searched}. '
+          f'Check ENABLED_SKILLS in your .env file.'
         )
 
   try:
@@ -483,7 +515,7 @@ def _strip_frontmatter(content: str) -> str:
   end_idx = content.find('---', 3)
   if end_idx <= 0:
     return content.strip()
-  return content[end_idx + 3:].strip()
+  return content[end_idx + 3 :].strip()
 
 
 def render_project_skill_guidance(
@@ -595,7 +627,7 @@ def get_skills_summary() -> str:
   lines.append('')
 
   for skill in skills:
-    lines.append(f"- **{skill['name']}**: {skill['description']}")
+    lines.append(f'- **{skill["name"]}**: {skill["description"]}')
 
   return '\n'.join(lines)
 

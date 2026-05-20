@@ -33,6 +33,8 @@ def test_parse_project_settings_returns_full_defaults_for_missing_json():
   assert settings['version'] == 1
   assert settings['resources']['default_catalog'] is None
   assert settings['agent_policy']['role'] == 'developer'
+  assert settings['semantics']['metric_view_context']['metric_views'] == []
+  assert settings['scenario_onboarding']['analysis_requirements'] == []
 
 
 def test_parse_project_settings_recovers_from_invalid_sections():
@@ -68,9 +70,14 @@ def test_merge_project_settings_deep_merges_without_deleting_existing_values():
 
 def test_project_context_prefers_effective_resources_and_tracks_overrides():
   """The context pack exposes effective resources and conversation overrides."""
-  project = ProjectLike(settings_json=merge_project_settings(None, {
-    'resources': {'default_catalog': 'prod'},
-  }))
+  project = ProjectLike(
+    settings_json=merge_project_settings(
+      None,
+      {
+        'resources': {'default_catalog': 'prod'},
+      },
+    )
+  )
 
   context = build_project_context(
     project,
@@ -87,14 +94,19 @@ def test_user_preview_uses_published_release_snapshot():
   """User preview runs pin to the current release snapshot when present."""
   release_settings = default_project_settings()
   release_settings['resources']['default_catalog'] = 'published'
-  draft_settings = merge_project_settings(None, {
-    'resources': {'default_catalog': 'draft'},
-    'releases': [{
-      'id': 'rel_1',
-      'status': 'published',
-      'settings_snapshot': release_settings,
-    }],
-  })
+  draft_settings = merge_project_settings(
+    None,
+    {
+      'resources': {'default_catalog': 'draft'},
+      'releases': [
+        {
+          'id': 'rel_1',
+          'status': 'published',
+          'settings_snapshot': release_settings,
+        }
+      ],
+    },
+  )
   project = ProjectLike(current_release_id='rel_1', settings_json=draft_settings)
 
   settings, source = get_project_settings_for_run(project, run_role='user_preview')
@@ -108,12 +120,17 @@ def test_user_preview_uses_published_release_snapshot():
 
 def test_system_prompt_renders_project_context():
   """Agent instructions include the compact project context pack."""
-  project = ProjectLike(settings_json=merge_project_settings(None, {
-    'semantics': {
-      'metric_views': ['prod.finance.revenue_metrics'],
-      'glossary': {'ARR': 'Annual recurring revenue'},
-    },
-  }))
+  project = ProjectLike(
+    settings_json=merge_project_settings(
+      None,
+      {
+        'semantics': {
+          'metric_views': ['prod.finance.revenue_metrics'],
+          'glossary': {'ARR': 'Annual recurring revenue'},
+        },
+      },
+    )
+  )
   context = build_project_context(
     project,
     effective_resources={'default_catalog': 'prod', 'default_schema': 'finance'},
@@ -128,15 +145,55 @@ def test_system_prompt_renders_project_context():
   assert 'Annual recurring revenue' in prompt
 
 
+def test_system_prompt_renders_metric_view_context_status():
+  """Metric View context should expose status and validation routing hints."""
+  project = ProjectLike(
+    settings_json=merge_project_settings(
+      None,
+      {
+        'semantics': {
+          'metric_views': ['prod.finance.revenue_metrics'],
+          'metric_view_context': {
+            'metric_views': [
+              {
+                'full_name': 'prod.finance.revenue_metrics',
+                'status': 'candidate',
+                'grain': ['Account', 'Month'],
+                'measures': ['ARR', 'Net Revenue'],
+                'dimensions': ['Month', 'Account Segment'],
+                'validation': {'direct_sql_ref': 'revenue_metrics_direct_sql'},
+              }
+            ],
+          },
+        },
+      },
+    )
+  )
+  context = build_project_context(project)
+
+  prompt = get_system_prompt(project_context=context, enabled_skills=[])
+
+  assert 'Metric View Context' in prompt
+  assert 'status `candidate`' in prompt
+  assert 'revenue_metrics_direct_sql' in prompt
+  assert 'candidate-only' in prompt
+  assert 'MEASURE(`Measure Name`)' in prompt
+
+
 def test_system_prompt_renders_analysis_notes_as_known_caveats():
   """Analysis notes saved through project settings reach prompt context."""
-  project = ProjectLike(settings_json=merge_project_settings(None, {
-    'semantics': {
-      'known_caveats': [
-        'Use validated visit-base denominator and exclude BDR 28062128.',
-      ],
-    },
-  }))
+  project = ProjectLike(
+    settings_json=merge_project_settings(
+      None,
+      {
+        'semantics': {
+          'known_caveats': [
+            'Use validated visit-base denominator and exclude BDR 28062128.',
+          ],
+        },
+      },
+    )
+  )
   context = build_project_context(project)
 
   prompt = get_system_prompt(project_context=context, enabled_skills=[])

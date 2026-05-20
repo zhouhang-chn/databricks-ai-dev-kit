@@ -2,7 +2,16 @@
 skills/
 
 # Projects directory (local development)
-projects/
+projects/*
+!projects/distribution/
+projects/distribution/*
+!projects/distribution/gap-analysis.md
+!projects/distribution/inventory.md
+!projects/distribution/readiness.md
+!projects/distribution/requirements.md
+!projects/distribution/metric-views/
+projects/distribution/metric-views/*
+!projects/distribution/metric-views/*.sql
 
 # Server log files (timestamped per startup)
 logs/

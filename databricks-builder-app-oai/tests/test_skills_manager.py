@@ -133,3 +133,47 @@ def test_databricks_analysis_gets_minimal_read_only_tools():
     'get_current_user',
     'mcp__databricks__execute_sql',
   ]
+
+
+def test_scenario_onboarding_skill_gets_artifact_and_semantic_tools():
+  """Scenario onboarding needs project artifacts plus Metric View inventory tools."""
+  sm = _load_skills_manager()
+  all_tools = [
+    'update_plan',
+    'submit_conclusion',
+    'read_project_file',
+    'write_project_file',
+    'edit_project_file',
+    'list_project_files',
+    'grep_project_files',
+    'get_project_tree',
+    'execute_sql',
+    'get_table_stats_and_schema',
+    'manage_metric_views',
+    'manage_volume_files',
+    'get_volume_folder_details',
+    'manage_workspace_files',
+    'manage_jobs',
+  ]
+
+  allowed = sm.get_allowed_mcp_tools(
+    all_tools,
+    enabled_skills=['databricks-scenario-onboarding'],
+  )
+
+  assert allowed == [
+    'update_plan',
+    'submit_conclusion',
+    'read_project_file',
+    'write_project_file',
+    'edit_project_file',
+    'list_project_files',
+    'grep_project_files',
+    'get_project_tree',
+    'execute_sql',
+    'get_table_stats_and_schema',
+    'manage_metric_views',
+    'manage_volume_files',
+    'get_volume_folder_details',
+    'manage_workspace_files',
+  ]

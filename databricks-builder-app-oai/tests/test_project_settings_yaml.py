@@ -87,3 +87,68 @@ def test_project_update_from_setting_maps_yaml_to_runtime_defaults():
   assert patch['settings']['semantics']['metric_views'] == ['cat.sch.metric_view']
   assert patch['settings']['semantics']['known_caveats'] == ['Known caveat']
   assert patch['settings']['workflows']['enabled'] == ['daily_refresh']
+
+
+def test_metric_view_context_round_trips_and_syncs_to_runtime_settings():
+  """Metric View context keeps status, grain, measures, and validation metadata."""
+  setting = ProjectSetting.model_validate(
+    {
+      'business_background': 'Analyze governed metrics.',
+      'databricks_resources': {
+        'input_metric_views': ['cat.sch.poc_metrics'],
+      },
+      'analysis_requirements': [
+        {
+          'requirement_id': 'req_poc_achievement',
+          'grain': ['M1', 'Month'],
+          'measures': ['POC Achievement Rate'],
+          'dimensions': ['Year Month', 'M1 No'],
+          'priority': 'P0',
+        }
+      ],
+      'semantic_gap_analysis': [
+        {
+          'requirement_id': 'req_poc_achievement',
+          'existing_coverage': 'partial',
+          'gaps': ['Metric View needs direct SQL reconciliation.'],
+          'recommended_assets': ['cat.sch.poc_metrics'],
+          'readiness': 'blocked_until_validated',
+        }
+      ],
+      'metric_view_context': {
+        'metric_views': [
+          {
+            'full_name': 'cat.sch.poc_metrics',
+            'status': 'candidate',
+            'grain': ['POC', 'Month'],
+            'dimensions': ['Year Month', 'M1 No'],
+            'measures': ['Total POC Count', 'POC Achievement Rate'],
+            'validation': {
+              'direct_sql_ref': 'poc_achievement_direct_sql',
+              'tolerance': {'count_fields': 'exact', 'rate_fields': 0.01},
+            },
+          }
+        ],
+      },
+      'readiness_summary': {'status': 'partially_ready'},
+    }
+  )
+
+  parsed = parse_project_setting_yaml(render_project_setting_yaml(setting))
+  patch = project_update_from_setting(parsed)
+
+  assert parsed.analysis_requirements[0].requirement_id == 'req_poc_achievement'
+  assert parsed.semantic_gap_analysis[0].existing_coverage == 'partial'
+  assert parsed.metric_view_context.metric_views[0].status == 'candidate'
+  assert parsed.metric_view_context.metric_views[0].validation is not None
+  assert (
+    parsed.metric_view_context.metric_views[0].validation.direct_sql_ref
+    == 'poc_achievement_direct_sql'
+  )
+  assert (
+    patch['settings']['semantics']['metric_view_context']['metric_views'][0]['full_name']
+    == 'cat.sch.poc_metrics'
+  )
+  assert (
+    patch['settings']['scenario_onboarding']['readiness_summary']['status'] == 'partially_ready'
+  )

@@ -47,3 +47,138 @@ databricks_resources:
   input_volume_paths: []
   output_schema:
   output_volume_folders: []
+
+metric_view_context:
+  discovery_sources:
+    user_input: true
+    analysis_notes: true
+    workspace_code:
+      - /Workspace/Users/sabrina.yu@budweiserapac.com/Distribution/MHA_achievement_analysis
+    databricks_metadata:
+      schemas:
+        - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw
+        - brewdat_uc_china_prod.org_datahub_dw
+        - brewdat_uc_china_prod.md_exchange_brewdat_ods
+      tables:
+        - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_detail
+        - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_summary
+        - brewdat_uc_china_prod.md_exchange_brewdat_ods.tsvc_base_sys_kpiachieverate
+    data_profile: design-record-only
+  metric_views:
+    - full_name: brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
+      status: candidate
+      source_objects:
+        - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_detail
+        - brewdat_uc_china_prod.org_datahub_dw.employee_relation_m1m2m3_monthly
+      grain:
+        - POC
+        - Group
+        - SKU Key
+        - Month
+      dimensions:
+        - Year Month
+        - M1 No
+        - POC ID
+        - Group Code
+        - MHA SKU Key
+        - M2 No
+        - M3 No
+      measures:
+        - Achieved SKU Count
+        - Total SKU Count
+        - SKU Achievement Rate
+        - Total POC-Group Count
+        - Achieved POC-Group Count
+      business_terms:
+        achievement_rate:
+          synonyms:
+            - SKU Achievement Rate
+            - 达成率
+            - completion rate
+      validation:
+        direct_sql_ref: mv1_detail_direct_sql
+        tolerance:
+          count_fields: exact
+          rate_fields: 0.01
+        known_caveats:
+          - Live Metric View query validation is still required before certification.
+          - Channel cleaning excludes T2WS and maps IH to TT, NULL to KA.
+    - full_name: brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
+      status: candidate
+      source_objects:
+        - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_summary
+      grain:
+        - POC
+        - Month
+      dimensions:
+        - Year Month
+        - M1 No
+        - POC ID
+        - Channel
+        - Format Name
+        - Is Achieved
+      measures:
+        - Total POC Count
+        - Achieved POC Count
+        - Not Achieved POC Count
+        - POC Achievement Rate
+      business_terms:
+        remaining_pocs:
+          synonyms:
+            - Not Achieved POC Count
+            - 还差几家店
+        poc_achievement_rate:
+          synonyms:
+            - POC Achievement Rate
+            - 达成率
+      validation:
+        direct_sql_ref: mv2_poc_achievement_direct_sql
+        tolerance:
+          count_fields: exact
+          rate_fields: 0.01
+        known_caveats:
+          - Live Metric View query validation is still required before certification.
+    - full_name: brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
+      status: candidate
+      source_objects:
+        - brewdat_uc_china_prod.md_exchange_brewdat_ods.tsvc_base_sys_kpiachieverate
+        - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_summary
+      grain:
+        - Employee
+        - Month
+      dimensions:
+        - Year Month
+        - Employee Code
+        - Username
+        - Role
+        - BU
+        - Region
+      measures:
+        - Total Target Value
+        - Total Actual Value
+        - KPI Achievement Rate
+        - Scan Side Achieved POC Count
+        - KPI-vs-Scan Difference
+      business_terms:
+        kpi_reconciliation:
+          synonyms:
+            - KPI-vs-Scan Difference
+            - KPI 系统不一致
+            - scan reconciliation
+      validation:
+        direct_sql_ref: mv3_kpi725_reconciliation_direct_sql
+        tolerance:
+          count_fields: exact
+          rate_fields: 0.01
+        known_caveats:
+          - Live Metric View query validation is still required before certification.
+          - 202605 actualvalue can be NULL while the month is still open.
+
+readiness_summary:
+  status: partially_ready
+  checked_at: "2026-05-20"
+  ready_for: candidate Metric View routing and v0.4 golden-case drafting
+  blocked_until:
+    - MV1-MV3 are queried through Metric View SQL with MEASURE().
+    - MV1-MV3 are reconciled against direct SQL oracles.
+    - Validation timestamps and tolerances are recorded.

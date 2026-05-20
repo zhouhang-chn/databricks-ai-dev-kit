@@ -52,6 +52,8 @@ v0.3.5 的上下文工程目标：
 | `m1_kpi725_benchmark_metrics` | KPI725 目标/实际与 scan 侧对账 |
 
 详细设计见 `metric-view-design.md` 和 `metric-view-context-engineering.md`。
+v0.3.5 场景准备产物见 `requirements.md`、`inventory.md`、`gap-analysis.md`
+和 `readiness.md`；MV1-MV3 的候选校验 SQL 位于 `metric-views/`。
 
 ---
 
