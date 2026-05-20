@@ -7,8 +7,9 @@
 
 1. **Preparation before scale.** v0.2 establishes that project settings (business background + data settings) and analysis notes are the foundation for tuning agent behavior. We move away from the generated scenario bundle concept.
 2. **One scenario before breadth.** The BDR routing pilot must be stable through project settings, analysis notes, read-only execution, and feedback capture before we add new themes.
-3. **Latency is a feature.** v0.6 is the dedicated latency release, but every release should keep "time-to-first-answer" in view.
-4. **Permissions are layered, not retrofitted.** v0.5 splits role permission (UI/server gate) from data permission (row filter) so each can ship cleanly.
+3. **Governed semantics before canonical answers.** Metric Views are the official Databricks semantic layer for business metrics. Before golden cases hard-code paths, Builder App must engineer and validate Metric Views from user input, project code, metadata, and data.
+4. **Latency is a feature.** v0.6 is the dedicated latency release, but every release should keep "time-to-first-answer" in view.
+5. **Permissions are layered, not retrofitted.** v0.5 splits role permission (UI/server gate) from data permission (row filter) so each can ship cleanly.
 
 ---
 
@@ -58,22 +59,61 @@
 
 ---
 
+## v0.3.5 — Metric View Context Engineering
+
+**Theme:** Build the Databricks Metric View semantic layer that turns messy
+business context into reliable, governed analysis context.
+
+**Why now:** v0.3 makes answers easier to understand, but visualization does
+not solve metric drift. v0.4 golden cases should not encode raw-table SQL as
+their primary semantic truth. The app needs an intermediate step that converts
+user non-structured input, project notes, user code, Unity Catalog metadata,
+and data profiling into validated Metric Views.
+
+**Scope:**
+- Treat Metric Views as the preferred semantic layer for KPIs, aggregate
+  measures, dimensions, grain, synonyms, and formatting.
+- Discover candidate metrics from business background, analysis notes, user
+  notebooks/SQL, UC schemas/comments, table stats, sample values, and analyst
+  feedback.
+- Draft and review Metric View YAML definitions with dimensions, measures,
+  joins, comments, display names, synonyms, and formats when runtime support is
+  available.
+- Validate Metric View output against direct SQL oracles and documented
+  tolerances.
+- Register validated Metric Views in `databricks_resources.input_metric_views`
+  and `settings.semantics.metric_views`.
+- Make KPI and aggregate analysis prefer Metric Views, with explicit fallback
+  when the semantic layer is missing, stale, or does not cover the requested
+  grain.
+- Seed the Distribution project by certifying MV1-MV3 from
+  `databricks-builder-app-oai/projects/distribution/metric-view-design.md`.
+
+**Out of scope:** full BI modeling studio, unreviewed production Metric View
+creation, production row-level permission enforcement, and precomputed metric
+serving.
+
+**Dependencies:** v0.2 project settings and analysis notes; v0.3 evidence and
+story flow for showing validation output.
+
+---
+
 ## v0.4 — Golden Analysis Cases
 
-**Theme:** Revisit the "golden cases" concept to provide reliable analysis paths for well-known patterns.
+**Theme:** Revisit the "golden cases" concept to provide reliable analysis paths for well-known patterns on top of a validated Metric View semantic layer.
 
-**Why now:** We dropped the full bundle generator in v0.2, but golden cases remain a powerful concept for ensuring quality. We will implement them without the overhead of business context and data context YAMLs.
+**Why now:** We dropped the full bundle generator in v0.2, but golden cases remain a powerful concept for ensuring quality. After v0.3.5, golden cases can reference certified Metric Views as their happy path and keep direct SQL as the eval oracle instead of rediscovering metric definitions.
 
 **Scope:**
 - Manual analyst trace workflow for high-value scenarios, starting from the BDR routing pilot.
-- Golden cases implementation: defined as part of project settings or a lightweight template, mapping specific questions to canonical paths/SQL.
+- Golden cases implementation: defined as part of project settings or a lightweight template, mapping specific questions to canonical Metric View paths, validation SQL, and answer contracts.
 - No business context YAML or data context YAML.
-- Fast path for the Analysis Agent: when the user's question matches a golden case, the Agent runs the canonical path instead of free-form planning.
+- Fast path for the Analysis Agent: when the user's question matches a golden case, the Agent runs the certified Metric View path instead of free-form planning; direct SQL remains available for validation and unsupported drill-down.
 - Initial set of golden cases derived from the BDR routing pilot.
 
 **Out of scope:** full scenario bundles with multiple YAML files; template marketplace.
 
-**Dependencies:** v0.2 project settings and analysis notes stable.
+**Dependencies:** v0.2 project settings and analysis notes stable; v0.3.5 Metric View context engineering for governed metrics.
 
 ---
 
@@ -128,8 +168,8 @@ Split into two sub-releases so each can ship and be evaluated independently.
 **Scope:**
 - Compute well-structured metric tables (e.g., daily BDR scorecards, weekly territory rollups) on schedule and persist to Postgres.
 - Frequent questions hit the metric table directly — no aggregation at query time.
-- Templates (v0.4) declare which metrics they need precomputed; v0.6.2 materializes them for any project derived from that template.
-- Combined effect with v0.4: template + precomputed metrics + flash model = canonical questions answered in < 1s.
+- Templates (v0.4) declare which v0.3.5 Metric Views and measures they need precomputed; v0.6.2 materializes them for any project derived from that template.
+- Combined effect with v0.3.5 + v0.4: certified Metric View + template + precomputed metrics + flash model = canonical questions answered in < 1s.
 
 ### v0.6.3 — IM Integration (optional, scope TBD)
 
@@ -146,7 +186,8 @@ Split into two sub-releases so each can ship and be evaluated independently.
 
 ## Cross-Version Themes
 
-- **Project Settings and Notes as the contract.** Visualization specs, golden cases, instant-path eligibility, and row-filter declarations live in or derive from project settings and analysis notes. Changes to these formats need careful versioning starting v0.3.
+- **Project Settings and Notes as the contract.** Metric View context, visualization specs, golden cases, instant-path eligibility, and row-filter declarations live in or derive from project settings and analysis notes. Changes to these formats need careful versioning starting v0.3.
+- **Metric Views as the semantic contract.** For governed metrics, the Analysis Agent should use Metric Views before raw tables. Raw SQL remains important for validation, drill-down, and unsupported exploratory paths.
 - **Cost / latency telemetry from v0.3 onward.** Every release after v0.2 should carry forward: per-question time-to-first-answer, per-question token cost, instant-path hit rate.
 - **Single-user dev mode preserved.** Even after v0.5, the local dev experience (single user, single workspace) must remain frictionless for FE-internal usage.
 

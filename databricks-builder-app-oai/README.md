@@ -22,6 +22,8 @@ SQL schema checks are conversation-aware. The runtime still blocks analytical SQ
 
 Analysis visualizations are model-directed when a conclusion includes `visualizations`. The middle story card prioritizes specs marked `display_in_story`, while the Inspect panel retains secondary evidence. Auto-detected charts are conservative fallbacks and avoid measure-only result sets where a calculated count/rate would become the x-axis.
 
+Metric Views are treated as the preferred Databricks semantic layer when a project registers them in `project_setting.yaml`. The prompt tells the Analysis Agent to use registered Metric Views for KPI, aggregate, ranking, trend, and comparison questions, while keeping raw tables for validation, row-level drill-down, source-data debugging, or unsupported grains.
+
 ## Local Development
 
 ```bash
@@ -29,7 +31,7 @@ cd databricks-builder-app-oai
 ./scripts/start_local.sh --profile <databricks-profile>
 ```
 
-The script provisions Lakebase unless `--skip-lakebase` is passed, creates `.env.local`, installs backend dependencies with `uv`, installs frontend dependencies with `npm`, and starts:
+The script provisions Lakebase unless `--skip-lakebase` is passed, creates `.env.local`, installs backend dependencies with `uv`, installs frontend dependencies with `pnpm`, and starts:
 
 - Backend: `http://localhost:8000`
 - Frontend: `http://localhost:3000`
@@ -45,7 +47,7 @@ OPENAI_API_KEY=<ai-gateway-key> \
 ./scripts/deploy.sh <app-name> --profile <databricks-profile>
 ```
 
-The deploy script builds the frontend with `npm`, stages the FastAPI app, installs skills, generates `app.yaml`, deploys the Databricks App, and grants Lakebase permissions.
+The deploy script builds the frontend with `pnpm`, stages the FastAPI app, installs skills, generates `app.yaml`, deploys the Databricks App, and grants Lakebase permissions.
 
 ## Project Model
 

@@ -15,7 +15,10 @@ progress tracking.
 | `next-moves/` | Current backend Next Moves service design and action plan. |
 | `frontend-refactor/` | Story canvas and inspect-panel frontend architecture notes. |
 | `v0.1-agents-sdk-integration/` | Historical migration track for replacing the Claude runtime with the OpenAI Agents SDK. |
-| `v0.2-business-analysis/` | Current Builder Agent track for generating scenario bundles from project settings, enriching context assets, and constructing golden evals. |
+| `v0.2-business-analysis/` | Analyst pilot track for project settings, analysis notes, and read-only analysis runs. |
+| `v0.3-visual-storytelling/` | Visual narrative track for chart evidence, story conclusions, and shareable analysis output. |
+| `v0.3.5-metric-view-context-engineering/` | Semantic-layer track for deriving, validating, and registering Databricks Metric Views from project context. |
+| `v0.4-golden-analysis-cases/` | Golden-case track for canonical question paths that consume the validated Metric View layer. |
 
 ## Versioned Progress Tracks
 
@@ -27,10 +30,11 @@ Each `vX.Y-*` folder should contain:
 - `action-plan.md`: implementation phases, acceptance gates, and validation.
 
 When a phase introduces progress-tracking artifacts, keep them under the
-versioned folder. For v0.2, scenario bundles are the canonical layout and the
-Builder Agent is the primary product surface. A bundle contains the project
-setting source of truth, generated structured context YAML, and a generated
-eval projection for one business scenario.
+versioned folder. Current phases use `project_setting.yaml`, analysis notes,
+registered Databricks resources, Metric View context, and eval artifacts as the
+product contract. Older v0.2 scenario-bundle docs are retained as historical
+context and should not be treated as the active architecture when newer
+versioned tracks supersede them.
 
 Within v0.2 scenario bundles:
 

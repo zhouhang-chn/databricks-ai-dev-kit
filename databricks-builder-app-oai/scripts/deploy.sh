@@ -156,8 +156,8 @@ if ! databricks auth describe $CLI_ARGS &> /dev/null; then
   echo -e "${RED}Error: Not authenticated. Run: databricks auth login${NC}"; exit 1
 fi
 
-if [ "$SKIP_BUILD" != true ] && ! command -v npm &> /dev/null; then
-  echo -e "${RED}Error: npm not found${NC}"; exit 1
+if [ "$SKIP_BUILD" != true ] && ! command -v pnpm &> /dev/null; then
+  echo -e "${RED}Error: pnpm not found${NC}"; exit 1
 fi
 
 WORKSPACE_HOST=$(databricks auth describe $CLI_ARGS --output json 2>/dev/null | python3 -c "
@@ -204,9 +204,9 @@ if [ "$SKIP_BUILD" = true ]; then
   if [ ! -d "out" ]; then echo -e "${RED}Error: No build at client/out.${NC}"; exit 1; fi
   echo -e "  ${GREEN}✓${NC} Using existing build (--skip-build)"
 else
-  if [ ! -d "node_modules" ]; then echo "  Installing npm dependencies..."; npm install --silent; fi
+  if [ ! -d "node_modules" ]; then echo "  Installing pnpm dependencies..."; pnpm install --silent; fi
   echo "  Building production bundle..."
-  npm run build
+  pnpm run build
   echo -e "  ${GREEN}✓${NC} Frontend built successfully"
 fi
 cd "$PROJECT_DIR"

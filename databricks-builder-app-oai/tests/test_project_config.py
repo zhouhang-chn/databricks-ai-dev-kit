@@ -124,6 +124,7 @@ def test_system_prompt_renders_project_context():
   assert 'Project Management Context' in prompt
   assert 'Revenue Review' in prompt
   assert 'prod.finance.revenue_metrics' in prompt
+  assert 'governed semantic layer' in prompt
   assert 'Annual recurring revenue' in prompt
 
 

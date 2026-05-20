@@ -48,9 +48,10 @@ The current OAI app already supports the necessary foundation: minimal
 `project_setting.yaml`, analysis notes, preferred tables and metric views,
 read-only user-preview runs, schema-before-SQL gates, structured plans,
 evidence rendering, chart detection, and structured conclusions. The major gap
-is that v0.4 golden cases are not yet a first-class settings/runtime contract.
-Distribution currently has rich design docs, but no app-consumable golden-case
-artifact that maps user questions to canonical paths.
+is that Metric Views must be promoted into a v0.3.5 semantic-layer milestone
+before v0.4 golden cases are finalized. Distribution currently has rich design
+docs, but no app-consumable Metric View context pack or golden-case artifact
+that maps user questions to certified semantic paths.
 
 User roles and identifiers should be handled manually for v0.4 through a small
 project-setting extension. That extension should describe only the current
@@ -130,7 +131,7 @@ recommendation, fraud, or POC profiling.
 | Golden-case contract | Roadmap describes v0.4 conceptually; app settings do not define `golden_cases`. | Canonical Distribution paths cannot be selected deterministically. | P0 |
 | User context | Current YAML has no current-user persona section. | Distribution questions like "my team" or "my stores" lack a stable identity anchor. | P0 |
 | Permission enforcement | User-preview blocks writes but does not inject row filters. | v0.4 can evaluate role-shaped answers, but cannot guarantee data isolation. | P0 for documentation, v0.5 for enforcement |
-| Metric View registration | `metric-view-design.md` proposes MVs; `distribution.yaml` has `input_metric_views: []`. | Agent falls back to raw table SQL and may drift from governed metrics. | P0 |
+| Metric View registration | `metric-view-design.md` proposes MVs; v0.3.5 must register and validate them. | Agent falls back to raw table SQL and may drift from governed metrics. | P0 |
 | Canonical SQL paths | Project docs include examples, but not app-readable query paths with validation checks. | Free-form planning can miss month alignment, channel cleaning, or group grain. | P0 |
 | Org chart notes contract | Org-scope guidance currently has nowhere distinct from general analysis notes. | Team-scope instructions can get mixed with metric caveats and become harder to render or validate. | P0 |
 | Stable derived tables | Several use cases depend on notebook intermediate outputs not declared as inputs. | Action recommendation and fraud scenarios are not ready for reliable golden runs. | P1 |
@@ -142,7 +143,8 @@ recommendation, fraud, or POC profiling.
 ## Recommended v0.4 Support Shape
 
 For v0.4, Distribution should be represented as a project-setting-driven golden
-case, not a custom standalone Data Agent.
+case, not a custom standalone Data Agent. The v0.3.5 prerequisite is a
+validated Metric View layer that those golden cases can use.
 
 Recommended contract:
 
@@ -183,7 +185,7 @@ golden_cases:
     required_context: [user_context.role, user_context.employee_no, question.yearmonth]
     canonical_path:
       - inspect_schema: m1_poc_achievement_metrics
-      - query: poc_achievement_by_m1_month
+      - query_metric_view: poc_achievement_by_m1_month
       - conclude: concise_action_answer
     expected_answer:
       must_include:
@@ -250,16 +252,16 @@ user_context:
 
 ## Initial Golden Cases
 
-Start with five golden cases that use stable declared tables or the first three
-Metric Views.
+Start with five golden cases that use the first three certified Metric Views and
+retain direct SQL as their eval oracle.
 
 | ID | User question shape | Role | Data path | Why first |
 |---|---|---|---|---|
-| `distribution_a1_m1_achievement` | "我这个月达成率多少？还差几家店？" | M1 | MV2 or `m1_scan_distribution_achievement_summary` | Simplest role-scoped fact answer. |
-| `distribution_a5_m1_unachieved_pocs` | "我哪些店还没达成？各差几个 Group？" | M1 | MV2 -> MV1 or summary -> detail | Tests POC-level plus POC x Group dual view. |
+| `distribution_a1_m1_achievement` | "我这个月达成率多少？还差几家店？" | M1 | MV2, summary table as SQL oracle | Simplest role-scoped fact answer. |
+| `distribution_a5_m1_unachieved_pocs` | "我哪些店还没达成？各差几个 Group？" | M1 | MV2 -> MV1, summary/detail tables as SQL oracle | Tests POC-level plus POC x Group dual view. |
 | `distribution_a2_m2_team_ranking` | "我们片区谁达成率最低？" | M2 | MV1/MV2 with current user context plus `org_chart_notes` | Tests role-shaped behavior without production RBAC. |
 | `distribution_b3_near_achievement` | "哪些店差 1 个 Group 就达成？" | M1/M2 | detail grouped by POC and Group | Good action-oriented golden case, still achievement-only. |
-| `distribution_f3_kpi_scan_reconcile` | "为什么达成数和 KPI 系统不一致？" | M2/M3 | MV3 or KPI725 joined to scan summary | Tests data quality and reconciliation behavior. |
+| `distribution_f3_kpi_scan_reconcile` | "为什么达成数和 KPI 系统不一致？" | M2/M3 | MV3, KPI725 and scan summary as SQL oracle | Tests data quality and reconciliation behavior. |
 
 Defer these until their derived tables are stable:
 
@@ -272,17 +274,17 @@ Defer these until their derived tables are stable:
 
 ## Metric View Positioning
 
-The Metric View design is directionally correct, but v0.4 should treat MVs as
-optional acceleration and semantic stabilization, not as a hard dependency for
-every case.
+The Metric View design is now the v0.3.5 prerequisite. v0.4 should not
+rediscover these metric definitions through raw-table SQL unless a certified
+Metric View is unavailable or the case explicitly needs row-level drill-down.
 
 Recommended sequence:
 
-1. For P0 golden cases, define canonical SQL directly against declared base
-   tables so the case can run before MV creation.
-2. Create and validate MV1, MV2, and MV3 when possible.
-3. Add the validated MV names to `databricks_resources.input_metric_views`.
-4. Keep the canonical SQL and direct-table ground truth as eval references.
+1. Create or validate MV1, MV2, and MV3 in v0.3.5.
+2. Add the validated MV names to `databricks_resources.input_metric_views`.
+3. Map user terms and golden-case questions to Metric View dimensions and
+   measures.
+4. Keep direct-table SQL as eval references and fallback paths.
 5. Move B/D/F extended cases to MV4, MV5, and future fraud/profile MVs only
    after source outputs are materialized.
 
@@ -367,13 +369,15 @@ Before calling Distribution v0.4-ready, gather this evidence:
 
 ## Recommended Next Steps
 
-1. Define the v0.4 `golden_cases`, `user_context`, and `org_chart_notes` schema
+1. Finish the v0.3.5 Metric View context contract and Distribution context
+   pack before changing golden-case runtime behavior.
+2. Create or validate MV1-MV3 and register them in `input_metric_views`.
+3. Validate Distribution Metric View outputs against live base-table SQL.
+4. Define the v0.4 `golden_cases`, `user_context`, and `org_chart_notes` schema
    extension in docs before changing implementation.
-2. Convert the five initial Distribution cases above into a project-setting
+5. Convert the five initial Distribution cases above into a project-setting
    draft and app `eval_cases`.
-3. Validate Distribution base-table canonical SQL against the live workspace.
-4. Create or validate MV1-MV3 and register them in `input_metric_views`.
-5. Run user-preview golden traces and capture trace IDs, SQL, evidence blocks,
+6. Run user-preview golden traces and capture trace IDs, SQL, evidence blocks,
    and answer scores.
-6. Defer production role resolution, project sharing, and row-level SQL filter
+7. Defer production role resolution, project sharing, and row-level SQL filter
    enforcement to v0.5.

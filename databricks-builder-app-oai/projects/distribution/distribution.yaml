@@ -1,0 +1,49 @@
+# Minimal user-authored project setting.
+# The Builder Agent turns this input into structured business and data context.
+
+business_background: >-
+  Evaluate SKU distribution completion status at POC-Group-month level as M1 performance.
+
+
+analysis_notes:
+  - We will assess m1 KPI achievement from two perspectives: by POC level and by POC × group level.
+  - Each (POC, group_code) combination represents a KPI requirement assigned to a specific employee (m1_no).
+  - Each group_code may correspond to multiple mha_sku_key, indicating a one-to-many mapping between KPI group and SKU keys.
+  - KPI assignments and definitions may vary by month, so all analysis must be performed with month-level alignment.
+  - The field m1_no represents the employee identifier (employee_no).
+  - The field poc_middle_id represents the POC identifier (poc_id).
+  - The field group_code represents the KPI group assigned to each employee for each POC.
+  - Prefer registered Databricks Metric Views for governed MHA achievement, KPI benchmark, trend, ranking, and reconciliation questions.
+  - Use raw source tables for validation, row-level drill-down, and unsupported exploratory questions only when the Metric View path is missing or insufficient.
+
+databricks_resources:
+  databricks_host: https://adb-960767945362324.0.databricks.azure.cn
+  cluster_id: 1021-020841-thvbkra7
+  warehouse_id: null
+  workspace_folders:
+    - /Workspace/Users/sabrina.yu@budweiserapac.com/Distribution
+  workspace_files:
+    - /Workspace/Users/sabrina.yu@budweiserapac.com/Distribution/MHA_achievement_analysis
+  workflows:
+  input_schemas:
+    - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw
+    - techsales_uc_china_prod.techsales_db
+    - brewdat_uc_china_prod.bcc_dmdsrintegrationproject_ods
+  input_tables:
+    - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_detail
+    - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_summary
+    - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_scan_detail
+    - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_bees_distribution_detail
+    - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_kbd_detail
+    - brewdat_uc_china_prod.bcc_dmdsrintegrationproject_ods.report_import_mapping_sku
+    - brewdat_uc_china_prod.md_exchange_brewdat_ods.tsvc_base_sys_kpiachieverate
+    - brewdat_uc_china_prod.org_datahub_dw.employee_relation_m1m2m3_monthly
+    - brewdat_uc_china_prod.poc_datahub_dw.poc_master_daily_fact
+
+  input_metric_views:
+    - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
+    - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
+    - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
+  input_volume_paths: []
+  output_schema:
+  output_volume_folders: []

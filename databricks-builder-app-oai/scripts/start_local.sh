@@ -89,10 +89,10 @@ if [ "$NODE_VERSION" -lt 18 ]; then
 fi
 echo -e "  ${GREEN}✓${NC} Node.js $(node -v)"
 
-if ! command -v npm &> /dev/null; then
-  echo -e "${RED}Error: npm not found${NC}"; exit 1
+if ! command -v pnpm &> /dev/null; then
+  echo -e "${RED}Error: pnpm not found${NC}"; exit 1
 fi
-echo -e "  ${GREEN}✓${NC} npm"
+echo -e "  ${GREEN}✓${NC} pnpm"
 
 if ! command -v databricks &> /dev/null; then
   echo -e "${RED}Error: Databricks CLI not found${NC}"; exit 1
@@ -248,7 +248,7 @@ cd "$PROJECT_DIR/client"
 if [ -d "node_modules" ] && [ "$FORCE_INSTALL" != true ]; then
   echo -e "  ${GREEN}✓${NC} node_modules exists (use --force-install to reinstall)"
 else
-  npm install --silent 2>/dev/null || npm install
+  pnpm install --silent 2>/dev/null || pnpm install
   echo -e "  ${GREEN}✓${NC} Frontend dependencies installed"
 fi
 cd "$PROJECT_DIR"
@@ -401,7 +401,7 @@ sleep 2
 
 echo -e "  Starting frontend on ${GREEN}http://localhost:3000${NC}..."
 cd client
-npm run dev &
+pnpm run dev &
 cd "$PROJECT_DIR"
 
 echo ""

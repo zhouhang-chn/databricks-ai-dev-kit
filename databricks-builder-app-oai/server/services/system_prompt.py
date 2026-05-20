@@ -127,7 +127,12 @@ context for this run unless the user explicitly says otherwise.
   if override_rows:
     section += f"\n### Conversation Overrides\n{chr(10).join(override_rows)}\n"
   if metric_views:
-    section += f"\n### Preferred Metric Views\n{metric_views}\n"
+    section += (
+      f'\n### Preferred Metric Views\n{metric_views}\n'
+      'Use these as the governed semantic layer for KPI, aggregate, ranking, '
+      'trend, and comparison questions. Use preferred tables for validation, '
+      'row-level drill-down, or questions the Metric Views do not cover.\n'
+    )
   if preferred_tables:
     section += f"\n### Preferred Tables\n{preferred_tables}\n"
   if deprecated_tables:
@@ -609,6 +614,11 @@ conclusions.
 - Escalate progressively: start with `table_stat_level="NONE"` unless there is
   an explicit reason to collect actual statistics, then call again with `SIMPLE`
   or `DETAILED` only if the next decision needs them
+- For KPI, aggregate, ranking, trend, and comparison analysis, prefer
+  configured Metric Views over raw tables when a Metric View covers the
+  requested grain and filters
+- Use raw tables for validation, row-level drill-down, source-data debugging,
+  or questions the registered Metric Views do not cover
 - Use configured preferred tables, metric views, glossary, known caveats, and sample queries as hints, not as proof that a guessed column exists
 - Long-running Databricks operations may return `{{status: "async", operation_id: ...}}`; in that case, poll with `check_operation_status(operation_id)` until it returns `completed` or `failed` before continuing
 - Do not claim to upload workspace files, run notebooks, execute Python code, create pipelines, or create jobs unless a matching tool is present in the run

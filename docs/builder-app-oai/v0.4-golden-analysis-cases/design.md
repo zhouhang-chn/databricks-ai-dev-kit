@@ -5,7 +5,8 @@
 v0.4 introduces Golden Analysis Cases for recurring, high-value questions where
 the analyst already knows the correct analysis path. A golden case maps a set
 of user question patterns to a canonical path: required context, resource
-inspection, SQL or Metric View query, answer contract, and evaluation checks.
+inspection, certified Metric View query, direct SQL validation, answer
+contract, and evaluation checks.
 
 The goal is not to rebuild the old multi-file scenario bundle. v0.4 keeps
 `project_setting.yaml` as the project contract and adds a lightweight
@@ -16,6 +17,7 @@ Related docs:
 
 - `../roadmap.md`
 - `../v0.2-business-analysis/design.md`
+- `../v0.3.5-metric-view-context-engineering/design.md`
 - `../project-management/design.md`
 - `distribution-gap-analysis.md`
 
@@ -30,6 +32,8 @@ Related docs:
   scope-derivation guidance.
 - Let the agent detect when a question matches a golden case and run the
   canonical path.
+- Prefer v0.3.5-certified Metric Views for governed metrics, while retaining
+  direct SQL as the validation oracle.
 - Capture enough expected behavior to score answer quality and data fidelity.
 - Keep v0.4 compatible with read-only user-preview runs.
 
@@ -40,7 +44,8 @@ Related docs:
 - No production project sharing or membership model.
 - No authoritative role resolution from authenticated identity.
 - No app-layer row-level permission enforcement.
-- No requirement to create Metric Views before a golden case can exist.
+- No Metric View authoring workflow inside v0.4. Metric View discovery,
+  validation, and certification are v0.3.5 work.
 - No custom standalone agent per project.
 
 Production role and data-permission enforcement remain v0.5 work.
@@ -68,7 +73,7 @@ User question
 -> Match golden case
 -> Load project settings + notes + user context
 -> Inspect configured schema
--> Execute canonical SQL or Metric View query
+-> Query certified Metric View or explicit direct SQL fallback
 -> Produce structured story conclusion
 -> Score against expected answer/eval contract
 ```
@@ -78,7 +83,8 @@ normal free-form planning path.
 
 ## Project Setting Contract
 
-v0.4 extends the minimal v0.2 YAML shape with three optional top-level sections:
+v0.4 consumes the v0.3.5 Metric View context when present and extends the
+minimal v0.2 YAML shape with three optional top-level sections:
 
 ```yaml
 business_background: >-
@@ -369,7 +375,9 @@ submit_conclusion(...)
 Rules:
 
 - Inspect schema before running canonical SQL against configured resources.
-- Use canonical SQL or Metric View references from the case.
+- Execute certified Metric View references from the case when available.
+- Use direct SQL references for validation, detail drill-down, and documented
+  fallback paths.
 - Substitute only declared parameters.
 - Do not let the model invent columns that are not confirmed by schema
   inspection.
@@ -391,17 +399,18 @@ path and why.
 
 ## Metric View Positioning
 
-Metric Views are preferred for governed metrics, but they are not required for
-v0.4.
+Metric Views are the preferred happy path for governed metrics in v0.4. The
+discovery, design, validation, and certification of those Metric Views belongs
+to v0.3.5.
 
 Recommended path:
 
-1. Start with canonical SQL over declared base tables.
-2. Add direct SQL ground-truth queries for evals.
-3. When a Metric View is created and validated, register it in
-   `databricks_resources.input_metric_views`.
-4. Allow golden cases to reference the Metric View for the happy path while
-   keeping direct SQL as the eval oracle.
+1. Build and validate Metric Views in v0.3.5.
+2. Register certified Metric Views in `databricks_resources.input_metric_views`.
+3. In v0.4, let golden cases reference those Metric Views for the happy path.
+4. Keep direct SQL ground-truth queries as eval oracles.
+5. If a case requires a metric that is not covered by a certified Metric View,
+   mark the case as not ready or define an explicit fallback path.
 
 Until a dedicated `query_metric_view` tool exists, golden cases can query Metric
 Views through `execute_sql`.
@@ -437,11 +446,11 @@ initial v0.4 slice should focus on achievement and KPI reconciliation:
 
 | Case | Role | Path |
 |---|---|---|
-| M1 achievement summary | M1 | POC achievement summary table or MV2. |
-| M1 unachieved POCs | M1 | POC summary -> POC x Group detail. |
+| M1 achievement summary | M1 | MV2, with summary-table direct SQL as eval oracle. |
+| M1 unachieved POCs | M1 | MV2 -> MV1, with direct SQL fallback for detail validation. |
 | M2 team ranking | M2 | User context + org chart notes -> team-scoped achievement. |
 | Near-achievement POCs | M1/M2 | Detail grouped by POC and Group. |
-| KPI vs scan reconciliation | M2/M3 | KPI725 table joined or compared to scan summary. |
+| KPI vs scan reconciliation | M2/M3 | MV3, with KPI725 table joined or compared to scan summary as eval oracle. |
 
 Defer fraud, SKU recommendation, POC ranking, and POC profiling until their
 derived tables are stable and declared in project settings.
@@ -470,6 +479,8 @@ v0.4 is ready when:
 
 - `project_setting.yaml` schema supports `org_chart_notes`, `user_context`, and
   `golden_cases`.
+- v0.3.5 has certified or explicitly rejected the Metric Views referenced by
+  the initial golden cases.
 - The settings page exposes those sections separately.
 - Prompt rendering places `org_chart_notes` immediately below `analysis_notes`.
 - At least one project has five reviewed golden cases.
