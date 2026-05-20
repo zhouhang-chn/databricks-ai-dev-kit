@@ -22,6 +22,10 @@ RUN set -eux; \
   apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
     ca-certificates \
     gcc \
+    g++ \
+    git \
+    python3-dev \
+    ninja-build \
     libc6-dev \
     pkg-config; \
   rm -rf /var/lib/apt/lists/*
@@ -34,8 +38,9 @@ COPY databricks-builder-app-oai ./databricks-builder-app-oai
 
 WORKDIR /app/databricks-builder-app-oai
 
-RUN python -m pip install --no-cache-dir --upgrade pip \
+RUN python -m pip install --no-cache-dir --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple \
   && pip wheel --no-cache-dir --wheel-dir /wheels \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple \
     ../databricks-tools-core \
     ../databricks-mcp-server \
     .
@@ -76,7 +81,7 @@ RUN set -eux; \
 WORKDIR /app
 
 COPY --from=builder /wheels /wheels
-RUN python -m pip install --no-cache-dir --upgrade pip \
+RUN python -m pip install --no-cache-dir --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple \
   && pip install --no-cache-dir --no-index --find-links=/wheels databricks-builder-app-oai \
   && rm -rf /wheels
 

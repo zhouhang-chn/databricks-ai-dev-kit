@@ -459,7 +459,7 @@ function ComboEvidenceChart({
 }) {
   const valueSeries = series.filter((item) => item.role === 'value');
   const percentSeries = series.filter((item) => item.role === 'percent');
-  if (rows.length < 2 || valueSeries.length === 0 || percentSeries.length === 0) return null;
+  if (rows.length < 2 || series.length === 0) return null;
 
   return (
     <div className="h-[260px] min-w-0">
@@ -488,36 +488,40 @@ function ComboEvidenceChart({
               fill: chartTheme.axis,
             }}
           />
-          <YAxis
-            yAxisId="value"
-            width={56}
-            tick={{ fontSize: 10, fill: chartTheme.axis }}
-            tickFormatter={formatNumber}
-            axisLine={{ stroke: chartTheme.grid }}
-            tickLine={{ stroke: chartTheme.grid }}
-            label={{
-              value: seriesAxisLabel(valueSeries),
-              angle: -90,
-              position: 'insideLeft',
-              style: { fill: chartTheme.axis, fontSize: 10 },
-            }}
-          />
-          <YAxis
-            yAxisId="percent"
-            orientation="right"
-            width={54}
-            tick={{ fontSize: 10, fill: chartTheme.axis }}
-            tickFormatter={(value) => `${formatNumber(value)}%`}
-            axisLine={{ stroke: chartTheme.grid }}
-            tickLine={{ stroke: chartTheme.grid }}
-            domain={[0, 'auto']}
-            label={{
-              value: seriesAxisLabel(percentSeries),
-              angle: 90,
-              position: 'insideRight',
-              style: { fill: chartTheme.axis, fontSize: 10 },
-            }}
-          />
+          {valueSeries.length > 0 && (
+            <YAxis
+              yAxisId="value"
+              width={56}
+              tick={{ fontSize: 10, fill: chartTheme.axis }}
+              tickFormatter={formatNumber}
+              axisLine={{ stroke: chartTheme.grid }}
+              tickLine={{ stroke: chartTheme.grid }}
+              label={{
+                value: seriesAxisLabel(valueSeries),
+                angle: -90,
+                position: 'insideLeft',
+                style: { fill: chartTheme.axis, fontSize: 10 },
+              }}
+            />
+          )}
+          {percentSeries.length > 0 && (
+            <YAxis
+              yAxisId="percent"
+              orientation="right"
+              width={54}
+              tick={{ fontSize: 10, fill: chartTheme.axis }}
+              tickFormatter={(value) => `${formatNumber(value)}%`}
+              axisLine={{ stroke: chartTheme.grid }}
+              tickLine={{ stroke: chartTheme.grid }}
+              domain={[0, 'auto']}
+              label={{
+                value: seriesAxisLabel(percentSeries),
+                angle: 90,
+                position: 'insideRight',
+                style: { fill: chartTheme.axis, fontSize: 10 },
+              }}
+            />
+          )}
           <Tooltip content={<ChartTooltip spec={spec} series={series} />} />
           {valueSeries.map((item) => (
             <Bar

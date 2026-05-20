@@ -68,6 +68,39 @@ Keep `APP_DB_PASSWORD` URL-safe, for example letters and digits only. Compose us
 
 ## Build
 
+### Azure Authentication
+
+The images are pushed to an Azure Container Registry (ACR) in China. Before building, you must authenticate with both the Azure CLI and Docker.
+
+#### Using the helper script (Recommended)
+
+Run the provided login helper script, which handles cloud switching and authentication:
+
+```bash
+./databricks-builder-app-oai/scripts/docker/login.sh
+```
+
+#### Manual Authentication
+
+If you prefer manual steps:
+
+1.  **Set Azure Cloud:**
+    ```bash
+    az cloud set --name AzureChinaCloud
+    ```
+
+2.  **Login to Azure:**
+    ```bash
+    az login
+    ```
+
+3.  **Login to ACR:**
+    ```bash
+    az acr login --name azrbrewdatnonprodce2acr
+    ```
+
+### Build and Push
+
 Build and push both app images:
 
 ```bash
