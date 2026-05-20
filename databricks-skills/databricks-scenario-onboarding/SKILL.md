@@ -18,6 +18,44 @@ requirements matrix, semantic-layer gap analysis, and Metric View plan.
 Use this before query-focused analysis. Do not answer the business question
 directly until the scenario is ready enough to support reliable analysis.
 
+## How To Invoke
+
+Use prompts that provide the scenario background, resource scope, and desired
+output. Good entry points:
+
+```text
+Onboard the distribution scenario from projects/distribution/README.md against
+schemas main.distribution.* and warehouse <warehouse-id>. Write onboarding
+artifacts under projects/distribution/.
+```
+
+```text
+Check readiness of project_setting.yaml in projects/distribution/ against the
+questions in projects/distribution/sample_questions.md. Update readiness.md
+with blockers and the handoff status.
+```
+
+```text
+Re-verify the certified Metric Views in projects/distribution/ after the
+source-table schema change. Re-inventory only affected assets and update
+gap-analysis.md and readiness.md.
+```
+
+## Required Inputs Checklist
+
+Before starting, confirm the user provided or can point to:
+
+- business background: paragraph, Markdown file, product doc, notebook, or
+  existing scenario folder
+- either an existing `project_setting.yaml` or a list of Databricks resources
+  to register
+- 3-10 sample analyst questions or question families
+- workspace auth: `DATABRICKS_CONFIG_PROFILE` or Databricks host/token already
+  configured
+- output location for scenario artifacts, usually `projects/<scenario>/`
+
+If any P0 input is missing, ask for it before inspecting data.
+
 ## Relationship To `databricks-analysis`
 
 This skill prepares the scenario. `databricks-analysis` executes the analysis.
@@ -84,6 +122,31 @@ Interpretation:
 - `databricks_resources` bounds what to inspect: schemas, tables, Metric Views,
   volumes, workspace code, workflows, and output locations.
 
+## Artifact Layout
+
+Use stable artifact names so future sessions can resume onboarding:
+
+```text
+projects/<scenario>/
+  project_setting.yaml
+  requirements.md
+  inventory.md
+  gap-analysis.md
+  metric-views/
+    <metric-view-name>.yaml
+    <metric-view-name>_validation.sql
+  readiness.md
+```
+
+Conventions:
+
+- `requirements.md`: matrix from requirement extraction.
+- `inventory.md`: Databricks tables, Metric Views, volumes, workspace files,
+  metadata, freshness, and access findings.
+- `gap-analysis.md`: requirement-to-asset coverage and blockers.
+- `metric-views/`: candidate Metric View YAML plus validation SQL.
+- `readiness.md`: ready / partially ready / blocked summary and handoff notes.
+
 ## MCP Tools
 
 Use the smallest tool surface that can prove readiness.
@@ -95,6 +158,17 @@ Use the smallest tool surface that can prove readiness.
 | `manage_metric_views` | Describe, query, create, alter, drop, or grant Metric Views. | Write-capable. Create/alter/drop/grant only with explicit authorization. |
 | `manage_volume_files` | List, inspect, upload, download, or delete volume files used by the scenario. | Write/delete operations require explicit authorization. |
 | `manage_workspace_files` | Stage or update workspace files/artifacts when scenario setup requires it. | Write/delete operations require explicit authorization. |
+
+## Re-running Existing Scenarios
+
+When re-running against an existing scenario folder, do not redo everything.
+Load `project_setting.yaml` and existing artifacts first, then:
+
+- skip project-setting creation unless resource scope changed
+- diff new questions or business rules against `requirements.md`
+- re-inventory only changed tables, Metric Views, volumes, or workspace files
+- re-validate only affected Metric Views and requirement rows
+- update `gap-analysis.md` and `readiness.md` with what changed
 
 ## Workflow
 
@@ -208,17 +282,52 @@ When all P0 requirements are ready or explicitly accepted as partial:
 - pass the readiness summary so the analysis agent uses certified Metric Views
   first and falls back only where the onboarding result allows it
 
+## Resolving Blockers
+
+When readiness is partial or blocked, tell the user the next action:
+
+- Missing column: request a data-engineering change; do not invent a metric or
+  silently substitute a nearby column.
+- Missing freshness: either downgrade the affected requirement to P1 and
+  proceed without it, or wait for the source refresh.
+- Missing permission: request access and show the exact grant needed, such as
+  `GRANT SELECT ON TABLE catalog.schema.table TO \`principal\``.
+- Missing Metric View: use `databricks-metric-views` to draft or create the
+  Metric View, then return to this skill to verify coverage.
+- Missing volume/file: register the volume path or workspace file, then
+  re-run only the affected inventory and gap checks.
+
+## Worked Example
+
+```text
+User: Onboard the distribution scenario.
+Agent: I need three things: background, sample questions, and target schemas.
+       projects/distribution/README.md covers background. What schemas and
+       warehouse should I scope to?
+User: main.distribution.*, warehouse abc123.
+Agent: Drafting projects/distribution/project_setting.yaml. Extracting 6 P0
+       and 2 P1 requirements from the background and 8 sample questions.
+       Inspecting 4 tables and 1 existing Metric View.
+Agent: 5 of 6 P0 requirements are covered. MV1 is missing a region dimension.
+       Proposed YAML is in projects/distribution/metric-views/mv1.yaml.
+       Readiness: partially ready. Blockers are in readiness.md.
+User: Add the region dimension and re-verify.
+Agent: Handing Metric View changes to databricks-metric-views, then returning
+       here to re-validate MV1 and update readiness.md.
+```
+
 ## Deliverables
 
-Return or write, depending on the user request:
+Return a summary and, when an output folder is provided, write artifacts using
+the layout above:
 
 - updated `project_setting.yaml`
-- analysis requirements matrix
-- asset and metadata inventory
-- Metric View/table/volume gap analysis
+- `requirements.md`
+- `inventory.md`
+- `gap-analysis.md`
 - Metric View YAML or creation plan
 - validation queries and results
-- readiness summary: ready / partially ready / blocked
+- `readiness.md`: ready / partially ready / blocked plus handoff status
 
 ## Guardrails
 
