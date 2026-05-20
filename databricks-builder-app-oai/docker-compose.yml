@@ -1,0 +1,96 @@
+name: ${COMPOSE_PROJECT_NAME:-builder-app-oai}
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
+    container_name: ${POSTGRES_CONTAINER:-builder-app-oai-postgres}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${APP_DB_NAME:-builder_app}
+      POSTGRES_USER: ${APP_DB_USER:-builder_app}
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD:-builder_app_local_password}
+      APP_DB_SCHEMA: ${APP_DB_SCHEMA:-builder_app}
+    command: ["postgres", "-c", "port=${POSTGRES_CONTAINER_PORT:-5432}"]
+    ports:
+      - "${POSTGRES_HOST_BIND:-127.0.0.1}:${POSTGRES_HOST_PORT:-5433}:${POSTGRES_CONTAINER_PORT:-5432}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${APP_DB_USER:-builder_app} -d ${APP_DB_NAME:-builder_app} -p ${POSTGRES_CONTAINER_PORT:-5432}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    image: ${IMAGE_REGISTRY_PREFIX:-azrbrewdatnonprodce2acr.azurecr.cn/brewdat-ds-cn/}${BACKEND_IMAGE_NAME:-builder-app-oai-backend}:${IMAGE_VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: databricks-builder-app-oai/Dockerfile.backend
+    container_name: ${BACKEND_CONTAINER:-builder-app-oai-backend}
+    restart: unless-stopped
+    environment:
+      ENV: ${APP_ENV:-development}
+      BACKEND_PORT: ${BACKEND_CONTAINER_PORT:-8000}
+      PROJECTS_BASE_DIR: ${PROJECTS_BASE_DIR:-/app/databricks-builder-app-oai/projects}
+      LAKEBASE_PG_URL: postgresql://${APP_DB_USER:-builder_app}:${APP_DB_PASSWORD:-builder_app_local_password}@postgres:${POSTGRES_CONTAINER_PORT:-5432}/${APP_DB_NAME:-builder_app}?sslmode=${APP_DB_SSLMODE:-disable}
+      LAKEBASE_DATABASE_NAME: ${APP_DB_NAME:-builder_app}
+      LAKEBASE_SCHEMA_NAME: ${APP_DB_SCHEMA:-builder_app}
+      BUILDER_AGENT_RUNTIME: ${BUILDER_AGENT_RUNTIME:-openai_agents}
+      OPENAI_AGENTS_DISABLE_TRACING: ${OPENAI_AGENTS_DISABLE_TRACING:-1}
+      SKILLS_ONLY_MODE: ${SKILLS_ONLY_MODE:-false}
+      ENABLED_SKILLS: ${ENABLED_SKILLS:-}
+      DATABRICKS_HOST: ${DATABRICKS_HOST:-}
+      DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
+      DATABRICKS_CLIENT_ID: ${DATABRICKS_CLIENT_ID:-}
+      DATABRICKS_CLIENT_SECRET: ${DATABRICKS_CLIENT_SECRET:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_AGENT_MODEL: ${OPENAI_AGENT_MODEL:-deepseek-v4-pro}
+      OPENAI_TITLE_MODEL: ${OPENAI_TITLE_MODEL:-deepseek-v4-flash}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-databricks}
+      MLFLOW_EXPERIMENT_NAME: ${MLFLOW_EXPERIMENT_NAME:-}
+      ENABLE_MCP_GATEWAY: ${ENABLE_MCP_GATEWAY:-false}
+      FASTMCP_STATELESS_HTTP: ${FASTMCP_STATELESS_HTTP:-true}
+    ports:
+      - "${BACKEND_HOST_BIND:-127.0.0.1}:${BACKEND_HOST_PORT:-8008}:${BACKEND_CONTAINER_PORT:-8000}"
+    volumes:
+      - projects:/app/databricks-builder-app-oai/projects
+      - logs:/app/databricks-builder-app-oai/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${BACKEND_CONTAINER_PORT:-8000}/api/config/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  frontend:
+    image: ${IMAGE_REGISTRY_PREFIX:-azrbrewdatnonprodce2acr.azurecr.cn/brewdat-ds-cn/}${FRONTEND_IMAGE_NAME:-builder-app-oai-frontend}:${IMAGE_VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: databricks-builder-app-oai/client/Dockerfile
+    container_name: ${FRONTEND_CONTAINER:-builder-app-oai-frontend}
+    restart: unless-stopped
+    environment:
+      FRONTEND_PORT: ${FRONTEND_CONTAINER_PORT:-8080}
+      BACKEND_URL: http://${BACKEND_CONTAINER:-builder-app-oai-backend}:${BACKEND_CONTAINER_PORT:-8000}
+    ports:
+      - "${FRONTEND_HOST_BIND:-0.0.0.0}:${FRONTEND_HOST_PORT:-3001}:${FRONTEND_CONTAINER_PORT:-8080}"
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  postgres-data:
+    name: ${POSTGRES_VOLUME:-builder-app-oai-postgres-data}
+  projects:
+    name: ${PROJECTS_VOLUME:-builder-app-oai-projects}
+  logs:
+    name: ${LOGS_VOLUME:-builder-app-oai-logs}
+
+networks:
+  default:
+    name: ${DOCKER_NETWORK:-builder-app-oai}

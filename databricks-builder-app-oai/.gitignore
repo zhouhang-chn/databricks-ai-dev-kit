@@ -23,6 +23,7 @@ __pycache__/
 .env
 .env.local
 app.yaml
+.deploy/
 
 # Node (client)
 client/node_modules/
