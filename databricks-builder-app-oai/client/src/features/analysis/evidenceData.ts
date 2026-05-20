@@ -141,6 +141,7 @@ export function isLikelyDateString(value: unknown): boolean {
   if (typeof value !== 'string') return false;
   const text = value.trim();
   if (!text) return false;
+  if (/^[+-]?\d+(?:\.\d+)?$/.test(text)) return false;
   if (/^\d{4}-\d{2}-\d{2}(T.*)?$/.test(text)) return true;
   if (/^[A-Za-z]{3}\s+\d{4}$/.test(text)) return true;
   const ts = Date.parse(text);

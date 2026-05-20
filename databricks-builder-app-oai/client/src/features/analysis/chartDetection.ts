@@ -38,10 +38,9 @@ export function detectChartSpec(
 
   if (numeric.length === 0) return undefined;
 
-  const xField =
-    temporal[0]?.name
-    ?? categorical.find((p) => p.distinctValues > 1 && p.distinctValues <= 60)?.name
-    ?? undefined;
+  const categoricalAxis = categorical.find((p) => p.distinctValues > 1 && p.distinctValues <= 60);
+  const xProfile = chooseTemporalAxis(temporal) ?? categoricalAxis;
+  const xField = xProfile?.name;
 
   if (!xField) return undefined;
 
@@ -49,11 +48,7 @@ export function detectChartSpec(
     .map((p) => p.name)
     .filter((name) => name !== xField)
     .slice(0, 3);
-  const breakdownField = categorical.find((p) => (
-    p.name !== xField
-    && p.distinctValues > 1
-    && p.distinctValues <= 20
-  ))?.name;
+  const breakdownField = findBreakdownField(profiles, xField)?.name;
 
   if (yFields.length === 0) return undefined;
 
@@ -99,6 +94,12 @@ export function detectChartSpec(
     sort: breakdownField ? 'natural' : 'desc',
     colorField: breakdownField,
   };
+}
+
+export function inferChartColorField(tabular: RowOriented, spec: ChartSpec): string | undefined {
+  if (spec.colorField && tabular.columns.includes(spec.colorField)) return spec.colorField;
+  if (!tabular.columns.includes(spec.xField)) return undefined;
+  return findBreakdownField(profileColumns(tabular), spec.xField)?.name;
 }
 
 export function validateChartSpec(spec: ChartSpec, tabular: RowOriented): boolean {
@@ -156,6 +157,34 @@ function isMostlyTemporal(profile: ColumnProfile): boolean {
   if (profile.nonNullCount === 0) return false;
   if (isLikelyTemporalColumnName(profile.name) && hasTemporalValueShape(profile)) return true;
   return profile.dateLikeCount / profile.nonNullCount >= 0.8;
+}
+
+function chooseTemporalAxis(profiles: ColumnProfile[]): ColumnProfile | undefined {
+  return [...profiles]
+    .filter((profile) => profile.distinctValues > 1)
+    .sort((left, right) => right.distinctValues - left.distinctValues)[0];
+}
+
+function findBreakdownField(profiles: ColumnProfile[], xField: string): ColumnProfile | undefined {
+  const xProfile = profiles.find((profile) => profile.name === xField);
+  const candidates = profiles.filter((profile) => (
+    profile.name !== xField
+    && profile.nonNullCount > 0
+    && profile.distinctValues > 1
+    && profile.distinctValues <= 20
+  ));
+
+  const temporalBreakdown = candidates.find((profile) => (
+    isMostlyTemporal(profile)
+    && (!xProfile || profile.distinctValues < xProfile.distinctValues || isCalendarPeriodColumn(profile.name))
+  ));
+  if (temporalBreakdown) return temporalBreakdown;
+
+  return candidates.find((profile) => !isMostlyNumeric(profile) && !isMostlyTemporal(profile));
+}
+
+function isCalendarPeriodColumn(name: string): boolean {
+  return /(^|_)(yearmonth|yyyymm|year_month|month|period|quarter|week)(_|$)/i.test(name);
 }
 
 function isLikelyTemporalColumnName(name: string): boolean {

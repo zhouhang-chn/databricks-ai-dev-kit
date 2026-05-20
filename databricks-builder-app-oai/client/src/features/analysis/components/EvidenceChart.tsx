@@ -97,6 +97,7 @@ export function EvidenceChart({
 }: EvidenceChartProps) {
   const [hiddenSeries, setHiddenSeries] = useState<string[]>([]);
   const rows = useMemo(() => toChartRows(tabular, spec, spec.chartType === 'bar' ? 30 : 120), [spec, tabular]);
+  const categoryData = useMemo(() => toCategoryChartData(tabular, spec, 120), [spec, tabular]);
   const comboData = useMemo(() => toComboData(tabular, spec, 120), [spec, tabular]);
   const baseSeries = useMemo(() => spec.yFields.map((field, index) => ({
     key: seriesKey(index),
@@ -109,7 +110,15 @@ export function EvidenceChart({
   const shouldUseCombo = (spec.chartType === 'line' || spec.chartType === 'area' || spec.chartType === 'bar')
     && hasMixedMetricRoles(comboData.series)
     && comboData.rows.length >= 2;
-  const legendSeries = shouldUseCombo ? comboData.series : baseSeries;
+  const shouldUseCategoryBreakdown = !shouldUseCombo
+    && categoryData.rows.length >= 2
+    && categoryData.series.length > baseSeries.length;
+  const chartRows = shouldUseCategoryBreakdown ? categoryData.rows : rows;
+  const legendSeries = shouldUseCombo
+    ? comboData.series
+    : shouldUseCategoryBreakdown
+      ? categoryData.series
+      : baseSeries;
   const visibleSeries = legendSeries.filter((item) => !hiddenSeries.includes(item.key));
 
   const toggleSeries = (key: string): void => {
@@ -172,7 +181,7 @@ export function EvidenceChart({
     if (spec.chartType === 'line' || spec.chartType === 'area') {
       return (
         <LineEvidenceChart
-          rows={rows}
+          rows={chartRows}
           spec={spec}
           series={visibleSeries}
           activeRowIndex={activeRowIndex}
@@ -198,7 +207,7 @@ export function EvidenceChart({
     }
     return (
       <BarEvidenceChart
-        rows={rows}
+        rows={chartRows}
         spec={spec}
         series={visibleSeries}
         activeRowIndex={activeRowIndex}
@@ -211,12 +220,12 @@ export function EvidenceChart({
   }, [
     activeRowIndex,
     clearActive,
+    chartRows,
     comboData.rows,
     handleChartClick,
     handleChartMove,
     onActiveRowChange,
     onSelectRow,
-    rows,
     selectedRowIndex,
     spec,
     shouldUseCombo,
@@ -862,18 +871,24 @@ function toChartRows(tabular: RowOriented, spec: ChartSpec, limit: number): Char
 
 function toComboData(tabular: RowOriented, spec: ChartSpec, limit: number): ComboChartData {
   if (spec.colorField && tabular.columns.includes(spec.colorField)) {
-    const categoryData = toCategoryComboData(tabular, spec, spec.colorField, limit);
+    const categoryData = toCategoryComboData(tabular, spec, spec.colorField, limit, 'metricRole');
     if (categoryData.rows.length > 0 && categoryData.series.length > 0) return categoryData;
   }
 
   return toAggregatedComboData(tabular, spec, limit);
 }
 
+function toCategoryChartData(tabular: RowOriented, spec: ChartSpec, limit: number): ComboChartData {
+  if (!spec.colorField || !tabular.columns.includes(spec.colorField)) return { rows: [], series: [] };
+  return toCategoryComboData(tabular, spec, spec.colorField, limit, 'chartType');
+}
+
 function toCategoryComboData(
   tabular: RowOriented,
   spec: ChartSpec,
   colorField: string,
-  limit: number
+  limit: number,
+  markMode: 'metricRole' | 'chartType'
 ): ComboChartData {
   // Keep the table grain visible: one x-axis bucket per period, one series per category.
   const categories: Array<{ key: string; label: string }> = [];
@@ -909,7 +924,9 @@ function toCategoryComboData(
       sourceField: field,
       categoryLabel: category.label,
       color: CHART_SERIES_COLORS[categoryIndex % CHART_SERIES_COLORS.length],
-      mark: role === 'percent' ? 'line' as const : 'bar' as const,
+      mark: markMode === 'chartType'
+        ? chartTypeToSeriesMark(spec.chartType)
+        : role === 'percent' ? 'line' as const : 'bar' as const,
       role,
     };
   }));

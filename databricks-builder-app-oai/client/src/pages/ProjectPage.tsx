@@ -1174,7 +1174,7 @@ export default function ProjectPage() {
   // Handle conversation changes via URL
   useEffect(() => {
     const urlConvId = searchParams.get('conversationId');
-    if (!projectId || !urlConvId || urlConvId === currentConvIdRef.current) return;
+    if (!projectId || isLoading || !urlConvId || urlConvId === currentConvIdRef.current) return;
 
     const loadSeq = conversationLoadSeqRef.current + 1;
     conversationLoadSeqRef.current = loadSeq;
@@ -1215,6 +1215,7 @@ export default function ProjectPage() {
     switchConv();
   }, [
     projectId,
+    isLoading,
     searchParams,
     conversations,
     project,

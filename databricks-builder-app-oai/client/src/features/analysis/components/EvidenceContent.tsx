@@ -3,7 +3,7 @@ import { Download } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { EvidenceBlock } from '@/features/analysis/types';
-import { detectChartSpec, validateChartSpec } from '@/features/analysis/chartDetection';
+import { detectChartSpec, inferChartColorField, validateChartSpec } from '@/features/analysis/chartDetection';
 import {
   asRowTable,
   cellToString,
@@ -160,7 +160,12 @@ export function EvidenceContent({ block }: { block: EvidenceBlock }) {
   const tabular = useMemo(() => (parsed ? asRowTable(parsed) : null), [parsed]);
   const chartSpec = useMemo(() => {
     if (!tabular) return undefined;
-    if (block.chartSpec && validateChartSpec(block.chartSpec, tabular)) return block.chartSpec;
+    if (block.chartSpec && validateChartSpec(block.chartSpec, tabular)) {
+      const colorField = inferChartColorField(tabular, block.chartSpec);
+      return colorField && colorField !== block.chartSpec.colorField
+        ? { ...block.chartSpec, colorField }
+        : block.chartSpec;
+    }
     return detectChartSpec(tabular, { toolName: block.toolName });
   }, [block.chartSpec, block.toolName, tabular]);
   const [expanded, setExpanded] = useState(false);
