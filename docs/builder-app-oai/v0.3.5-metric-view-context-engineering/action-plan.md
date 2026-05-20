@@ -1,28 +1,50 @@
-# v0.3.5 Metric View Context Engineering Action Plan
+# v0.3.5 Scenario Onboarding And Metric View Context Engineering Action Plan
 
 ## Objective And Release Gates
 
 Objective:
 
-- Build and validate a Databricks Metric View semantic layer that the Analysis
-  Agent can trust before v0.4 golden cases add canonical routing.
+- Onboard an analysis scenario into a validated project setting, data-analysis
+  requirements matrix, semantic-layer gap analysis, and Databricks Metric View
+  layer that the Analysis Agent can trust before v0.4 golden cases add
+  canonical routing.
 
 Release gates:
 
-1. Semantic-layer gate: project settings register validated Metric Views, not
+1. Scenario contract gate: `project_setting.yaml` captures business
+   background, analysis notes, Databricks resources, tables, Metric Views,
+   volumes, and workspace code needed by the scenario.
+2. Requirements gate: scenario input is converted into explicit analysis
+   requirements with grain, measures, dimensions, filters, answer contract, and
+   priority.
+3. Gap-analysis gate: requirements are compared against existing tables,
+   volumes, metadata, and Metric Views.
+4. Semantic-layer gate: project settings register validated Metric Views, not
    only raw tables.
-2. Context-engineering gate: Metric View candidates are derived from user input,
+5. Context-engineering gate: Metric View candidates are derived from user input,
    code, metadata, and data profiling rather than hand-written names only.
-3. Validation gate: Metric View outputs reconcile with direct SQL or documented
+6. Validation gate: Metric View outputs reconcile with direct SQL or documented
    tolerances.
-4. Runtime gate: aggregate and KPI questions prefer Metric Views and disclose
+7. Runtime gate: aggregate and KPI questions prefer Metric Views and disclose
    visible fallback when using base tables.
-5. Handoff gate: v0.4 golden cases can reference certified Metric Views as
+8. Handoff gate: v0.4 golden cases can reference certified Metric Views as
    their happy path.
 
 ## Workstreams
 
-Workstream A: Metric Context Contract
+Workstream A: Scenario Onboarding Contract
+
+- Define the scenario onboarding artifacts:
+  - `project_setting.yaml`
+  - analysis requirements matrix
+  - asset inventory
+  - semantic gap analysis
+  - Metric View context
+  - readiness summary
+- Add a `databricks-scenario-onboarding` skill for Codex/Claude Code.
+- Keep project payload in scenario artifacts, not `AGENTS.md`.
+
+Workstream B: Metric Context Contract
 
 - Define `metric_view_context` as the design contract.
 - Keep `databricks_resources.input_metric_views` as the current app-compatible
@@ -31,34 +53,42 @@ Workstream A: Metric Context Contract
 - Define validation metadata: direct SQL reference, tolerance, checked timestamp,
   and known caveats.
 
-Workstream B: Discovery And Candidate Generation
+Workstream C: Discovery And Candidate Generation
 
+- Extract question families, metrics, dimensions, grain, filters, answer
+  contracts, and priorities from business background and analysis notes.
 - Extract metrics, dimensions, grain, filters, joins, and synonyms from
-  business background and analysis notes.
+  the requirements matrix.
 - Inspect workspace notebooks, SQL files, and project code for repeated
   aggregation logic.
-- Inspect Unity Catalog schemas, tables, comments, existing views, and current
-  Metric Views.
+- Inspect Unity Catalog schemas, tables, comments, volumes, existing views, and
+  current Metric Views.
 - Use table stats and sample rows to validate enum-like dimensions, nulls,
   date/month formats, and measure feasibility.
+- Identify whether each requirement is covered, partially covered, missing, or
+  blocked.
 
-Workstream C: Metric View Validation
+Workstream D: Metric View Validation
 
 - Draft YAML definitions for reviewed candidates.
 - Validate each source table and join path.
 - Query Metric Views with `MEASURE()` and explicit dimensions.
 - Reconcile Metric View results with direct SQL over source tables.
+- Verify each Metric View against the scenario requirements it is supposed to
+  satisfy.
 - Record validation results in project docs and later in app settings.
 
-Workstream D: Runtime Preference
+Workstream E: Runtime Preference
 
 - Render Metric Views as the preferred semantic layer in prompt context.
 - Update prompt policy so KPI and aggregate questions use Metric Views first.
 - Keep base tables available for drill-down, validation, and unsupported grains.
 - Add visible fallback language when the run cannot use the Metric View path.
 
-Workstream E: Distribution Seed
+Workstream F: Distribution Seed
 
+- Treat Distribution as a complete scenario onboarding seed, not only a Metric
+  View design example.
 - Promote Distribution MV1-MV3 from design to v0.3.5 certification targets.
 - Register validated MV names in `distribution.yaml`.
 - Map sample Distribution questions to the metric view, dimensions, measures,
@@ -74,17 +104,42 @@ Goal:
 Scope:
 
 1. Add design, gap analysis, and action plan docs.
-2. Update v0.4 docs so Golden Analysis Cases depend on the metric-view layer.
-3. Update Distribution docs so Metric Views are the primary semantic path.
-4. Include official Databricks business semantics and Metric View references.
+2. Add the reusable `databricks-scenario-onboarding` skill.
+3. Update v0.4 docs so Golden Analysis Cases depend on the metric-view layer.
+4. Update Distribution docs so Metric Views are the primary semantic path.
+5. Include official Databricks business semantics and Metric View references.
 
 Acceptance:
 
 - Roadmap shows v0.3.5 between v0.3 and v0.4.
+- The skill installer can install `databricks-scenario-onboarding`.
 - v0.4 no longer treats Metric Views as optional acceleration only.
 - Distribution has a documented Metric View context-engineering path.
 
-## Milestone 2: Discovery Prototype
+## Milestone 2: Scenario Onboarding Prototype
+
+Goal:
+
+- Turn a project setting and unstructured scenario input into analysis
+  requirements, inventory, gaps, and readiness status.
+
+Scope:
+
+1. Parse or draft `project_setting.yaml`.
+2. Extract requirements from background, analysis notes, and sample questions.
+3. Inventory configured schemas, tables, Metric Views, volumes, and workspace
+   files.
+4. Compare requirements to existing assets.
+5. Produce readiness summary: ready, partially ready, or blocked.
+
+Acceptance:
+
+- Each P0 requirement has required grain, measures, dimensions, filters, and
+  answer contract.
+- Each P0 requirement has an asset-coverage status.
+- Missing tables, volumes, metadata, or Metric Views are explicit blockers.
+
+## Milestone 3: Discovery Prototype
 
 Goal:
 
@@ -93,7 +148,7 @@ Goal:
 
 Scope:
 
-1. Parse project settings, analysis notes, and registered resources.
+1. Use scenario requirements and registered resources as inputs.
 2. Extract SQL patterns from referenced workspace notebooks or files when
    accessible.
 3. Call schema/stat inspection for source tables and existing Metric Views.
@@ -108,7 +163,7 @@ Acceptance:
 - Candidate pack marks unresolved assumptions instead of silently certifying
   them.
 
-## Milestone 3: Metric View Validation
+## Milestone 4: Metric View Validation
 
 Goal:
 
@@ -132,7 +187,7 @@ Acceptance:
   - tolerance and status
 - Invalid candidates remain candidate or missing, never certified.
 
-## Milestone 4: Runtime Semantic Preference
+## Milestone 5: Runtime Semantic Preference
 
 Goal:
 
@@ -152,7 +207,7 @@ Acceptance:
 - Direct table SQL is still available for row-level drill-down and validation.
 - Answers disclose fallback when Metric View use was expected but impossible.
 
-## Milestone 5: v0.4 Handoff
+## Milestone 6: v0.4 Handoff
 
 Goal:
 
@@ -187,6 +242,12 @@ Runtime validation after implementation work:
 ```bash
 cd databricks-builder-app-oai
 UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run pytest tests/test_project_settings_yaml.py tests/test_project_config.py -q
+```
+
+Skill validation after skill changes:
+
+```bash
+python .github/scripts/validate_skills.py
 ```
 
 Frontend validation only when UI changes are made:

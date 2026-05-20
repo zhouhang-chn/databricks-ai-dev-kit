@@ -90,6 +90,7 @@ cp -r ai-dev-kit/databricks-skills/databricks-agent-bricks .claude/skills/
 - **searching-mlflow-docs** - Search MLflow documentation
 
 ### 📊 Analytics & Dashboards
+- **databricks-scenario-onboarding** - Prepare analysis scenarios before query-focused analysis: define `project_setting.yaml`, extract data requirements, compare existing tables/volumes/metadata/Metric Views, propose or build Metric Views, and verify readiness
 - **databricks-aibi-dashboards** - Databricks AI/BI dashboards (with SQL validation workflow)
 - **databricks-unity-catalog** - System tables for lineage, audit, billing
 

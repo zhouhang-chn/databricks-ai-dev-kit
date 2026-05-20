@@ -1,9 +1,9 @@
-# v0.3.5 Metric View Context Engineering Design
+# v0.3.5 Scenario Onboarding And Metric View Context Engineering Design
 
 ## Purpose
 
-v0.3.5 inserts a semantic-layer release between v0.3 visual storytelling and
-v0.4 golden analysis cases.
+v0.3.5 inserts a scenario-onboarding and semantic-layer release between v0.3
+visual storytelling and v0.4 golden analysis cases.
 
 The product thesis is simple: accurate data analysis should not depend on each
 agent run rediscovering metric definitions from raw tables, notebooks, and
@@ -11,11 +11,18 @@ free-form notes. Databricks Unity Catalog business semantics and Metric Views
 are the governed semantic layer. Builder App should engineer that layer from
 project context, validate it, and make the Analysis Agent use it first.
 
+The release also covers the preparation loop before query-focused analysis:
+define the scenario in `project_setting.yaml`, derive concrete analysis
+requirements, inspect existing Databricks data and metadata, identify semantic
+asset gaps, build the needed Metric Views, and verify that the semantic layer
+can answer the scenario requirements.
+
 Related references:
 
 - `../roadmap.md`
 - `../v0.3-visual-storytelling/design.md`
 - `../v0.4-golden-analysis-cases/design.md`
+- `../../../databricks-skills/databricks-scenario-onboarding/SKILL.md`
 - `../../../databricks-builder-app-oai/projects/distribution/metric-view-design.md`
 - Databricks docs: [Unity Catalog business semantics](https://docs.databricks.com/aws/en/business-semantics/)
 - Databricks docs: [Unity Catalog metric views](https://docs.databricks.com/gcp/en/business-semantics/metric-views)
@@ -23,6 +30,15 @@ Related references:
 
 ## Goals
 
+- Make scenario onboarding a first-class preparation workflow before analysis
+  execution.
+- Define or refine `project_setting.yaml` from business background, analysis
+  notes, Databricks resources, tables, Metric Views, volumes, workspace code,
+  and output locations.
+- Extract a data-analysis requirements matrix from unstructured scenario input
+  and resource hints.
+- Compare requirements against existing data, metadata, tables, volumes, and
+  Metric Views.
 - Treat Metric Views as the official semantic layer for reusable business
   metrics, dimensions, grain, synonyms, and formatting.
 - Build metric-view candidates by reading project context from:
@@ -35,8 +51,12 @@ Related references:
 - Produce reviewed Metric View YAML definitions with dimensions, measures,
   joins, comments, display names, synonyms, and formats where supported.
 - Validate Metric Views by comparing them with direct SQL over source tables.
+- Verify Metric View effectiveness and completeness against the extracted
+  scenario requirements.
 - Register validated Metric Views in `databricks_resources.input_metric_views`
   and `settings.semantics.metric_views`.
+- Provide a reusable `databricks-scenario-onboarding` skill for Codex/Claude
+  Code preparation before query-focused analysis.
 - Make the Analysis Agent prefer Metric Views for KPI and aggregate questions,
   falling back to base tables only for validation, unsupported details, or
   explicitly exploratory analysis.
@@ -52,6 +72,34 @@ Related references:
   remain v0.6.
 - No requirement that every source table has a Metric View before exploratory
   analysis can run.
+- No production workflow orchestration for onboarding. v0.3.5 defines the
+  workflow, artifacts, skill, and validation gates first.
+
+## Scenario Onboarding Workflow
+
+```text
+User scenario input
+-> create/refine project_setting.yaml
+-> extract data-analysis requirements
+-> inventory Databricks resources, tables, volumes, metadata, and code
+-> compare requirements to existing Metric Views and source assets
+-> produce semantic-layer gap analysis
+-> build or propose missing Metric Views
+-> validate Metric Views against source SQL and requirements
+-> mark scenario ready, partially ready, or blocked for query-focused analysis
+```
+
+Onboarding artifacts:
+
+- `project_setting.yaml`: compact scenario contract.
+- `analysis_requirements`: matrix of question families, metrics, dimensions,
+  grain, filters, outputs, caveats, and priority.
+- `asset_inventory`: tables, Metric Views, volumes, workspace code, metadata,
+  freshness, and known limitations.
+- `semantic_gap_analysis`: what is covered, partial, missing, or stale.
+- `metric_view_context`: certified Metric Views, candidate Metric Views,
+  validations, tolerances, and unresolved assumptions.
+- `readiness_summary`: whether query-focused analysis can proceed.
 
 ## Context Engineering Inputs
 
@@ -66,10 +114,49 @@ Related references:
 
 ## Output Contract
 
-v0.3.5 introduces a project-level metric context pack. It can be represented in
-docs first and later persisted in the app settings schema.
+v0.3.5 introduces scenario onboarding artifacts plus a project-level metric
+context pack. They can be represented in docs first and later persisted in the
+app settings schema.
 
 ```yaml
+analysis_requirements:
+  - requirement_id: distribution_a1_m1_achievement
+    question_examples:
+      - "我这个月达成率多少？"
+      - "还差几家店达成？"
+    business_terms:
+      - POC achievement rate
+      - remaining POCs
+    grain:
+      - M1
+      - Month
+    measures:
+      - Total POC Count
+      - Achieved POC Count
+      - Not Achieved POC Count
+      - POC Achievement Rate
+    dimensions:
+      - Year Month
+      - M1 No
+    filters:
+      - exclude T2WS
+      - align achievement and KPI configuration by yearmonth
+    required_assets:
+      metric_views:
+        - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
+      tables:
+        - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_summary
+    priority: P0
+
+semantic_gap_analysis:
+  - requirement_id: distribution_a1_m1_achievement
+    existing_coverage: partial
+    gaps:
+      - Metric View not yet validated against source SQL
+    recommended_assets:
+      - m1_poc_achievement_metrics
+    readiness: blocked_until_validated
+
 metric_view_context:
   discovery_sources:
     user_input: true
@@ -125,12 +212,16 @@ databricks_resources:
 
 ```text
 Project setup or refinement
+-> load or create project_setting.yaml
 -> collect unstructured business input and analysis notes
+-> extract analysis requirements and answer contracts
 -> inspect workspace code and SQL patterns
--> inspect UC schemas, source tables, and current Metric Views
+-> inspect UC schemas, source tables, current Metric Views, and volumes
+-> compare requirements to existing assets and metadata
+-> document gaps for Metric Views, tables, volumes, and metadata
 -> profile candidate dimensions and measures
 -> draft Metric View YAML
--> validate with direct SQL and sample user questions
+-> validate with direct SQL, requirements, and sample user questions
 -> register validated Metric Views in project settings
 -> render Metric View context for analysis runs
 ```

@@ -2,12 +2,23 @@
 
 ## Purpose
 
-This file applies the v0.3.5 Metric View Context Engineering release to the
-Distribution seed project.
+This file applies the v0.3.5 Scenario Onboarding and Metric View Context
+Engineering release to the Distribution seed project.
 
 Distribution analysis should prefer Databricks Metric Views for governed
 metrics. Raw tables remain available for validation, drill-down, and cases not
 yet covered by the semantic layer.
+
+## Scenario Onboarding Outputs
+
+Distribution onboarding should produce:
+
+- updated `distribution.yaml` as the project setting source
+- analysis requirements matrix
+- inventory of tables, Metric Views, volumes, metadata, and workspace notebooks
+- semantic gap analysis for Metric Views, source tables, volumes, and metadata
+- validation queries for each certified Metric View
+- readiness summary before query-focused analysis starts
 
 ## Context Inputs
 
@@ -19,6 +30,25 @@ yet covered by the semantic layer.
 | Workspace notebook `MHA_achievement_analysis` | repeated joins, filters, month alignment rules, final aggregates |
 | Unity Catalog metadata | table schemas, column comments, source table freshness, Metric View existence |
 | Data profiling | `yearmonth` range, channel values, null rates, enum dimensions, POC/M1 cardinality |
+
+## Initial Analysis Requirements
+
+| Requirement | Grain | Measures | Dimensions / filters | Required assets | Readiness |
+|---|---|---|---|---|---|
+| M1 monthly achievement summary | M1 x Month | Total POC Count, Achieved POC Count, Not Achieved POC Count, POC Achievement Rate | `Year Month`, `M1 No`, exclude T2WS | MV2, summary table oracle | blocked until MV2 validated |
+| M1 unachieved POC and group gaps | POC x Group x Month | Achieved SKU Count, Total SKU Count, SKU Achievement Rate | `Year Month`, `M1 No`, `POC ID`, `Group Code` | MV2 -> MV1, detail table oracle | blocked until MV1/MV2 validated |
+| M2 team ranking | M1 x Month within M2 scope | POC Achievement Rate, Total POC Count, Achieved POC Count | `M2 No`, `Year Month`, org relation month | MV1/MV2, org table | partial; needs user context and org validation |
+| Near-achievement POCs | POC x Group x Month | Remaining group/SKU gaps | `Year Month`, `M1 No` or M2 team scope | MV1, detail table oracle | partial; gap formula needs validation |
+| KPI-vs-scan reconciliation | Employee x Month | Total Actual Value, Scan Side Achieved POC Count, KPI-vs-Scan Difference | `Year Month`, Employee Code, KPI725 | MV3, KPI725 table, summary table | blocked until MV3 validated |
+
+## Asset Gap Analysis
+
+| Gap | Impact | Resolution |
+|---|---|---|
+| MV1-MV3 are designed but not live-validated in this artifact | Agent cannot treat them as certified semantic assets yet | Validate source schemas, run MV queries, compare against direct SQL |
+| Distribution has no declared input volumes | File-based evidence is unavailable to the scenario | Add volume paths only if onboarding finds files or notebook exports needed |
+| Org/user scope is not a security layer | Team questions can be simulated but not access-controlled | Keep as scenario scope in v0.4; defer enforcement to v0.5 |
+| MV4-MV5 are not certification targets | Fraud, BEES/KBD coverage, and profiling questions are not ready | Keep those requirements P1/P2 until source outputs stabilize |
 
 ## Metric View Certification Targets
 

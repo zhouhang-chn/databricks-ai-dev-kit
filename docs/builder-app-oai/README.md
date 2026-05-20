@@ -17,7 +17,7 @@ progress tracking.
 | `v0.1-agents-sdk-integration/` | Historical migration track for replacing the Claude runtime with the OpenAI Agents SDK. |
 | `v0.2-business-analysis/` | Analyst pilot track for project settings, analysis notes, and read-only analysis runs. |
 | `v0.3-visual-storytelling/` | Visual narrative track for chart evidence, story conclusions, and shareable analysis output. |
-| `v0.3.5-metric-view-context-engineering/` | Semantic-layer track for deriving, validating, and registering Databricks Metric Views from project context. |
+| `v0.3.5-metric-view-context-engineering/` | Scenario-onboarding and semantic-layer track for deriving analysis requirements, gap-analyzing Databricks assets, and validating Metric Views. |
 | `v0.4-golden-analysis-cases/` | Golden-case track for canonical question paths that consume the validated Metric View layer. |
 
 ## Versioned Progress Tracks

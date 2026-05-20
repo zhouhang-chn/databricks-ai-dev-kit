@@ -59,20 +59,31 @@
 
 ---
 
-## v0.3.5 — Metric View Context Engineering
+## v0.3.5 — Scenario Onboarding And Metric View Context Engineering
 
-**Theme:** Build the Databricks Metric View semantic layer that turns messy
-business context into reliable, governed analysis context.
+**Theme:** Onboard an analysis scenario into `project_setting.yaml`, derive
+analysis requirements from business context and Databricks resources, then build
+the Metric View semantic layer needed for reliable analysis.
 
 **Why now:** v0.3 makes answers easier to understand, but visualization does
 not solve metric drift. v0.4 golden cases should not encode raw-table SQL as
-their primary semantic truth. The app needs an intermediate step that converts
-user non-structured input, project notes, user code, Unity Catalog metadata,
-and data profiling into validated Metric Views.
+their primary semantic truth. The app needs an intermediate step that turns
+unstructured scenario input and Databricks resource hints into explicit
+analysis requirements, compares those requirements with existing data and
+metadata, and creates validated Metric Views where the semantic layer is
+missing.
 
 **Scope:**
+- Cover the scenario onboarding preparation loop before query-focused analysis:
+  define or refine `project_setting.yaml`, derive analysis requirements, inspect
+  available Databricks resources, and decide whether the scenario is ready.
 - Treat Metric Views as the preferred semantic layer for KPIs, aggregate
   measures, dimensions, grain, synonyms, and formatting.
+- Compare analysis requirements with existing Metric Views, source tables,
+  volumes, workspace code, Unity Catalog metadata, and data profiling.
+- Produce a gap analysis that identifies missing Metric Views, missing
+  dimensions/measures, missing tables, missing volumes, stale metadata, and
+  validation blockers.
 - Discover candidate metrics from business background, analysis notes, user
   notebooks/SQL, UC schemas/comments, table stats, sample values, and analyst
   feedback.
@@ -83,6 +94,8 @@ and data profiling into validated Metric Views.
   tolerances.
 - Register validated Metric Views in `databricks_resources.input_metric_views`
   and `settings.semantics.metric_views`.
+- Add a reusable `databricks-scenario-onboarding` skill for Codex/Claude Code
+  preparation before query-focused Databricks analysis.
 - Make KPI and aggregate analysis prefer Metric Views, with explicit fallback
   when the semantic layer is missing, stale, or does not cover the requested
   grain.
