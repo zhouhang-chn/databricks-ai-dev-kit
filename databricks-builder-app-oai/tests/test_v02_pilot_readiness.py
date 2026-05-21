@@ -35,7 +35,7 @@ databricks_resources:
     encoding='utf-8',
   )
   events_payload = [
-    {'type': 'tool_use', 'tool_name': 'get_table_stats_and_schema', 'trace_id': 'tr-1'},
+    {'type': 'tool_use', 'tool_name': 'get_table_schema', 'trace_id': 'tr-1'},
     {'type': 'tool_use', 'tool_name': 'execute_sql'},
   ]
   tool_manifest_payload = [
