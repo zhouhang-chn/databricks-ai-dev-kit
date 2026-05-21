@@ -82,7 +82,11 @@ WORKDIR /app
 
 COPY --from=builder /wheels /wheels
 RUN python -m pip install --no-cache-dir --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple \
-  && pip install --no-cache-dir --no-index --find-links=/wheels databricks-builder-app-oai \
+  && pip install --no-cache-dir --no-index --find-links=/wheels \
+    databricks-tools-core \
+    databricks-mcp-server \
+    databricks-builder-app-oai \
+  && python -c "import databricks_tools_core, databricks_mcp_server" \
   && rm -rf /wheels
 
 COPY databricks-skills ./databricks-skills
