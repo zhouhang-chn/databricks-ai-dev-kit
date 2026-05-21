@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -519,11 +520,83 @@ def _strip_frontmatter(content: str) -> str:
   return content[end_idx + 3 :].strip()
 
 
+def _project_has_metric_views(project_context: dict[str, Any] | None) -> bool:
+  """Whether the project has any configured Metric Views (stable per project)."""
+  if not isinstance(project_context, dict):
+    return False
+  settings = project_context.get('settings') or {}
+  if not isinstance(settings, dict):
+    return False
+  semantics = settings.get('semantics') or {}
+  if not isinstance(semantics, dict):
+    return False
+  if isinstance(semantics.get('metric_views'), list) and semantics.get('metric_views'):
+    return True
+  mvc = semantics.get('metric_view_context')
+  if isinstance(mvc, dict):
+    nested = mvc.get('metric_views')
+    if isinstance(nested, list) and nested:
+      return True
+  return False
+
+
+# Per-skill optional sections, keyed by the `## ` heading prefix, paired with a
+# predicate over project metadata. A section is dropped only when its predicate
+# returns False (high-confidence "not applicable for this project"); sections
+# without an entry are always kept.
+#
+# Selection uses only stable, per-conversation project metadata — never the
+# current user message — so the rendered guidance stays byte-stable across a
+# conversation's turns and does not break the static-prompt cache (P0).
+_OPTIONAL_SKILL_SECTIONS: dict[str, list[tuple[str, Callable[[dict[str, Any] | None], bool]]]] = {
+  'databricks-analysis': [
+    # The Metric Views section tells the agent to "query Metric Views first";
+    # for a project with no Metric Views that guidance is actively misleading.
+    ('Metric Views', _project_has_metric_views),
+  ],
+}
+
+
+def _filter_optional_skill_sections(
+  content: str,
+  skill_name: str,
+  project_context: dict[str, Any] | None,
+) -> str:
+  """Drop optional `## ` sections that don't apply to this project.
+
+  Splits on level-2 headings, keeps the preamble and every section without a
+  rule, and drops a section only when its rule's predicate returns False.
+  Returns the content unchanged when the skill has no rules or no project
+  context is available.
+  """
+  rules = _OPTIONAL_SKILL_SECTIONS.get(skill_name)
+  if not rules or project_context is None:
+    return content
+
+  blocks: list[list[str]] = [[]]
+  for line in content.split('\n'):
+    if line.startswith('## '):
+      blocks.append([line])
+    else:
+      blocks[-1].append(line)
+
+  kept_lines: list[str] = list(blocks[0])  # preamble before the first heading
+  for block in blocks[1:]:
+    heading = block[0][3:].strip()
+    drop = any(
+      heading.startswith(prefix) and not predicate(project_context) for prefix, predicate in rules
+    )
+    if not drop:
+      kept_lines.extend(block)
+  return '\n'.join(kept_lines).strip()
+
+
 def render_project_skill_guidance(
   project_dir: Path,
   enabled_skills: list[str] | None = None,
   *,
   max_chars: int = 40_000,
+  project_context: dict[str, Any] | None = None,
 ) -> str:
   """Render selected project skill Markdown into bounded agent instructions."""
   project_skills_dir = get_project_skills_dir(project_dir)
@@ -551,6 +624,10 @@ def render_project_skill_guidance(
       logger.warning(f'Failed to read skill guidance {skill_md}: {e}')
       continue
 
+    if not content:
+      continue
+
+    content = _filter_optional_skill_sections(content, skill_name, project_context)
     if not content:
       continue
 

@@ -258,6 +258,7 @@ class OpenAIAgentRuntime:
       skill_guidance = render_project_skill_guidance(
         project_dir,
         enabled_skills=enabled_skills,
+        project_context=request.project_context,
       )
       project_operating_guide = load_project_operating_guide(project_dir)
       logger.info(
