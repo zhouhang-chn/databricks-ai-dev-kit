@@ -140,6 +140,39 @@ To use a different config file:
 databricks-builder-app-oai/scripts/docker/deploy.sh --config /path/to/docker.env --build
 ```
 
+### All-In-One Server Script
+
+Use [`deploy-aio.sh`](../../databricks-builder-app-oai/scripts/docker/deploy-aio.sh) when you want to copy one file to a server and deploy without the repository, `docker-compose.yml`, or `docker.env` templates.
+
+On your workstation:
+
+```bash
+scp databricks-builder-app-oai/scripts/docker/deploy-aio.sh user@server:/opt/builder-app-oai/deploy-aio.sh
+```
+
+On the server, edit the configuration block at the top of the copied script:
+
+```bash
+chmod +x /opt/builder-app-oai/deploy-aio.sh
+$EDITOR /opt/builder-app-oai/deploy-aio.sh
+/opt/builder-app-oai/deploy-aio.sh
+```
+
+The script embeds the Compose stack and PostgreSQL init script. It writes generated runtime files under `~/builder-app-oai` by default, pulls the configured images, and starts PostgreSQL, backend, and frontend. To use another runtime directory:
+
+```bash
+/opt/builder-app-oai/deploy-aio.sh --dir /data/builder-app-oai
+```
+
+Useful operations:
+
+```bash
+/opt/builder-app-oai/deploy-aio.sh ps
+/opt/builder-app-oai/deploy-aio.sh logs
+/opt/builder-app-oai/deploy-aio.sh restart
+/opt/builder-app-oai/deploy-aio.sh down
+```
+
 ## Ports
 
 Defaults:
