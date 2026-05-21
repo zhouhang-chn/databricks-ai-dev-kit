@@ -107,11 +107,19 @@ Build and push both app images:
 databricks-builder-app-oai/scripts/docker/build.sh
 ```
 
+When `IMAGE_VERSION` is a versioned tag, the build script also tags and pushes the same image as `latest`. For example, `IMAGE_VERSION=20260521002` pushes both `:20260521002` and `:latest`.
+
 Build and push only one image:
 
 ```bash
 databricks-builder-app-oai/scripts/docker/build.sh --backend-only
 databricks-builder-app-oai/scripts/docker/build.sh --frontend-only
+```
+
+Use `--no-latest` if you need to publish only the versioned tag:
+
+```bash
+IMAGE_VERSION=20260521002 databricks-builder-app-oai/scripts/docker/build.sh --backend-only --no-latest
 ```
 
 The build script uses `docker buildx build --push -t ...`. Make sure Docker is logged in to the configured registry before building:

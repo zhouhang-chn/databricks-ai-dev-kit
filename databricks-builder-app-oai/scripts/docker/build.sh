@@ -11,6 +11,7 @@ PULL=false
 SERVICES=(backend frontend)
 USE_CONFIG=false
 PLATFORM_OVERRIDE=""
+PUSH_LATEST=true
 
 usage() {
   cat <<'EOF'
@@ -25,6 +26,7 @@ Options:
   --no-cache           Build without Docker layer cache
   --pull               Always pull newer base images
   --platform PLATFORM  Target platform (default: linux/amd64)
+  --no-latest          Do not also tag and push the image as latest
   -h, --help           Show this help
 EOF
 }
@@ -67,6 +69,10 @@ while [[ $# -gt 0 ]]; do
       require_value "$1" "${2:-}"
       PLATFORM_OVERRIDE="$2"
       shift 2
+      ;;
+    --no-latest)
+      PUSH_LATEST=false
+      shift
       ;;
     -h|--help)
       usage
@@ -118,11 +124,19 @@ build_service() {
   local image_name="$2"
   local dockerfile="$3"
   local tag="${IMAGE_REGISTRY_PREFIX}${image_name}:${IMAGE_VERSION}"
+  local latest_tag="${IMAGE_REGISTRY_PREFIX}${image_name}:latest"
+  local tag_args=(-t "$tag")
 
-  echo "Building and pushing $service image: $tag ($IMAGE_PLATFORM)"
+  if [[ "$PUSH_LATEST" == true && "$IMAGE_VERSION" != "latest" ]]; then
+    tag_args+=(-t "$latest_tag")
+    echo "Building and pushing $service image: $tag and $latest_tag ($IMAGE_PLATFORM)"
+  else
+    echo "Building and pushing $service image: $tag ($IMAGE_PLATFORM)"
+  fi
+
   docker buildx build \
     "${BUILD_ARGS[@]}" \
-    -t "$tag" \
+    "${tag_args[@]}" \
     -f "$dockerfile" \
     "$REPO_ROOT"
 }
