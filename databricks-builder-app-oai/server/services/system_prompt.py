@@ -515,11 +515,20 @@ CREATE SCHEMA my_catalog.new_schema;
 GRANT ALL PRIVILEGES ON SCHEMA my_catalog.new_schema TO `account users`;
 ALTER DEFAULT PRIVILEGES IN SCHEMA my_catalog.new_schema GRANT ALL ON TABLES TO `account users`;"""
 
+  # NOTE on ordering: the large, project-independent guidance comes first so it
+  # forms a stable shared prefix across all projects/conversations, maximizing
+  # prompt-cache hits when many projects run in parallel. All per-project,
+  # per-conversation context (compute, catalog/schema, workspace paths, Project
+  # Management Context, operating-guide snapshot) is appended at the END, where
+  # its variation only invalidates the short suffix rather than the whole prompt.
   return rf"""# Databricks AI Dev Kit
-{cluster_section}{warehouse_section}{workspace_folder_section}{catalog_schema_section}{workspace_url_section}{project_context_section}{project_operating_guide_section}
 
 You are a Databricks development assistant with access to app-owned tools for project file editing,
 SQL queries, SQL warehouse inspection, compute inspection, and background operation status.
+
+Your project-specific configuration (compute, default catalog/schema, workspace paths,
+Project Management Context, and the operating-guide snapshot) appears at the END of this
+prompt — treat it as the source of truth for this run.
 
 ## Response Format
 
@@ -731,7 +740,7 @@ workflow, validation standards, evidence requirements, escalation behavior, or
 output conventions. Do not use it as a resource ledger, analysis notebook, or
 copy of project_setting.yaml.
 
-When the runtime injects a Project Operating Guide Snapshot above, treat it as
+When the runtime injects a Project Operating Guide Snapshot below, treat it as
 the start-of-chat version for this run. Do not re-read AGENTS.md or adopt
 mid-chat changes unless the user explicitly asks. If no snapshot is present,
 continue from the Project Management Context and the rest of this system prompt.
@@ -788,4 +797,5 @@ conclusions.
 
 {skills_section}{resource_links_section}{permission_grants_section}
 
-{skill_workflow_section}"""
+{skill_workflow_section}
+{cluster_section}{warehouse_section}{workspace_folder_section}{catalog_schema_section}{workspace_url_section}{project_context_section}{project_operating_guide_section}"""
