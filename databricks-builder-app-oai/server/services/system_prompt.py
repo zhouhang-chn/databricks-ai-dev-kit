@@ -134,7 +134,9 @@ def _render_project_context(project_context: dict[str, Any] | None) -> str:
 
   metric_views = _format_project_list(semantics.get('metric_views'))
   metric_view_context = _format_metric_view_context(semantics.get('metric_view_context'))
-  preferred_tables = _format_project_list(semantics.get('preferred_tables'))
+  input_tables = _format_project_list(
+    semantics.get('input_tables') or semantics.get('preferred_tables')
+  )
   deprecated_tables = _format_project_list(semantics.get('deprecated_tables'))
   sample_queries = _format_project_list(semantics.get('sample_queries'), limit=5)
   caveats = _format_project_list(semantics.get('known_caveats'), limit=5)
@@ -177,20 +179,24 @@ context for this run unless the user explicitly says otherwise.
     section += f'\n### Conversation Overrides\n{chr(10).join(override_rows)}\n'
   if metric_views:
     section += (
-      f'\n### Preferred Metric Views\n{metric_views}\n'
-      'Use these as the governed semantic layer for KPI, aggregate, ranking, '
-      'trend, and comparison questions. Use preferred tables for validation, '
-      'row-level drill-down, or questions the Metric Views do not cover.\n'
+      f'\n### Metric Views\n{metric_views}\n'
+      'Use these first as the governed semantic layer for KPI, aggregate, '
+      'ranking, trend, and comparison questions. Query Metric Views with '
+      '`MEASURE(...)` before using raw input tables whenever a Metric View '
+      'covers the requested grain and filters. Use input tables only for '
+      'validation, row-level drill-down, source-data debugging, or questions '
+      'the Metric Views do not cover.\n'
     )
   if metric_view_context:
     section += (
       f'\n### Metric View Context\n{metric_view_context}\n'
-      'Treat `certified` and `validated` Metric Views as the preferred path. '
-      'For `candidate`, `stale`, or `missing` Metric Views, state the status '
-      'and use a visible validation or fallback path before relying on raw tables.\n'
+      'Treat `certified` and `validated` Metric Views as the default path. '
+      'For `candidate`, `stale`, or `missing` Metric Views, inspect the Metric '
+      'View path first when it appears relevant; state the status and use a '
+      'visible validation or fallback path before relying on raw input tables.\n'
     )
-  if preferred_tables:
-    section += f'\n### Preferred Tables\n{preferred_tables}\n'
+  if input_tables:
+    section += f'\n### Input Tables\n{input_tables}\n'
   if deprecated_tables:
     section += (
       '\n### Deprecated Or Blocked Tables\n'
@@ -596,9 +602,13 @@ plan, use `op="revise"` instead.
      segment, cohort, or comparison group. Do not use calculated measures such
      as counts, percentages, rates, averages, baselines, deltas, or scores as
      the x-axis unless the chart is explicitly a scatter/correlation chart.
+     Treat duration columns such as `avg_*_time`, `*_time_mins`,
+     `*_duration`, `*_travel_time*`, and `active_days` as measures, not as
+     categorical or temporal dimensions.
    - Put measured quantities in `y_fields`; for mixed units, choose a combo-
-     friendly spec such as bars for volume/count fields and lines for rates or
-     percentages.
+     friendly spec such as bars for volume/count fields and lines for rates,
+     percentages, or duration/time fields. Prefer separate charts when counts
+     and durations answer different analytical questions.
 
    **Self-check before this call:** Have you already submitted a
    conclusion for this run? If yes, **STOP** — do not call anything.
@@ -645,7 +655,7 @@ advancing to `op="start"` (or stopping, respectively).
 
 Project payload comes from `project_setting.yaml` and the injected Project
 Management Context. Treat those as the source of truth for business background,
-analysis notes, Databricks resources, caveats, preferred tables, time windows,
+analysis notes, Databricks resources, caveats, input tables, time windows,
 group definitions, and current resource defaults.
 
 AGENTS.md is different: it is a project-local operating guide for reusable
@@ -678,30 +688,26 @@ conclusions.
 - Do not run Databricks tools until a visible plan exists and the current step
   has been started
 - For natural-language analysis over project tables, inspect schema first with
-  `get_table_stats_and_schema` or an explicit DESCRIBE/SHOW COLUMNS query
-  before the first analytical `execute_sql`, unless the same conversation
-  already contains a successful schema inspection for that table. Never guess
-  column names from business terms
-- When calling `get_table_stats_and_schema`, always set `table_stat_level`
-  explicitly and use the least expensive level that answers the current question
-- Use `NONE` by default for schema discovery / column validation; use `SIMPLE`
-  only when row counts or basic column-health signals are needed
-- Use `DETAILED` only when richer profiling such as distributions, percentiles,
-  histograms, or value frequencies is required
-- Escalate progressively: start with `table_stat_level="NONE"` unless there is
-  an explicit reason to collect actual statistics, then call again with `SIMPLE`
-  or `DETAILED` only if the next decision needs them
-- For KPI, aggregate, ranking, trend, and comparison analysis, prefer
-  configured Metric Views over raw tables when a Metric View covers the
-  requested grain and filters
+  `get_table_schema` or an explicit DESCRIBE/SHOW COLUMNS query before the
+  first analytical `execute_sql`, unless the same conversation already contains
+  a successful schema inspection for that table. Never guess column names from
+  business terms
+- Use `get_table_schema` for column discovery and type validation. It is the
+  schema-only path and does not compute row counts or column statistics
+- Use `get_table_stats` only after schema discovery, and pass an explicit
+  non-empty `columns` list containing only the columns needed for the current
+  decision. Do not profile every column unless the user asks for a full profile
+- For KPI, aggregate, ranking, trend, and comparison analysis, first inspect and
+  query configured Metric Views when a Metric View covers the requested grain
+  and filters. Do not skip directly to raw input tables for these questions
 - When querying Metric Views, select explicit dimensions and measures with
   ``MEASURE(`Measure Name`)``; do not use `SELECT *` against Metric Views
-- Use raw tables for validation, row-level drill-down, source-data debugging,
+- Use input tables for validation, row-level drill-down, source-data debugging,
   or questions the registered Metric Views do not cover
 - If the expected Metric View is unavailable, stale, candidate-only, or lacks
   the requested grain, disclose that status and the fallback reason before
   using a direct base-table SQL path
-- Use configured preferred tables, metric views, glossary, known caveats, and
+- Use configured input tables, metric views, glossary, known caveats, and
   sample queries as hints, not as proof that a guessed column exists
 - Long-running Databricks operations may return
   `{{status: "async", operation_id: ...}}`; in that case, poll with

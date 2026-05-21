@@ -27,14 +27,20 @@ Use this skill when:
 
 ### Inspect Source Table Schema
 
-Before creating a metric view, call `get_table_stats_and_schema` to understand available columns for dimensions and measures:
+Before creating a metric view, call `get_table_schema` to understand available columns for dimensions and measures. Use `get_table_stats` only for selected columns that need profiling:
 
 ```
-get_table_stats_and_schema(
+get_table_schema(
     catalog="catalog",
     schema="schema",
-    table_names=["orders"],
-    table_stat_level="SIMPLE"  # Use "DETAILED" for cardinality, min/max, histograms
+    table_names=["orders"]
+)
+
+get_table_stats(
+    catalog="catalog",
+    schema="schema",
+    table_name="orders",
+    columns=["order_date", "status", "amount"]
 )
 ```
 

@@ -13,7 +13,7 @@ Create Databricks AI/BI dashboards (formerly Lakeview dashboards). **Follow thes
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  STEP 1: Get table schemas via get_table_stats_and_schema(..., "NONE")      │
+│  STEP 1: Get table schemas via get_table_schema(...)                        │
 ├─────────────────────────────────────────────────────────────────────┤
 │  STEP 2: Write SQL queries for each dataset                        │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -34,7 +34,8 @@ Create Databricks AI/BI dashboards (formerly Lakeview dashboards). **Follow thes
 
 | Tool | Description |
 |------|-------------|
-| `get_table_stats_and_schema` | **STEP 1**: Get table schemas for designing queries; use `table_stat_level="NONE"` unless chart design explicitly needs cardinality / profiling |
+| `get_table_schema` | **STEP 1**: Get table schemas for designing queries. |
+| `get_table_stats` | Optional selected-column profiling. Requires explicit `columns`; use only when chart design needs cardinality / profiling. |
 | `execute_sql` | **STEP 3**: Test SQL queries - MANDATORY before deployment! |
 | `manage_warehouse` (action="get_best") | Get available warehouse ID |
 | `manage_dashboard` | **STEP 5**: Dashboard lifecycle management (see actions below) |
@@ -198,7 +199,7 @@ y=12: Table (w=12, h=6) - Detailed data
 | High cardinality | **Table only** | customer_id, order_id, SKU |
 
 **Before creating any chart with color/grouping:**
-1. Check column cardinality (use `get_table_stats_and_schema(..., table_stat_level="SIMPLE")` when distinct-value stats are actually needed)
+1. Check column cardinality (use `get_table_stats(..., columns=[...])` when distinct-value stats are actually needed)
 2. If >10 distinct values, aggregate to higher level OR use TOP-N + "Other" bucket
 3. For high-cardinality dimensions, use a table widget instead of a chart
 

@@ -45,7 +45,7 @@ Analysis Agent. It is not the project payload.
 
 - Treat project_setting.yaml and the injected Project Management Context as the
   source of truth for business background, analysis notes, Databricks resources,
-  caveats, preferred tables, time windows, and group definitions.
+  caveats, input tables, time windows, and group definitions.
 - Use this file only for reusable operating rules: workflow, validation,
   evidence, persistence, escalation, and output conventions.
 - Do not copy table IDs, resource inventories, one-off findings, SQL results, or
@@ -59,9 +59,9 @@ Analysis Agent. It is not the project payload.
   unless the same conversation already has a successful schema inspection for
   the table. Verify column names instead of inferring them from business
   language.
-- When using `get_table_stats_and_schema`, always set `table_stat_level`
-  explicitly. Prefer `NONE` for schema discovery and column validation; use
-  `SIMPLE` or `DETAILED` only when the current question requires actual stats.
+- Use `get_table_schema` for column discovery and type validation. Use
+  `get_table_stats` only after schema discovery, with an explicit non-empty
+  `columns` list limited to the columns needed for the current decision.
 - Prefer project-configured Databricks resources. If a warehouse is not
   configured and a cluster is configured, use the cluster for SQL execution.
 - Keep analysis-only chats read-oriented. Persist changes only when the user

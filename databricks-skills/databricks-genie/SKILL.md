@@ -31,7 +31,7 @@ Use this skill when:
 |------|---------|
 | `manage_genie` | Create, get, list, delete, export, and import Genie Spaces |
 | `ask_genie` | Ask natural language questions to a Genie Space |
-| `get_table_stats_and_schema` | Inspect table schemas before creating a space |
+| `get_table_schema` | Inspect table schemas before creating a space |
 | `execute_sql` | Test SQL queries directly |
 
 ### manage_genie - Space Management
@@ -108,11 +108,10 @@ result = ask_genie(
 Before creating a Genie Space, understand your data:
 
 ```
-# MCP Tool: get_table_stats_and_schema
-get_table_stats_and_schema(
+# MCP Tool: get_table_schema
+get_table_schema(
     catalog="my_catalog",
-    schema="sales",
-    table_stat_level="SIMPLE"
+    schema="sales"
 )
 ```
 

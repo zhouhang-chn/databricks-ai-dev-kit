@@ -13,15 +13,13 @@ A Genie Space connects to Unity Catalog tables and translates natural language q
 **Before creating a Genie Space, you MUST inspect the table schemas** to understand what data is available:
 
 ```python
-get_table_stats_and_schema(
+get_table_schema(
     catalog="my_catalog",
-    schema="sales",
-    table_stat_level="SIMPLE"
+    schema="sales"
 )
 ```
 
 This returns:
-- Table names and row counts
 - Column names and data types
 - Sample values and cardinality
 - Null counts and statistics
@@ -339,10 +337,9 @@ To push a serialized config to an already-existing space (rather than creating a
 
 3. **Inspect the tables**:
    ```python
-   get_table_stats_and_schema(
+   get_table_schema(
        catalog="catalog",
        schema="schema",
-       table_stat_level="NONE",
    )
    ```
 

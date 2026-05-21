@@ -76,15 +76,22 @@ manage_pipeline_run(
 
 ### Step 4: Validate Results
 
-**On Success** - Use `get_table_stats_and_schema` to verify tables (NOT manual SQL COUNT queries):
+**On Success** - Use `get_table_schema` to verify table schemas, then `get_table_stats` for selected columns when profiling is needed:
 ```
-# MCP Tool: get_table_stats_and_schema
-get_table_stats_and_schema(
+# MCP Tool: get_table_schema
+get_table_schema(
     catalog="my_catalog",
     schema="my_schema",
     table_names=["bronze_orders", "silver_orders", "gold_daily_summary"]
 )
-# Returns schema, row counts, and column stats for all tables in one call
+
+# MCP Tool: get_table_stats
+get_table_stats(
+    catalog="my_catalog",
+    schema="my_schema",
+    table_name="gold_daily_summary",
+    columns=["order_date", "daily_revenue"]
+)
 ```
 
 **On Failure** - Check `run_result["message"]` for suggested next steps, then get detailed errors:
@@ -157,7 +164,8 @@ manage_pipeline_run(
 | Tool | Description |
 |------|-------------|
 | `manage_workspace_files(action="upload")` | Upload files/folders to workspace |
-| `get_table_stats_and_schema` | **Use this to validate tables** - returns schema, row counts, and stats in one call |
-| `execute_sql` | Run ad-hoc SQL to inspect actual data content (not for row counts) |
+| `get_table_schema` | **Use this to validate table schemas** before querying outputs |
+| `get_table_stats` | Profile selected columns only when row counts, nulls, distincts, or ranges are needed |
+| `execute_sql` | Run targeted SQL to inspect actual data content or custom aggregate checks |
 
 ---

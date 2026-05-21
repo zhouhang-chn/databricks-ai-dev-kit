@@ -3,25 +3,25 @@ name: databricks-analysis
 description: >-
   Read-only Databricks data analysis and exploration. Use for data discovery
   (catalogs, schemas, tables), efficient SQL on SQL warehouses, system-table
-  introspection (lineage, audit, billing, query history), metric-view
+  introspection (lineage, audit, billing, query history), metric-view-first
   consumption, federated and volume reads, statistical profiling, and
   well-cited Markdown reporting. Never writes, creates, or alters resources.
 ---
 
 # Databricks Data Analysis & Exploration
 
-Read-only data analysis on Databricks: **discover → profile → query → enrich → report**.
+Read-only data analysis on Databricks: **plan → semantic layer → profile → query → report**.
 
-This skill is intended to be the only skill enabled for an analysis agent. It assumes a small read-only tool surface: `execute_sql`, `execute_sql_multi`, `get_table_stats_and_schema`, `list_compute`, and identity/warehouse discovery helpers when available. It does **not** assume access to skill-gated tools such as `manage_uc_objects`, `manage_dashboard`, `manage_pipeline`, `manage_jobs`, `execute_code`, or write-capable project-file tools. Do data discovery via SQL (`SHOW`, `DESCRIBE`, `system.information_schema.*`).
+This skill is intended to be the only skill enabled for an analysis agent. It assumes a small read-only tool surface: `execute_sql`, `execute_sql_multi`, `get_table_schema`, `get_table_stats`, `list_compute`, and identity/warehouse discovery helpers when available. It does **not** assume access to skill-gated tools such as `manage_uc_objects`, `manage_dashboard`, `manage_pipeline`, `manage_jobs`, `execute_code`, or write-capable project-file tools. Do data discovery via SQL (`SHOW`, `DESCRIBE`, `system.information_schema.*`).
 
 ## Workflow
 
-1. **Plan** — state the question, the candidate tables/columns, and the time window before running SQL.
-2. **Discover** — locate data via `SHOW CATALOGS / SCHEMAS / TABLES`, `DESCRIBE EXTENDED`, or `get_table_stats_and_schema(..., table_stat_level="NONE")`. Verify column names; never guess them from business language.
-3. **Profile** — row count, distincts, nulls, ranges, top values. Use `APPROX_COUNT_DISTINCT` / `APPROX_PERCENTILE` on large tables.
-4. **Query** — write efficient SQL with explicit columns, filtered early, with `LIMIT` during exploration.
-5. **Enrich** *(optional)* — metric views, joins, window functions.
-6. **Report** — synthesize into a Markdown answer with sources, time window, caveats, and assumptions.
+1. **Plan** — state the question, time window, candidate Metric Views, and candidate input tables before running SQL.
+2. **Semantic layer first** — for KPI, aggregate, ranking, trend, comparison, and reusable business-metric questions, inspect configured Metric Views before raw input tables. Verify available dimensions/measures with `DESCRIBE EXTENDED` or `get_table_schema`.
+3. **Profile only what is needed** — profile input tables only when the Metric View path is missing, insufficient, or needs validation/drill-down. Use row count, distincts, nulls, ranges, and top values; use `APPROX_COUNT_DISTINCT` / `APPROX_PERCENTILE` on large tables.
+4. **Query** — query Metric Views with explicit dimensions and `MEASURE(...)` before using raw input tables when the Metric View covers the requested grain and filters. For raw-table exploration, write efficient SQL with explicit columns, filtered early, with `LIMIT` during exploration.
+5. **Validate or drill down** *(optional)* — use input tables for validation, row-level details, source-data debugging, or unsupported grains. State the fallback reason visibly before relying on raw-table SQL for a KPI-style question.
+6. **Report** — synthesize into a Markdown answer with sources, time window, caveats, assumptions, and whether the answer used a Metric View or an input-table fallback.
 
 ## Read-Only Constraints
 
@@ -43,21 +43,24 @@ If a write is essential to answer the question, surface that in the conclusion a
 |------|---------|
 | `execute_sql` | Primary tool. Run a single SQL statement on a SQL warehouse. |
 | `execute_sql_multi` | Multiple statements in one call (e.g. inspect + query). |
-| `get_table_stats_and_schema` | Schema inspection plus optional stats. Always set `table_stat_level` explicitly: default to `NONE`, use `SIMPLE` for row counts / basic health, and use `DETAILED` only for richer profiling such as cardinality, min/max, histograms, or value frequencies. |
+| `get_table_schema` | Schema-only inspection for configured tables and Metric Views. Use this first for column discovery and type validation. |
+| `get_table_stats` | Selected-column profiling for one table. Requires an explicit non-empty `columns` list; use only after schema discovery and only for columns needed by the current decision. |
 | `list_compute` | Discover available SQL warehouses and clusters; pick the running one. |
 | `get_current_user` | Confirm the active workspace identity when a result looks unexpected. |
 
-**Compute selection.** Prefer a configured SQL warehouse when one exists. In the Builder App runtime, `execute_sql` and `get_table_stats_and_schema` can fall back to the configured cluster when no warehouse is configured. Never start, resize, or create compute — ask the user instead.
+**Compute selection.** Prefer a configured SQL warehouse when one exists. In the Builder App runtime, `execute_sql`, `get_table_schema`, and `get_table_stats` can fall back to the configured cluster when no warehouse is configured. Never start, resize, or create compute — ask the user instead.
+
+**Metric View tooling.** This read-only skill does not require `manage_metric_views`. Query Metric Views through `execute_sql` using `MEASURE(...)`. If a `manage_metric_views` tool is exposed by a broader runtime, use only read-oriented `describe` or `query` actions; do not create, alter, drop, grant, or otherwise mutate Metric Views.
 
 ### Progressive profiling rule
 
-Use the least expensive inspection level that answers the current question:
+Separate schema discovery from statistics:
 
-- `NONE` — schema discovery and column-name / type validation. This is the default when there is no explicit need for actual statistics.
-- `SIMPLE` — only when the current decision needs row counts or lightweight column-health signals.
-- `DETAILED` — only when the task explicitly needs richer profiling such as distributions, percentiles, histograms, or value frequencies.
+- Start with `get_table_schema` for schema discovery and column-name / type validation.
+- Call `get_table_stats` only when the next decision needs actual statistics such as row counts, distincts, nulls, ranges, samples, or value frequencies.
+- Always pass a narrow `columns` list to `get_table_stats`. Do not request every column unless the user explicitly asks for a full profile.
 
-Start with `NONE` and escalate only when the next decision genuinely requires more statistics.
+If the task needs only one or two simple aggregate checks, direct SQL with `COUNT`, `APPROX_COUNT_DISTINCT`, `APPROX_PERCENTILE`, or `APPROX_TOP_K` over explicit columns is also acceptable.
 
 ## Discovery Without `manage_uc_objects`
 
@@ -88,11 +91,14 @@ WHERE column_name ILIKE '%email%';
 
 `information_schema` is **per-catalog** — query it inside the catalog you care about. For workspace-wide metadata, the system catalog (`system.access.*`, `system.query.history`) is usually a better source.
 
-For schema-only discovery, use `get_table_stats_and_schema(catalog, schema, table_names=[...], table_stat_level="NONE")`. For full table profiling (row count, sample, column stats), use `table_stat_level="DETAILED"` only when those richer statistics are needed.
+For schema-only discovery, use `get_table_schema(catalog, schema, table_names=[...])`. For profiling, use `get_table_stats(catalog, schema, table_name="...", columns=[...])` only for the explicit columns needed by the current decision.
+
+When project context lists both `input_metric_views` and `input_tables`, treat the Metric Views as the governed semantic layer and input tables as source/fallback assets. Do not call input tables "preferred" tables, and do not inspect them first for KPI-style questions unless no Metric View is registered or the Metric View clearly lacks the requested grain, filters, or measures.
 
 ## SQL Patterns for Analysis
 
 - **Always use fully-qualified names**: `catalog.schema.table`.
+- **Metric View first for business metrics**: for KPI, aggregate, ranking, trend, and comparison questions, start from a registered Metric View when it covers the requested grain and filters. Do not re-implement certified measures from raw columns.
 - **Filter early, aggregate late** — push `WHERE` close to the source.
 - **Avoid `SELECT *`** — explicit columns reduce I/O and prevent breakage on schema drift.
 - **`LIMIT` during exploration** (default 100–1000); remove only when small samples are insufficient.
@@ -195,9 +201,25 @@ ORDER BY total_duration_ms DESC LIMIT 50;
 
 Useful schemas to know: `system.access.*` (audit, lineage, column lineage), `system.billing.*` (usage, list_prices), `system.compute.*` (clusters, warehouses), `system.query.history`, `system.lakeflow.*` (jobs, pipelines).
 
-## Metric Views — Consume, Don't Create
+## Metric Views — Query First, Don't Create
 
 Metric views (Unity Catalog YAML metric definitions) are queried with `MEASURE()` and explicit columns — **`SELECT *` is not supported**.
+
+Use Metric Views first for:
+
+- KPI or achievement-rate questions
+- Period trends, rankings, benchmarks, and comparisons
+- Governed totals, ratios, rates, averages, and distinct-count metrics
+- Questions that map to measures/dimensions listed in project context
+
+Use input tables instead only for:
+
+- row-level drill-down
+- source-data debugging and validation
+- freshness, null-density, or reconciliation checks
+- questions whose grain, filters, or measures are not covered by a Metric View
+
+If a relevant Metric View is `candidate`, `stale`, or not yet certified, still inspect/query it when it appears to cover the question, then disclose the status and validate or fall back as needed. Do not silently skip to raw input tables.
 
 ```sql
 -- Inspect a metric view's dimensions/measures
@@ -212,7 +234,17 @@ WHERE `Order Month` >= add_months(current_date(), -12)
 GROUP BY ALL ORDER BY ALL;
 ```
 
-Dimension/measure names with spaces require backticks. Metric views are the canonical place to read business KPIs — prefer them over re-implementing definitions in raw SQL when one exists.
+Dimension/measure names with spaces require backticks. Metric Views are the canonical place to read business KPIs — use them before raw-table SQL when one exists.
+
+For a Metric View query, the pattern is:
+
+1. Select explicit dimensions.
+2. Select measures with `MEASURE(\`Measure Name\`)`.
+3. Apply filters to dimensions, not to measure aliases.
+4. Use `GROUP BY ALL` or group by every selected dimension.
+5. Order and limit after aggregation.
+
+If the Metric View query fails or does not support the requested question, report the failure/fallback reason and then use input tables.
 
 ## File and Federated Reads
 
@@ -247,9 +279,10 @@ A good analysis answer always:
 1. **Leads with the result** — one or two sentences before any table.
 2. **Uses Markdown tables** for ranked lists, distributions, period comparisons; right-align numeric columns with `---:`.
 3. **Cites sources** — fully-qualified table names and the time window analyzed.
-4. **Lists assumptions and caveats** — nulls excluded, definition of the metric, sample vs. full, time zone, refresh recency.
-5. **Flags data-quality issues** observed (high null rate, suspicious outliers, partition drift) instead of silently filtering them.
-6. **Distinguishes measured results from recommendations** — keep a "What this means" or "Suggested next steps" section if helpful.
+4. **States the metric path** — Metric View used, or why an input-table fallback was necessary.
+5. **Lists assumptions and caveats** — nulls excluded, definition of the metric, sample vs. full, time zone, refresh recency.
+6. **Flags data-quality issues** observed (high null rate, suspicious outliers, partition drift) instead of silently filtering them.
+7. **Distinguishes measured results from recommendations** — keep a "What this means" or "Suggested next steps" section if helpful.
 
 Skeleton:
 
@@ -275,6 +308,8 @@ Skeleton:
 - ❌ Self-joins to compute "previous row" → use `LAG()` / `LEAD()` + `QUALIFY`.
 - ❌ Reading `system.access.*` / `system.billing.*` / `system.query.history` without a date filter → scans years.
 - ❌ Inferring column names from business language → run `DESCRIBE` first.
+- ❌ Re-implementing a governed KPI from raw input tables before checking registered Metric Views → inspect/query the Metric View first.
+- ❌ Calling input tables "preferred" tables → they are source/fallback assets unless the project explicitly says no Metric View covers the question.
 - ❌ Running any DDL / DML / maintenance / permission statement → out of scope; refuse and escalate.
 - ❌ Calling `manage_cluster` / `manage_sql_warehouse` lifecycle actions to "speed things up" → costly, irreversible from the user's perspective; ask first.
 

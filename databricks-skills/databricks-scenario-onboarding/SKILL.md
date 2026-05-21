@@ -153,7 +153,8 @@ Use the smallest tool surface that can prove readiness.
 
 | Tool | Use in onboarding | Notes |
 |---|---|---|
-| `get_table_stats_and_schema` | Inspect configured tables and Metric Views. | Start with `table_stat_level="NONE"`; escalate only when stats are needed. |
+| `get_table_schema` | Inspect configured table and Metric View schemas. | Use first for column discovery and type validation. |
+| `get_table_stats` | Profile selected columns for one table. | Requires explicit `columns`; use only when statistics are needed for a decision. |
 | `execute_sql` / `execute_sql_multi` | Query information schema, test direct SQL oracles, validate Metric View outputs. | Keep validation SQL read-oriented unless the user explicitly authorizes writes. |
 | `manage_metric_views` | Describe, query, create, alter, drop, or grant Metric Views. | Write-capable. Create/alter/drop/grant only with explicit authorization. |
 | `manage_volume_files` | List, inspect, upload, download, or delete volume files used by the scenario. | Write/delete operations require explicit authorization. |
@@ -211,10 +212,10 @@ analyst feedback.
 
 Inspect only what is needed for the requirements matrix.
 
-- Start with `get_table_stats_and_schema(..., table_stat_level="NONE")` for
-  configured tables and Metric Views.
-- Escalate to `SIMPLE` or `DETAILED` only when row counts, cardinality, ranges,
-  nulls, or top values are needed for a decision.
+- Start with `get_table_schema(...)` for configured tables and Metric Views.
+- Use `get_table_stats(...)` only after schema discovery, with explicit selected
+  columns when row counts, cardinality, ranges, nulls, or top values are needed
+  for a decision.
 - Use Unity Catalog metadata, table comments, information schema, and workspace
   code to understand source meaning.
 - Include volumes when requirements depend on files, PDFs, images, CSVs, or

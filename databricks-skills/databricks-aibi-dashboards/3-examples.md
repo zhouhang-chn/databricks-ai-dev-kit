@@ -8,10 +8,9 @@ Production-ready templates you can adapt for your use case.
 import json
 
 # Step 1: Check table schema
-table_info = get_table_stats_and_schema(
+table_info = get_table_schema(
     catalog="samples",
     schema="nyctaxi",
-    table_stat_level="NONE",
 )
 
 # Step 2: Test queries
