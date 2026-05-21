@@ -27,6 +27,8 @@ import { EvidenceContent } from './EvidenceContent';
 
 const INLINE_EVIDENCE_LIMIT = 3;
 const NON_NARRATIVE_TOOLS = new Set([
+  'get_table_schema',
+  'get_table_stats',
   'get_table_stats_and_schema',
   'get_volume_folder_details',
   'list_compute',

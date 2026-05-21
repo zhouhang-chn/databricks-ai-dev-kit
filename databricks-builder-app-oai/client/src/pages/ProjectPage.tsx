@@ -215,9 +215,11 @@ function joinLines(values?: string[] | null): string {
 function computeReadiness(project: Project | null): Record<string, boolean> {
   const settings = project?.settings;
   const semantics = settings?.semantics || {};
+  const inputTables = semantics.input_tables || semantics.preferred_tables || [];
+  const metricViews = semantics.metric_views || [];
   return {
     purpose: Boolean(project?.description?.trim()),
-    semanticScope: Boolean((semantics.preferred_tables?.length || 0) > 0),
+    semanticScope: Boolean(inputTables.length > 0 || metricViews.length > 0),
   };
 }
 
@@ -246,26 +248,10 @@ function splitOutputSchema(value: string): { defaultCatalog: string | null; defa
   return { defaultCatalog: parts[0], defaultSchema: parts[1] };
 }
 
-function schemaFromThreePartName(value: string): string | null {
-  const parts = value.split('.').map((part) => part.trim()).filter(Boolean);
-  return parts.length === 3 ? `${parts[0]}.${parts[1]}` : null;
-}
-
-function uniqueValues(values: Array<string | null | undefined>): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const value of values) {
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    result.push(value);
-  }
-  return result;
-}
-
 function projectSettingFromProject(project: Project | null): ProjectSetting {
   const settings = project?.settings;
   const resources = settings?.resources || {};
-  const preferredTables = settings?.semantics?.preferred_tables || [];
+  const inputTables = settings?.semantics?.input_tables || settings?.semantics?.preferred_tables || [];
   const metricViews = settings?.semantics?.metric_views || [];
   const outputSchema = resources.default_catalog && resources.default_schema
     ? `${resources.default_catalog}.${resources.default_schema}`
@@ -280,11 +266,7 @@ function projectSettingFromProject(project: Project | null): ProjectSetting {
       workspace_folders: resources.workspace_folder ? [resources.workspace_folder] : [],
       workspace_files: [],
       workflows: settings?.workflows?.enabled || [],
-      input_schemas: uniqueValues([
-        ...preferredTables.map(schemaFromThreePartName),
-        ...metricViews.map(schemaFromThreePartName),
-      ]),
-      input_tables: preferredTables,
+      input_tables: inputTables,
       input_metric_views: metricViews,
       input_volume_paths: [],
       output_schema: outputSchema,
@@ -353,6 +335,10 @@ function resolveMlflowExperimentName(
   return projectResourceDefaults(project).mlflow_experiment_name || '';
 }
 
+function conversationCacheKey(projectId: string, conversationId: string): string {
+  return `${projectId}:${conversationId}`;
+}
+
 function ProjectManagementPanel({
   isOpen,
   onClose,
@@ -394,7 +380,6 @@ function ProjectManagementPanel({
   const [workspaceFolders, setWorkspaceFolders] = useState('');
   const [workspaceFiles, setWorkspaceFiles] = useState('');
   const [workflows, setWorkflows] = useState('');
-  const [inputSchemas, setInputSchemas] = useState('');
   const [inputTables, setInputTables] = useState('');
   const [inputMetricViews, setInputMetricViews] = useState('');
   const [inputVolumePaths, setInputVolumePaths] = useState('');
@@ -413,7 +398,6 @@ function ProjectManagementPanel({
     setWorkspaceFolders(joinLines(resources.workspace_folders));
     setWorkspaceFiles(joinLines(resources.workspace_files));
     setWorkflows(joinLines(resources.workflows));
-    setInputSchemas(joinLines(resources.input_schemas));
     setInputTables(joinLines(resources.input_tables));
     setInputMetricViews(joinLines(resources.input_metric_views));
     setInputVolumePaths(joinLines(resources.input_volume_paths));
@@ -455,7 +439,6 @@ function ProjectManagementPanel({
     setWorkspaceFolders(joinLines(resources.workspace_folders));
     setWorkspaceFiles(joinLines(resources.workspace_files));
     setWorkflows(joinLines(resources.workflows));
-    setInputSchemas(joinLines(resources.input_schemas));
     setInputTables(joinLines(resources.input_tables));
     setInputMetricViews(joinLines(resources.input_metric_views));
     setInputVolumePaths(joinLines(resources.input_volume_paths));
@@ -509,7 +492,6 @@ function ProjectManagementPanel({
         workspace_folders: splitLines(workspaceFolders),
         workspace_files: splitLines(workspaceFiles),
         workflows: splitLines(workflows),
-        input_schemas: splitLines(inputSchemas),
         input_tables: splitLines(inputTables),
         input_metric_views: splitLines(inputMetricViews),
         input_volume_paths: splitLines(inputVolumePaths),
@@ -529,7 +511,7 @@ function ProjectManagementPanel({
           mlflow_experiment_name: project?.settings?.resources?.mlflow_experiment_name || null,
         },
         semantics: {
-          preferred_tables: splitLines(inputTables),
+          input_tables: splitLines(inputTables),
           metric_views: splitLines(inputMetricViews),
           known_caveats: currentAnalysisNotes(),
         },
@@ -554,7 +536,6 @@ function ProjectManagementPanel({
         workspace_folders: splitLines(workspaceFolders),
         workspace_files: splitLines(workspaceFiles),
         workflows: splitLines(workflows),
-        input_schemas: splitLines(inputSchemas),
         input_tables: splitLines(inputTables),
         input_metric_views: splitLines(inputMetricViews),
         input_volume_paths: splitLines(inputVolumePaths),
@@ -687,11 +668,6 @@ function ProjectManagementPanel({
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-[var(--color-text-heading)]">Workflows</label>
                 <textarea value={workflows} onChange={(e) => setWorkflows(e.target.value)} placeholder="Workflow name" className="min-h-16 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-[var(--color-text-heading)]">Input Schemas</label>
-                <textarea value={inputSchemas} onChange={(e) => setInputSchemas(e.target.value)} placeholder="catalog.schema" className="min-h-16 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-sm" />
               </div>
 
               <div className="space-y-1.5">
@@ -965,6 +941,7 @@ export default function ProjectPage() {
   const currentConvIdRef = useRef<string | undefined>(undefined);
   const messageToolsRef = useRef<Record<string, string[]>>({});
   const conversationLoadSeqRef = useRef(0);
+  const conversationCacheRef = useRef<Record<string, Conversation>>({});
   // Per-conversation streaming data (supports concurrent streams)
   const allStreamsRef = useRef<Record<string, ActiveStream>>({});
 
@@ -1049,6 +1026,7 @@ export default function ProjectPage() {
 
   const applyConversationState = useCallback((conv: Conversation) => {
     const nextMessages = conv.messages || [];
+    conversationCacheRef.current[conversationCacheKey(conv.project_id, conv.id)] = conv;
     currentConvIdRef.current = conv.id;
     setCurrentConversation(conv);
     setMessages(nextMessages);
@@ -1179,17 +1157,23 @@ export default function ProjectPage() {
     const loadSeq = conversationLoadSeqRef.current + 1;
     conversationLoadSeqRef.current = loadSeq;
     const knownConversation = conversations.find((conv) => conv.id === urlConvId);
+    const cachedConversation = conversationCacheRef.current[conversationCacheKey(projectId, urlConvId)];
     currentConvIdRef.current = urlConvId;
-    setLoadingConversationId(urlConvId);
-    setCurrentConversation({
-      ...(knownConversation || {}),
-      id: urlConvId,
-      project_id: projectId,
-      title: knownConversation?.title || 'New Chat',
-      created_at: knownConversation?.created_at || null,
-      messages: [],
-    });
-    clearConversationCanvas();
+    if (cachedConversation) {
+      setLoadingConversationId(null);
+      applyConversationState(cachedConversation);
+    } else {
+      setLoadingConversationId(urlConvId);
+      setCurrentConversation({
+        ...(knownConversation || {}),
+        id: urlConvId,
+        project_id: projectId,
+        title: knownConversation?.title || 'New Chat',
+        created_at: knownConversation?.created_at || null,
+        messages: [],
+      });
+      clearConversationCanvas();
+    }
 
     const switchConv = async () => {
       try {
@@ -2098,22 +2082,31 @@ export default function ProjectPage() {
               {/* Middle Panel: StoryCanvas + Input */}
               <div className="flex-1 flex flex-col min-w-[400px] border-r border-[var(--color-border)]/40 overflow-hidden">
                 <div className="flex-1 overflow-y-auto no-scrollbar">
-                  <StoryCanvas
-                    stories={analysisStories}
-                    activeStoryId={activeStoryId}
-                    onSelectStory={setActiveStoryId}
-                    onSuggestedNextStep={handleSuggestedNextStep}
-                    onRetryStory={handleRetryStory}
-                    retryDisabled={isStreamingHere}
-                    emptyTitle={runRole === 'user_preview' ? 'What would a user ask?' : 'What can I help you build?'}
-                    emptyDescription={
-                      runRole === 'user_preview'
-                        ? 'Preview the published project with read-only tools and release-pinned context.'
-                        : 'Build data pipelines, generate synthetic data, create dashboards, and explore Databricks resources.'
-                    }
-                    starterPrompts={starterPrompts}
-                    onStarterPrompt={handleStarterPrompt}
-                  />
+                  {isConversationLoading ? (
+                    <div className="flex h-full items-center justify-center px-6">
+                      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Loading chat...</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <StoryCanvas
+                      stories={analysisStories}
+                      activeStoryId={activeStoryId}
+                      onSelectStory={setActiveStoryId}
+                      onSuggestedNextStep={handleSuggestedNextStep}
+                      onRetryStory={handleRetryStory}
+                      retryDisabled={isStreamingHere}
+                      emptyTitle={runRole === 'user_preview' ? 'What would a user ask?' : 'What can I help you build?'}
+                      emptyDescription={
+                        runRole === 'user_preview'
+                          ? 'Preview the published project with read-only tools and release-pinned context.'
+                          : 'Build data pipelines, generate synthetic data, create dashboards, and explore Databricks resources.'
+                      }
+                      starterPrompts={starterPrompts}
+                      onStarterPrompt={handleStarterPrompt}
+                    />
+                  )}
 
                   {isStreamingHere && analysisStories.length === 0 && (
                     <div className="mx-auto w-full max-w-4xl px-6 pb-6">

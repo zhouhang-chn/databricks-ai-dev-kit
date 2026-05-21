@@ -32,6 +32,8 @@ export interface ProjectSettings {
   };
   semantics?: {
     metric_views?: string[];
+    input_tables?: string[];
+    /** Legacy setting name; new saves use input_tables. */
     preferred_tables?: string[];
     deprecated_tables?: string[];
     glossary?: Record<string, string>;
@@ -109,7 +111,6 @@ export interface DatabricksResources {
   workspace_folders: string[];
   workspace_files: string[];
   workflows: string[];
-  input_schemas: string[];
   input_tables: string[];
   input_metric_views: string[];
   input_volume_paths: string[];

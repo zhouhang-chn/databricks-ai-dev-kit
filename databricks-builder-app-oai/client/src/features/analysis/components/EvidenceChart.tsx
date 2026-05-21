@@ -45,8 +45,10 @@ type SeriesConfig = {
   categoryLabel?: string;
   color: string;
   mark: SeriesMark;
-  role: 'value' | 'percent';
+  role: MetricRole;
 };
+
+type MetricRole = 'value' | 'percent' | 'duration';
 
 type ChartRow = {
   __rowIndex: number;
@@ -458,7 +460,13 @@ function ComboEvidenceChart({
   onChartLeave: () => void;
 }) {
   const valueSeries = series.filter((item) => item.role === 'value');
-  const percentSeries = series.filter((item) => item.role === 'percent');
+  const secondarySeries = series.filter((item) => item.role !== 'value');
+  const secondaryRole = secondarySeries.find((item) => item.role === 'percent')?.role
+    ?? secondarySeries[0]?.role
+    ?? 'value';
+  const secondaryUnitSuffix = secondaryRole === 'duration'
+    ? durationUnitSuffix(secondarySeries[0]?.sourceField ?? secondarySeries[0]?.field ?? '')
+    : '';
   if (rows.length < 2 || series.length === 0) return null;
 
   return (
@@ -504,18 +512,18 @@ function ComboEvidenceChart({
               }}
             />
           )}
-          {percentSeries.length > 0 && (
+          {secondarySeries.length > 0 && (
             <YAxis
-              yAxisId="percent"
+              yAxisId="secondary"
               orientation="right"
               width={54}
               tick={{ fontSize: 10, fill: chartTheme.axis }}
-              tickFormatter={(value) => `${formatNumber(value)}%`}
+              tickFormatter={(value) => formatAxisValue(value, secondaryRole, secondaryUnitSuffix)}
               axisLine={{ stroke: chartTheme.grid }}
               tickLine={{ stroke: chartTheme.grid }}
               domain={[0, 'auto']}
               label={{
-                value: seriesAxisLabel(percentSeries),
+                value: seriesAxisLabel(secondarySeries),
                 angle: 90,
                 position: 'insideRight',
                 style: { fill: chartTheme.axis, fontSize: 10 },
@@ -548,10 +556,10 @@ function ComboEvidenceChart({
               })}
             </Bar>
           ))}
-          {percentSeries.map((item) => (
+          {secondarySeries.map((item) => (
             <Line
               key={item.key}
-              yAxisId="percent"
+              yAxisId="secondary"
               type="monotone"
               dataKey={item.key}
               name={item.field}
@@ -930,7 +938,7 @@ function toCategoryComboData(
       color: CHART_SERIES_COLORS[categoryIndex % CHART_SERIES_COLORS.length],
       mark: markMode === 'chartType'
         ? chartTypeToSeriesMark(spec.chartType)
-        : role === 'percent' ? 'line' as const : 'bar' as const,
+        : role === 'value' ? 'bar' as const : 'line' as const,
       role,
     };
   }));
@@ -984,7 +992,7 @@ function toAggregatedComboData(tabular: RowOriented, spec: ChartSpec, limit: num
     field,
     sourceField: field,
     color: CHART_SERIES_COLORS[index % CHART_SERIES_COLORS.length],
-    mark: inferMetricRole(field, tabular) === 'percent' ? 'line' as const : 'bar' as const,
+    mark: inferMetricRole(field, tabular) === 'value' ? 'bar' as const : 'line' as const,
     role: inferMetricRole(field, tabular),
   }));
   const rows: ChartRow[] = Array.from(groups.entries()).map(([label, entries]) => {
@@ -1025,7 +1033,9 @@ function aggregateMetricValue(
 
   if (values.length === 0) return null;
 
-  if (inferMetricRole(field, tabular) === 'percent') {
+  const role = inferMetricRole(field, tabular);
+
+  if (role === 'percent') {
     const weightedTotal = values.reduce((sum, entry) => sum + entry.value * Math.max(entry.weight ?? 1, 0), 0);
     const weightTotal = values.reduce((sum, entry) => sum + Math.max(entry.weight ?? 1, 0), 0);
     return weightTotal > 0
@@ -1033,7 +1043,7 @@ function aggregateMetricValue(
       : values.reduce((sum, entry) => sum + entry.value, 0) / values.length;
   }
 
-  return shouldAverageField(field)
+  return role === 'duration' || shouldAverageField(field)
     ? values.reduce((sum, entry) => sum + entry.value, 0) / values.length
     : values.reduce((sum, entry) => sum + entry.value, 0);
 }
@@ -1196,11 +1206,13 @@ function hasOwnValue(row: ChartRow, key: string): boolean {
 }
 
 function hasMixedMetricRoles(series: SeriesConfig[]): boolean {
-  return series.some((item) => item.role === 'value') && series.some((item) => item.role === 'percent');
+  const roles = new Set(series.map((item) => item.role));
+  return roles.size > 1 && roles.has('value');
 }
 
-function inferMetricRole(field: string, tabular?: RowOriented): 'value' | 'percent' {
+function inferMetricRole(field: string, tabular?: RowOriented): MetricRole {
   if (isPercentField(field)) return 'percent';
+  if (isDurationField(field)) return 'duration';
   if (!tabular) return 'value';
   const values = tabular.rows
     .map((row) => coerceNumber(row[field]))
@@ -1217,6 +1229,17 @@ function isPercentField(field: string): boolean {
     || /(pct|percent|percentage|rate|ratio|share)$/i.test(field);
 }
 
+function isDurationField(field: string): boolean {
+  const normalized = field.toLowerCase();
+  if (/(^|_)(duration|elapsed|latency|wait|travel_time|visit_time|drive_time|service_time|handle_time|processing_time|response_time|resolution_time)(_|$)/.test(normalized)) {
+    return true;
+  }
+  if (/(^|_)(avg|average|mean|median|actual|planned|estimated|total|sum|min|max)(_|.*)?(time|duration|days|hours|hrs|minutes|minute|mins|min|seconds|second|secs|sec)(_|$)/.test(normalized)) {
+    return true;
+  }
+  return /(^|_)(active|visit|travel|work|service|handle|processing|response|resolution)_(days|time|hours|hrs|minutes|minute|mins|min|seconds|second|secs|sec)(_|$)/.test(normalized);
+}
+
 function shouldAverageField(field: string): boolean {
   return /(^|_)(avg|average|mean|median)(_|$)/i.test(field)
     || /(avg|average|mean|median)$/i.test(field);
@@ -1226,7 +1249,21 @@ function formatMetricValue(value: unknown, field: string): string {
   const numeric = typeof value === 'number' ? value : coerceNumber(value);
   if (numeric === undefined) return cellToString(value);
   if (inferMetricRole(field) === 'percent') return `${formatNumber(numeric)}%`;
+  if (inferMetricRole(field) === 'duration') return `${formatNumber(numeric)}${durationUnitSuffix(field)}`;
   return formatNumber(numeric);
+}
+
+function formatAxisValue(value: unknown, role: MetricRole, unitSuffix = ''): string {
+  if (role === 'percent') return `${formatNumber(value)}%`;
+  if (role === 'duration') return `${formatNumber(value)}${unitSuffix || 'm'}`;
+  return formatNumber(value);
+}
+
+function durationUnitSuffix(field: string): string {
+  if (/(^|_)(hours|hour|hrs|hr)(_|$)/i.test(field)) return 'h';
+  if (/(^|_)(seconds|second|secs|sec)(_|$)/i.test(field)) return 's';
+  if (/(^|_)(days|day)(_|$)/i.test(field)) return 'd';
+  return 'm';
 }
 
 function renderLineDot(

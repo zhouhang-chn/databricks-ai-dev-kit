@@ -2,6 +2,8 @@ import type { ChartSpec } from '@/features/analysis/types';
 import { coerceNumber, isLikelyDateString, type RowOriented } from './evidenceData';
 
 const NON_CHART_TOOLS = new Set([
+  'get_table_schema',
+  'get_table_stats',
   'get_table_stats_and_schema',
   'get_volume_folder_details',
   'list_compute',
@@ -21,6 +23,8 @@ type ColumnProfile = {
   minNumeric?: number;
   maxNumeric?: number;
 };
+
+type MetricRole = 'value' | 'percent' | 'duration';
 
 export function detectChartSpec(
   tabular: RowOriented,
@@ -44,10 +48,7 @@ export function detectChartSpec(
 
   if (!xField) return undefined;
 
-  const yFields = numeric
-    .map((p) => p.name)
-    .filter((name) => name !== xField)
-    .slice(0, 3);
+  const yFields = selectCompatibleYFields(numeric, xField);
   const breakdownField = findBreakdownField(profiles, xField)?.name;
 
   if (yFields.length === 0) return undefined;
@@ -159,6 +160,15 @@ function isMostlyTemporal(profile: ColumnProfile): boolean {
   return profile.dateLikeCount / profile.nonNullCount >= 0.8;
 }
 
+function selectCompatibleYFields(profiles: ColumnProfile[], xField: string): string[] {
+  const candidates = profiles.map((profile) => profile.name).filter((name) => name !== xField);
+  if (candidates.length === 0) return [];
+  const primaryRole = inferMetricRoleFromName(candidates[0]);
+  return candidates
+    .filter((name) => inferMetricRoleFromName(name) === primaryRole)
+    .slice(0, 3);
+}
+
 function chooseTemporalAxis(profiles: ColumnProfile[]): ColumnProfile | undefined {
   return [...profiles]
     .filter((profile) => profile.distinctValues > 1)
@@ -188,11 +198,36 @@ function isCalendarPeriodColumn(name: string): boolean {
 }
 
 function isLikelyTemporalColumnName(name: string): boolean {
-  if (/(pct|percent|percentage|rate|ratio|amount|count|total|score|avg|average|sum)$/i.test(name)) {
+  if (isAggregateMetricColumnName(name) || isDurationMetricColumnName(name)) {
     return false;
   }
   return /(^|_)(date|time|timestamp|month|yearmonth|yyyymm|year_month|week|quarter|period|day)(_|$)/i.test(name)
     || /(_at|_ts)$/i.test(name);
+}
+
+function inferMetricRoleFromName(name: string): MetricRole {
+  if (/(^|_)(pct|percent|percentage|rate|ratio|share)(_|$)/i.test(name)
+    || /(pct|percent|percentage|rate|ratio|share)$/i.test(name)) {
+    return 'percent';
+  }
+  if (isDurationMetricColumnName(name)) return 'duration';
+  return 'value';
+}
+
+function isAggregateMetricColumnName(name: string): boolean {
+  return /(^|_)(avg|average|mean|median|sum|total|count|cnt|num|number|score|amount|rate|ratio|pct|percent|percentage)(_|$)/i.test(name)
+    || /(pct|percent|percentage|rate|ratio|amount|count|total|score|avg|average|sum)$/i.test(name);
+}
+
+function isDurationMetricColumnName(name: string): boolean {
+  const normalized = name.toLowerCase();
+  if (/(^|_)(duration|elapsed|latency|wait|travel_time|visit_time|drive_time|service_time|handle_time|processing_time|response_time|resolution_time)(_|$)/.test(normalized)) {
+    return true;
+  }
+  if (/(^|_)(avg|average|mean|median|actual|planned|estimated|total|sum|min|max)(_|.*)?(time|duration|days|hours|hrs|minutes|minute|mins|min|seconds|second|secs|sec)(_|$)/.test(normalized)) {
+    return true;
+  }
+  return /(^|_)(active|visit|travel|work|service|handle|processing|response|resolution)_(days|time|hours|hrs|minutes|minute|mins|min|seconds|second|secs|sec)(_|$)/.test(normalized);
 }
 
 function hasTemporalValueShape(profile: ColumnProfile): boolean {

@@ -173,7 +173,12 @@ export function EvidenceContent({ block }: { block: EvidenceBlock }) {
   const [activeRowIndex, setActiveRowIndex] = useState<number | null>(null);
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
 
-  if (block.toolName === 'get_table_stats_and_schema' || block.toolName === 'get_volume_folder_details') {
+  if (
+    block.toolName === 'get_table_schema' ||
+    block.toolName === 'get_table_stats' ||
+    block.toolName === 'get_table_stats_and_schema' ||
+    block.toolName === 'get_volume_folder_details'
+  ) {
     if (parsed && typeof parsed === 'object') {
       return <TableStatsRenderer data={parsed} />;
     }
