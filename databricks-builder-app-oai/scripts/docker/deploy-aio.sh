@@ -292,7 +292,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA :"app_schema" GRANT ALL ON SEQUENCES TO :"app
 ALTER ROLE :"app_user" IN DATABASE :"app_db" SET search_path = :"app_schema", public;
 SQL
 SH
-  chmod 700 "$INIT_FILE"
+  chmod 755 "$INIT_DIR" "$INIT_FILE"
 }
 
 compose() {

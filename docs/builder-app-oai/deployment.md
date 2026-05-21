@@ -224,6 +224,19 @@ APP_DB_PASSWORD=replace_with_url_safe_password
 
 Because PostgreSQL only runs init scripts when the data volume is first created, change `APP_DB_PASSWORD` before the first deploy, or recreate the PostgreSQL volume intentionally.
 
+If PostgreSQL logs show `ls: can't open '/docker-entrypoint-initdb.d/': Permission denied`, the generated init directory is not readable by the PostgreSQL container user. Use the latest `deploy-aio.sh`, or fix the copied files on the server and recreate only the PostgreSQL volume:
+
+```bash
+sudo chmod 755 /home/28078014/builder-app-oai/postgres-init
+sudo chmod 755 /home/28078014/builder-app-oai/postgres-init/10-builder-app.sh
+sudo docker compose \
+  --env-file /home/28078014/builder-app-oai/docker.env \
+  -f /home/28078014/builder-app-oai/docker-compose.yml \
+  down
+sudo docker volume rm builder-app-oai-postgres-data
+bash /path/to/deploy-aio.sh
+```
+
 ## Operations
 
 Check status:
