@@ -147,6 +147,11 @@ class Conversation(Base):
 
   def to_dict_summary(self) -> dict[str, Any]:
     """Convert to dictionary without messages (for list views)."""
+    loaded_messages = self.__dict__.get('messages')
+    message_count = self.__dict__.get(
+      '_message_count',
+      len(loaded_messages) if loaded_messages else 0,
+    )
     return {
       'id': self.id,
       'project_id': self.project_id,
@@ -159,7 +164,7 @@ class Conversation(Base):
       'default_schema': self.default_schema,
       'warehouse_id': self.warehouse_id,
       'workspace_folder': self.workspace_folder,
-      'message_count': len(self.messages) if self.messages else 0,
+      'message_count': message_count,
     }
 
 

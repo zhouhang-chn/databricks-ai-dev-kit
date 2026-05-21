@@ -68,6 +68,16 @@ def test_merge_project_settings_deep_merges_without_deleting_existing_values():
   assert patched['semantics']['metric_views'] == ['prod.finance.revenue_metrics']
 
 
+def test_parse_project_settings_migrates_legacy_preferred_tables():
+  """Old saved settings should load as input tables without re-emitting preferred_tables."""
+  settings = parse_project_settings(
+    '{"semantics": {"preferred_tables": ["prod.finance.orders"]}}'
+  )
+
+  assert settings['semantics']['input_tables'] == ['prod.finance.orders']
+  assert 'preferred_tables' not in settings['semantics']
+
+
 def test_project_context_prefers_effective_resources_and_tracks_overrides():
   """The context pack exposes effective resources and conversation overrides."""
   project = ProjectLike(
@@ -126,6 +136,7 @@ def test_system_prompt_renders_project_context():
       {
         'semantics': {
           'metric_views': ['prod.finance.revenue_metrics'],
+          'input_tables': ['prod.finance.orders'],
           'glossary': {'ARR': 'Annual recurring revenue'},
         },
       },
@@ -141,7 +152,11 @@ def test_system_prompt_renders_project_context():
   assert 'Project Management Context' in prompt
   assert 'Revenue Review' in prompt
   assert 'prod.finance.revenue_metrics' in prompt
+  assert 'Input Tables' in prompt
+  assert 'Preferred Tables' not in prompt
+  assert 'prod.finance.orders' in prompt
   assert 'governed semantic layer' in prompt
+  assert '`MEASURE(...)` before using raw input tables' in prompt
   assert 'Annual recurring revenue' in prompt
 
 
@@ -214,11 +229,11 @@ def test_system_prompt_renders_project_operating_guide_snapshot():
   assert 'Validate schemas before SQL' in prompt
 
 
-def test_system_prompt_prefers_none_for_schema_only_inspection():
-  """Schema inspection guidance should choose the least expensive stat level."""
+def test_system_prompt_separates_schema_and_selected_column_stats():
+  """Schema inspection should be separate from selected-column profiling."""
   prompt = get_system_prompt(enabled_skills=[])
 
-  assert 'always set `table_stat_level`' in prompt
-  assert 'use the least expensive level that answers the current question' in prompt
-  assert '`NONE` by default for schema discovery / column validation' in prompt
-  assert 'start with `table_stat_level="NONE"`' in prompt
+  assert 'inspect schema first with\n  `get_table_schema`' in prompt
+  assert 'does not compute row counts or column statistics' in prompt
+  assert 'Use `get_table_stats` only after schema discovery' in prompt
+  assert 'explicit\n  non-empty `columns` list' in prompt

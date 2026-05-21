@@ -18,7 +18,7 @@ OPENAI_AGENTS_DISABLE_TRACING=1
 
 Follow-up suggestions come from the terminal `submit_conclusion.next_steps` payload and render as clickable chips under the answer. The app does not run a separate post-response Next Moves generator, which avoids an extra model call and keeps the visible follow-ups consistent with the final synthesis.
 
-SQL schema checks are conversation-aware. The runtime still blocks analytical SQL over configured project tables when no schema is known, but a successful prior `get_table_stats_and_schema`, `DESCRIBE`, or `SHOW COLUMNS` event in the same conversation seeds the next run so repeated follow-up questions do not re-inspect the same table.
+SQL schema checks are conversation-aware. The runtime still blocks analytical SQL over configured project tables when no schema is known, but a successful prior `get_table_schema`, `get_table_stats`, `DESCRIBE`, or `SHOW COLUMNS` event in the same conversation seeds the next run so repeated follow-up questions do not re-inspect the same table.
 
 Analysis visualizations are model-directed when a conclusion includes `visualizations`. The middle story card prioritizes specs marked `display_in_story`, while the Inspect panel retains secondary evidence. Auto-detected charts are conservative fallbacks and avoid measure-only result sets where a calculated count/rate would become the x-axis.
 

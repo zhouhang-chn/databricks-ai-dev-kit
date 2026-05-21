@@ -13,8 +13,8 @@ analysis_notes:
   - The field m1_no represents the employee identifier (employee_no).
   - The field poc_middle_id represents the POC identifier (poc_id).
   - The field group_code represents the KPI group assigned to each employee for each POC.
-  - Prefer registered Databricks Metric Views for governed MHA achievement, KPI benchmark, trend, ranking, and reconciliation questions.
-  - Use raw source tables for validation, row-level drill-down, and unsupported exploratory questions only when the Metric View path is missing or insufficient.
+  - Use registered Databricks Metric Views first for governed MHA achievement, KPI benchmark, trend, ranking, and reconciliation questions.
+  - Use input tables for validation, row-level drill-down, and unsupported exploratory questions only when the Metric View path is missing or insufficient.
 
 databricks_resources:
   databricks_host: https://adb-960767945362324.0.databricks.azure.cn
@@ -25,10 +25,6 @@ databricks_resources:
   workspace_files:
     - /Workspace/Users/sabrina.yu@budweiserapac.com/Distribution/MHA_achievement_analysis
   workflows:
-  input_schemas:
-    - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw
-    - techsales_uc_china_prod.techsales_db
-    - brewdat_uc_china_prod.bcc_dmdsrintegrationproject_ods
   input_tables:
     - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_detail
     - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_summary
@@ -41,9 +37,11 @@ databricks_resources:
     - brewdat_uc_china_prod.poc_datahub_dw.poc_master_daily_fact
 
   input_metric_views:
-    - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
-    - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
-    - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
+    - ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
+    - ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
+    - ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
+    - ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_bees_coverage_metrics
+    - ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kbd_coverage_metrics
   input_volume_paths: []
   output_schema:
   output_volume_folders: []
@@ -65,7 +63,7 @@ metric_view_context:
         - brewdat_uc_china_prod.md_exchange_brewdat_ods.tsvc_base_sys_kpiachieverate
     data_profile: design-record-only
   metric_views:
-    - full_name: brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
+    - full_name: ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
       status: candidate
       source_objects:
         - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_detail
@@ -103,7 +101,7 @@ metric_view_context:
         known_caveats:
           - Live Metric View query validation is still required before certification.
           - Channel cleaning excludes T2WS and maps IH to TT, NULL to KA.
-    - full_name: brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
+    - full_name: ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
       status: candidate
       source_objects:
         - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_summary
@@ -138,7 +136,7 @@ metric_view_context:
           rate_fields: 0.01
         known_caveats:
           - Live Metric View query validation is still required before certification.
-    - full_name: brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
+    - full_name: ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
       status: candidate
       source_objects:
         - brewdat_uc_china_prod.md_exchange_brewdat_ods.tsvc_base_sys_kpiachieverate

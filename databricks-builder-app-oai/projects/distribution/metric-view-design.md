@@ -46,8 +46,17 @@ View 输出，并将认证后的 Metric View 注册到 `distribution.yaml`。
 所有 Metric View 创建在：
 
 ```
-brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw
+ds_uc_china_dev.gld_apc_sales_m1_scan_dw
 ```
+
+### Runtime 兼容性
+
+以下 SQL 已按 `ds_dev_cn3` 集群的 Databricks Runtime 16.4 ML 验证口径改写：
+
+- Metric View YAML 使用 `version: 0.1`
+- YAML 中不使用 `comment` 字段（`comment` 为 v1.1 元数据，DBR 16.4 会拒绝）
+- Join 使用 v0.1 支持的 `name` / `source` / `on` 语法，不使用 `join_type`
+- 如升级到 DBR 17.2+，可再切回 `version: 1.1` 并补充 YAML `comment`
 
 ---
 
@@ -55,7 +64,7 @@ brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw
 
 ### 2.1 设计说明
 
-基于 `distribution_achievement_detail`（POC × Group × SKU Key 粒度），Join `mha_sku_achievement_detail` 获取组织层级（M1 → M2 → M3 → BU → Region → Area），构建支持从一线业代下钻到大区分析的全层级达成明细视图。
+基于 `distribution_achievement_detail`（POC × Group × SKU Key 粒度），Join `employee_relation_m1m2m3_monthly` 获取组织层级（M1 → M2 → M3 → BU → Region → Area），构建支持从一线业代下钻到大区分析的全层级达成明细视图。
 
 ### 2.2 E/R 关系
 
@@ -79,14 +88,13 @@ distribution_achievement_detail (FACT)
 ### 2.3 YAML Definition
 
 ```sql
-CREATE OR REPLACE VIEW brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
+CREATE OR REPLACE VIEW ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
 WITH METRICS
 LANGUAGE YAML
 AS $$
-  version: 1.1
-  comment: "MHA分销达成明细指标 — POC×Group×SKU Key 粒度，含完整组织层级，支持售点级和Group级双视角达成评估"
+  version: 0.1
   source: brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_detail
-  filter: CAST(yearmonth AS INT) >= 202501 AND channel != 'T2WS'
+  filter: CAST(yearmonth AS INT) >= 202501 AND (channel IS NULL OR channel != 'T2WS')
 
   joins:
     - name: org
@@ -96,100 +104,76 @@ AS $$
   dimensions:
     - name: Year Month
       expr: "CAST(yearmonth AS INT)"
-      comment: "数据月份，格式 yyyyMM (如 202601)"
 
     - name: M1 No
       expr: "source.m1_no"
-      comment: "一线业代工号"
 
     - name: POC ID
       expr: "source.poc_middle_id"
-      comment: "售点唯一标识"
 
     - name: POC Name
       expr: "source.poc_self_defined_name"
-      comment: "售点自定名称"
 
     - name: Channel
       expr: "CASE WHEN source.channel = 'IH' THEN 'TT' WHEN source.channel IS NULL THEN 'KA' ELSE source.channel END"
-      comment: "渠道 (IH→TT, NULL→KA, 已排除T2WS)"
 
     - name: Format Name
       expr: "source.format_name"
-      comment: "业态: 大卖场/普通超市/高端超市/现购自运/普通便利店/高端便利店/油站便利店"
 
     - name: Group Code
       expr: "source.group_code"
-      comment: "KPI 组 (每个 (POC, group_code) = 一项 KPI 要求)"
 
     - name: SKU Key Type
       expr: "source.mha_sku_key_type"
-      comment: "品项类型: Subbrand*PACK 或 CIO"
 
     - name: MHA SKU Key
       expr: "source.mha_sku_key"
-      comment: "品项标识"
 
     - name: BU
       expr: "org.bu"
-      comment: "事业部"
 
     - name: Region
       expr: "org.region"
-      comment: "大区"
 
     - name: Area
       expr: "org.area"
-      comment: "区域"
 
     - name: Territory
       expr: "org.territory"
-      comment: "片区"
 
     - name: M2 Name
       expr: "org.m2_employee_name"
-      comment: "M2 主管姓名"
 
     - name: M2 No
       expr: "org.m2_employee_no"
-      comment: "M2 工号"
 
     - name: M3 Name
       expr: "org.m3_employee_name"
-      comment: "M3 经理姓名"
 
     - name: M3 No
       expr: "org.m3_employee_no"
-      comment: "M3 工号"
 
   measures:
     - name: Achieved SKU Count
       expr: "SUM(source.if_achieved)"
-      comment: "当月达成 SKU Key 数量"
 
     - name: Total SKU Count
       expr: "COUNT(1)"
-      comment: "当月全部 SKU Key 数量"
 
     - name: SKU Achievement Rate
       expr: "SUM(source.if_achieved) * 1.0 / COUNT(1)"
-      comment: "SKU Key 级别达成率"
 
     - name: Distinct POC Count
       expr: "COUNT(DISTINCT source.poc_middle_id)"
-      comment: "涉及售点数"
 
     - name: Distinct Group Count
       expr: "COUNT(DISTINCT source.group_code)"
-      comment: "涉及 Group 数"
 
     - name: Achieved POC-Group Count
       expr: "COUNT(DISTINCT CASE WHEN source.if_achieved = 1 THEN CONCAT(source.poc_middle_id, '|', source.group_code) END)"
-      comment: "达成的 (POC, Group) 组合数"
 
     - name: Total POC-Group Count
       expr: "COUNT(DISTINCT CONCAT(source.poc_middle_id, '|', source.group_code))"
-      comment: "全部 (POC, Group) 组合数"
 $$
 ```
 
@@ -204,7 +188,7 @@ SELECT
   MEASURE(`SKU Achievement Rate`) AS achieve_rate,
   MEASURE(`Distinct POC Count`) AS poc_count,
   MEASURE(`Distinct Group Count`) AS group_count
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
 WHERE `Year Month` = 202604 AND `M1 No` = '28036110'
 GROUP BY ALL;
 
@@ -218,7 +202,7 @@ SELECT
   MEASURE(`Achieved SKU Count`) AS achieved,
   MEASURE(`Total SKU Count`) AS required,
   MEASURE(`SKU Achievement Rate`) AS rate
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
 WHERE `Year Month` = 202604
   AND `M1 No` = '28036110'
 GROUP BY `POC ID`, `POC Name`, `Channel`, `Format Name`, `Group Code`
@@ -230,7 +214,7 @@ SELECT
   `Region`,
   MEASURE(`SKU Achievement Rate`) AS achieve_rate,
   MEASURE(`Distinct POC Count`) AS poc_count
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
 WHERE `Year Month` = 202604
 GROUP BY ALL
 ORDER BY achieve_rate DESC;
@@ -240,7 +224,7 @@ SELECT
   `Year Month`,
   `M2 Name`,
   MEASURE(`SKU Achievement Rate`) AS achieve_rate
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
 WHERE `Year Month` IN (202602, 202603, 202604)
   AND `Region` = '华东'
 GROUP BY ALL
@@ -253,97 +237,107 @@ ORDER BY `Year Month`, achieve_rate DESC;
 
 ### 3.1 设计说明
 
-基于 `distribution_achievement_summary`（售点级别达成汇总），Join `poc_master_daily_fact` 获取售点地理和业态维度，加入业态分层阈值判定逻辑。
+基于 `distribution_achievement_summary`（售点级别达成汇总），Join `employee_relation_m1m2m3_monthly` 获取组织层级，加入业态分层阈值判定逻辑。
 
 ### 3.2 YAML Definition
 
 ```sql
-CREATE OR REPLACE VIEW brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
+CREATE OR REPLACE VIEW ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
 WITH METRICS
 LANGUAGE YAML
 AS $$
-  version: 1.1
-  comment: "售点级别MHA达成汇总 — 含业态分层阈值判定，支持售点整体达成评估和优先级排序"
+  version: 0.1
   source: brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_summary
-  filter: CAST(yearmonth AS INT) >= 202501 AND channel != 'T2WS'
+  filter: CAST(source.yearmonth AS INT) >= 202501 AND (source.channel IS NULL OR source.channel != 'T2WS')
+
+  joins:
+    - name: org
+      source: brewdat_uc_china_prod.org_datahub_dw.employee_relation_m1m2m3_monthly
+      on: source.yearmonth = org.relation_month AND source.m1_no = org.employee_no
 
   dimensions:
     - name: Year Month
-      expr: "CAST(yearmonth AS INT)"
-      comment: "数据月份"
+      expr: "CAST(source.yearmonth AS INT)"
 
     - name: M1 No
-      expr: "m1_no"
-      comment: "一线业代工号"
+      expr: "source.m1_no"
 
     - name: POC ID
-      expr: "poc_middle_id"
-      comment: "售点唯一标识"
+      expr: "source.poc_middle_id"
 
     - name: POC Name
-      expr: "poc_self_defined_name"
-      comment: "售点自定名称"
+      expr: "source.poc_self_defined_name"
 
     - name: Channel
-      expr: "CASE WHEN channel = 'IH' THEN 'TT' WHEN channel IS NULL THEN 'KA' ELSE channel END"
-      comment: "渠道 (IH→TT / NULL→KA)"
+      expr: "CASE WHEN source.channel = 'IH' THEN 'TT' WHEN source.channel IS NULL THEN 'KA' ELSE source.channel END"
 
     - name: Format Name
-      expr: "format_name"
-      comment: "业态名称"
+      expr: "source.format_name"
 
     - name: Format Category
       expr: "CASE
-        WHEN format_name IN ('大卖场', '普通超市', '现购自运', '高端超市') THEN 'Large_Format'
-        WHEN format_name IN ('普通便利店', '高端便利店', '油站便利店') THEN 'Convenience'
+        WHEN source.format_name IN ('大卖场', '普通超市', '现购自运', '高端超市') THEN 'Large_Format'
+        WHEN source.format_name IN ('普通便利店', '高端便利店', '油站便利店') THEN 'Convenience'
         ELSE 'Other'
         END"
-      comment: "业态大类: Large_Format (需≥5 Group) / Convenience (需≥4 Group)"
 
     - name: Is Achieved
-      expr: "CASE WHEN achievement_date IS NOT NULL THEN 'Achieved' ELSE 'Not Achieved' END"
-      comment: "该售点是否整体达成"
+      expr: "CASE WHEN source.achievement_date IS NOT NULL THEN 'Achieved' ELSE 'Not Achieved' END"
+
+    - name: BU
+      expr: "org.bu"
+
+    - name: Region
+      expr: "org.region"
+
+    - name: Area
+      expr: "org.area"
+
+    - name: Territory
+      expr: "org.territory"
+
+    - name: M2 Name
+      expr: "org.m2_employee_name"
+
+    - name: M2 No
+      expr: "org.m2_employee_no"
+
+    - name: M3 Name
+      expr: "org.m3_employee_name"
+
+    - name: M3 No
+      expr: "org.m3_employee_no"
 
   measures:
     - name: Achievement Num
-      expr: "SUM(achievement_num)"
-      comment: "达成的 MHA 品项数"
+      expr: "SUM(source.achievement_num)"
 
     - name: Total MHA SKU Count
-      expr: "SUM(CAST(mha_sku_cnt AS DOUBLE))"
-      comment: "MHA SKU 总数"
+      expr: "SUM(CAST(source.mha_sku_cnt AS DOUBLE))"
 
     - name: Total POC Count
-      expr: "COUNT(DISTINCT poc_middle_id)"
-      comment: "全部售点数"
+      expr: "COUNT(DISTINCT source.poc_middle_id)"
 
     - name: Achieved POC Count
-      expr: "COUNT(DISTINCT CASE WHEN achievement_date IS NOT NULL THEN poc_middle_id END)"
-      comment: "整体达成的售点数"
+      expr: "COUNT(DISTINCT CASE WHEN source.achievement_date IS NOT NULL THEN source.poc_middle_id END)"
 
     - name: Not Achieved POC Count
-      expr: "COUNT(DISTINCT CASE WHEN achievement_date IS NULL THEN poc_middle_id END)"
-      comment: "未达成的售点数"
+      expr: "COUNT(DISTINCT CASE WHEN source.achievement_date IS NULL THEN source.poc_middle_id END)"
 
     - name: POC Achievement Rate
-      expr: "COUNT(DISTINCT CASE WHEN achievement_date IS NOT NULL THEN poc_middle_id END) * 1.0 / COUNT(DISTINCT poc_middle_id)"
-      comment: "售点级别达成率 (达成售点数 / 总售点数)"
+      expr: "COUNT(DISTINCT CASE WHEN source.achievement_date IS NOT NULL THEN source.poc_middle_id END) * 1.0 / COUNT(DISTINCT source.poc_middle_id)"
 
     - name: Large Format Achieved POC Count
-      expr: "COUNT(DISTINCT CASE WHEN achievement_date IS NOT NULL AND format_name IN ('大卖场', '普通超市', '现购自运', '高端超市') THEN poc_middle_id END)"
-      comment: "大业态达成售点数"
+      expr: "COUNT(DISTINCT CASE WHEN source.achievement_date IS NOT NULL AND source.format_name IN ('大卖场', '普通超市', '现购自运', '高端超市') THEN source.poc_middle_id END)"
 
     - name: Large Format Total POC Count
-      expr: "COUNT(DISTINCT CASE WHEN format_name IN ('大卖场', '普通超市', '现购自运', '高端超市') THEN poc_middle_id END)"
-      comment: "大业态总售点数"
+      expr: "COUNT(DISTINCT CASE WHEN source.format_name IN ('大卖场', '普通超市', '现购自运', '高端超市') THEN source.poc_middle_id END)"
 
     - name: Convenience Achieved POC Count
-      expr: "COUNT(DISTINCT CASE WHEN achievement_date IS NOT NULL AND format_name IN ('普通便利店', '高端便利店', '油站便利店') THEN poc_middle_id END)"
-      comment: "便利店达成售点数"
+      expr: "COUNT(DISTINCT CASE WHEN source.achievement_date IS NOT NULL AND source.format_name IN ('普通便利店', '高端便利店', '油站便利店') THEN source.poc_middle_id END)"
 
     - name: Convenience Total POC Count
-      expr: "COUNT(DISTINCT CASE WHEN format_name IN ('普通便利店', '高端便利店', '油站便利店') THEN poc_middle_id END)"
-      comment: "便利店总售点数"
+      expr: "COUNT(DISTINCT CASE WHEN source.format_name IN ('普通便利店', '高端便利店', '油站便利店') THEN source.poc_middle_id END)"
 $$
 ```
 
@@ -357,7 +351,7 @@ SELECT
   MEASURE(`Achieved POC Count`) AS achieved_poc,
   MEASURE(`Not Achieved POC Count`) AS not_achieved_poc,
   MEASURE(`POC Achievement Rate`) AS achieve_rate
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
 WHERE `Year Month` = 202604 AND `M1 No` = '28036110'
 GROUP BY ALL;
 
@@ -370,7 +364,7 @@ SELECT
   MEASURE(`Total POC Count`) AS total_poc,
   MEASURE(`Achieved POC Count`) AS achieved_poc,
   MEASURE(`POC Achievement Rate`) AS achieve_rate
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
 WHERE `Year Month` = 202604
 GROUP BY ALL
 ORDER BY achieve_rate DESC;
@@ -382,7 +376,7 @@ SELECT
   MEASURE(`Total POC Count`) AS total,
   MEASURE(`Achieved POC Count`) AS achieved,
   MEASURE(`POC Achievement Rate`) AS rate
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
 WHERE `Year Month` = 202604
 GROUP BY ALL
 ORDER BY rate DESC;
@@ -393,7 +387,7 @@ SELECT
   MEASURE(`Total POC Count`) AS total_poc,
   MEASURE(`Achieved POC Count`) AS achieved_poc,
   MEASURE(`POC Achievement Rate`) AS achieve_rate
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
 WHERE `Year Month` IN (202602, 202603, 202604)
 GROUP BY ALL
 ORDER BY `Year Month`;
@@ -410,12 +404,11 @@ ORDER BY `Year Month`;
 ### 4.2 YAML Definition
 
 ```sql
-CREATE OR REPLACE VIEW brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
+CREATE OR REPLACE VIEW ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
 WITH METRICS
 LANGUAGE YAML
 AS $$
-  version: 1.1
-  comment: "KPI725 M1达成售点数对标 — KPI系统上报值 vs 目标值，支持与Scan侧达成数的交叉校验和异常诊断"
+  version: 0.1
   source: brewdat_uc_china_prod.md_exchange_brewdat_ods.tsvc_base_sys_kpiachieverate
   filter: kpicode = 'KPI725'
 
@@ -423,105 +416,80 @@ AS $$
     - name: scan_summary
       source: brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_summary
       on: "source.EmployeeCode = scan_summary.m1_no AND CAST(DATE_FORMAT(source.startdate, 'yyyyMM') AS STRING) = scan_summary.yearmonth"
-      join_type: left
     - name: org
       source: brewdat_uc_china_prod.org_datahub_dw.employee_relation_m1m2m3_monthly
       on: "source.EmployeeCode = org.employee_no AND CAST(DATE_FORMAT(source.startdate, 'yyyyMM') AS STRING) = org.relation_month"
-      join_type: left
 
   dimensions:
     - name: Year Month
       expr: "CAST(DATE_FORMAT(source.startdate, 'yyyyMM') AS INT)"
-      comment: "KPI 周期月份"
 
     - name: Employee Code
       expr: "source.EmployeeCode"
-      comment: "业代工号"
 
     - name: Username
       expr: "source.username"
-      comment: "业代姓名"
 
     - name: Role
       expr: "source.userrolecode"
-      comment: "角色: M1 / M2 / M3"
 
     - name: Post Code
       expr: "source.postcode"
-      comment: "岗位代码"
 
     - name: BU
       expr: "org.bu"
-      comment: "事业部 (来自组织关系表)"
 
     - name: Region
       expr: "org.region"
-      comment: "大区 (来自组织关系表)"
 
     - name: Area
       expr: "org.area"
-      comment: "区域 (来自组织关系表)"
 
     - name: Territory
       expr: "org.territory"
-      comment: "片区 (来自组织关系表)"
 
     - name: Has Target
       expr: "CASE WHEN source.targetvalue IS NOT NULL AND source.targetvalue > 0 THEN 'Has Target' ELSE 'No Target' END"
-      comment: "是否配置了KPI目标值"
 
     - name: Has Actual
       expr: "CASE WHEN source.actualvalue IS NOT NULL THEN 'Has Actual' ELSE 'No Actual' END"
-      comment: "是否有实际上报值"
 
   measures:
     - name: Total Target Value
       expr: "SUM(source.targetvalue)"
-      comment: "目标达成售点数合计"
 
     - name: Total Actual Value
       expr: "SUM(source.actualvalue)"
-      comment: "实际达成售点数合计 (KPI系统上报)"
 
     - name: KPI Achievement Rate
       expr: "SUM(source.actualvalue) / NULLIF(SUM(source.targetvalue), 0)"
-      comment: "KPI达成率 (actual/target)"
 
     - name: Target-Actual Gap
       expr: "SUM(source.targetvalue) - SUM(source.actualvalue)"
-      comment: "目标达成差距 (正值=未达标, 负值=超标)"
 
     - name: Employee Count
       expr: "COUNT(DISTINCT source.EmployeeCode)"
-      comment: "有KPI配置的业代人数"
 
     - name: Employee Count with Zero Actual
       expr: "COUNT(DISTINCT CASE WHEN source.actualvalue = 0 OR source.actualvalue IS NULL THEN source.EmployeeCode END)"
-      comment: "实际达成=0或无数据的业代人数"
 
     - name: Employee Count with Fractional Actual
       expr: "COUNT(DISTINCT CASE WHEN source.actualvalue % 1 != 0 THEN source.EmployeeCode END)"
-      comment: "实际达成值含小数的业代人数 (数据质量标记)"
 
     - name: Scan Side Achieved POC Count
       expr: "SUM(CASE WHEN scan_summary.achievement_date IS NOT NULL THEN 1 ELSE 0 END)"
-      comment: "Scan侧达成的售点数 (用于交叉校验)"
 
     - name: KPI-vs-Scan Difference
       expr: "SUM(source.actualvalue) - SUM(CASE WHEN scan_summary.achievement_date IS NOT NULL THEN 1 ELSE 0 END)"
-      comment: "KPI系统上报值 - Scan侧达成数的差异"
 
     - name: Max Actual Value
       expr: "MAX(source.actualvalue)"
-      comment: "最大上报值 (极端值检测)"
 
     - name: Min Actual Value
       expr: "MIN(source.actualvalue)"
-      comment: "最小上报值"
 
     - name: Median Actual Value
       expr: "PERCENTILE(source.actualvalue, 0.5)"
-      comment: "上报值中位数"
 $$
 ```
 
@@ -536,7 +504,7 @@ SELECT
   MEASURE(`Total Actual Value`) AS actual,
   MEASURE(`KPI Achievement Rate`) AS achieve_rate,
   MEASURE(`Target-Actual Gap`) AS gap
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
 WHERE `Year Month` BETWEEN 202601 AND 202604
 GROUP BY ALL
 ORDER BY `Year Month`;
@@ -549,7 +517,7 @@ SELECT
   MEASURE(`Total Actual Value`) AS kpi_actual,
   MEASURE(`Scan Side Achieved POC Count`) AS scan_achieved,
   MEASURE(`KPI-vs-Scan Difference`) AS diff
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
 WHERE `Year Month` = 202604
 GROUP BY ALL
 HAVING MEASURE(`KPI-vs-Scan Difference`) != 0
@@ -562,11 +530,11 @@ SELECT
   `Employee Code`,
   `Username`,
   MEASURE(`Total Actual Value`) AS actual
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
 WHERE `Year Month` = 202604
   AND `Employee Code` IN (
     SELECT `Employee Code`
-    FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
+    FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
     WHERE `Year Month` = 202604
     GROUP BY `Employee Code`
     HAVING MEASURE(`Employee Count with Fractional Actual`) > 0
@@ -580,7 +548,7 @@ SELECT
   `Username`,
   MEASURE(`Total Actual Value`) AS actual,
   MEASURE(`Total Target Value`) AS target
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
 WHERE `Year Month` = 202604
 GROUP BY ALL
 HAVING MEASURE(`Total Actual Value`) > 500
@@ -592,7 +560,7 @@ SELECT
   `Year Month`,
   MEASURE(`Employee Count`) AS emp_count,
   MEASURE(`KPI Achievement Rate`) AS achieve_rate
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
 WHERE `Year Month` = 202604
 GROUP BY ALL;
 ```
@@ -603,89 +571,75 @@ GROUP BY ALL;
 
 ### 5.1 设计说明
 
-基于 `bees_distribution_detail`（BEES 平台订单明细），追踪各售点的订单覆盖情况。用于与扫码数据交叉匹配（订单验证）、售点销量层级评估。
+基于 `bees_distribution_detail`（BEES 平台订单明细），追踪各售点的订单覆盖情况。用于与扫码数据交叉匹配（订单验证）、售点销量层级评估。源表不包含渠道字段，渠道下钻需与 MV2 的售点维度组合使用。
 
 ### 5.2 YAML Definition
 
 ```sql
-CREATE OR REPLACE VIEW brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_bees_coverage_metrics
+CREATE OR REPLACE VIEW ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_bees_coverage_metrics
 WITH METRICS
 LANGUAGE YAML
 AS $$
-  version: 1.1
-  comment: "BEES订单分销覆盖 — 按售点×SKU追踪订单覆盖情况，支持售点画像(销量层级)和扫码-订单交叉验证"
+  version: 0.1
   source: brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_bees_distribution_detail
   filter: CAST(yearmonth AS INT) >= 202501
 
   dimensions:
     - name: Year Month
       expr: "CAST(yearmonth AS INT)"
-      comment: "订单月份"
 
     - name: M1 No
       expr: "m1_no"
-      comment: "业代工号"
 
     - name: POC ID
       expr: "poc_middle_id"
-      comment: "售点标识"
 
     - name: Subbrand
       expr: "subbrand"
-      comment: "子品牌"
 
     - name: Pack
       expr: "pack"
-      comment: "包装规格"
 
     - name: CIO Code
       expr: "cio_code"
-      comment: "CIO 条码"
 
     - name: MHA SKU Key
       expr: "mha_sku_key"
-      comment: "对应 MHA 品项标识"
 
     - name: TSBF
       expr: "tsbf"
-      comment: "TS/BF 分类"
 
   measures:
     - name: Order Count
       expr: "COUNT(DISTINCT order_id)"
-      comment: "BEES 订单数"
 
     - name: Distinct POC Count
       expr: "COUNT(DISTINCT poc_middle_id)"
-      comment: "有订单的售点数"
 
     - name: Distinct SKU Count
       expr: "COUNT(DISTINCT cio_code)"
-      comment: "有订单的 SKU 数"
 
     - name: Distinct Subbrand Count
       expr: "COUNT(DISTINCT subbrand)"
-      comment: "有订单的子品牌数"
 
     - name: SKU Coverage per POC
       expr: "COUNT(DISTINCT cio_code) * 1.0 / NULLIF(COUNT(DISTINCT poc_middle_id), 0)"
-      comment: "每售点平均 SKU 覆盖数"
 $$
 ```
 
 ### 5.3 查询示例
 
 ```sql
--- D3: 售点在同行中的销量层级 (按 Channel 内排名)
+-- D3: 售点在 M1 负责范围内的 BEES 订单覆盖排序
 SELECT
+  `M1 No`,
   `POC ID`,
-  `Channel`,
   `Year Month`,
   MEASURE(`Order Count`) AS order_cnt,
   MEASURE(`Distinct SKU Count`) AS sku_cnt,
   MEASURE(`SKU Coverage per POC`) AS sku_per_poc
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_bees_coverage_metrics
-WHERE `Year Month` = 202604 AND `Channel` = 'TT'
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_bees_coverage_metrics
+WHERE `Year Month` = 202604 AND `M1 No` = '28036110'
 GROUP BY ALL
 ORDER BY order_cnt DESC;
 
@@ -696,7 +650,7 @@ SELECT
   MEASURE(`Order Count`) AS total_orders,
   MEASURE(`Distinct POC Count`) AS covered_pocs,
   MEASURE(`Distinct SKU Count`) AS sku_variety
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_bees_coverage_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_bees_coverage_metrics
 WHERE `Year Month` = 202604
 GROUP BY ALL
 ORDER BY covered_pocs DESC;
@@ -713,64 +667,51 @@ ORDER BY covered_pocs DESC;
 ### 6.2 YAML Definition
 
 ```sql
-CREATE OR REPLACE VIEW brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kbd_coverage_metrics
+CREATE OR REPLACE VIEW ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kbd_coverage_metrics
 WITH METRICS
 LANGUAGE YAML
 AS $$
-  version: 1.1
-  comment: "KA渠道KBD铺货覆盖 — 按售点×SKU追踪关键品牌铺货情况，用于KA渠道的MHA补充评估"
+  version: 0.1
   source: brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_kbd_detail
   filter: CAST(yearmonth AS INT) >= 202602
 
   dimensions:
     - name: Year Month
       expr: "CAST(yearmonth AS INT)"
-      comment: "数据月份"
 
     - name: M1 No
       expr: "m1_no"
-      comment: "业代工号"
 
     - name: POC ID
       expr: "poc_middle_id"
-      comment: "售点标识"
 
     - name: Subbrand
       expr: "subbrand"
-      comment: "子品牌"
 
     - name: Pack
       expr: "pack"
-      comment: "包装规格"
 
     - name: TSBF
       expr: "tsbf"
-      comment: "TS/BF 分类"
 
     - name: MHA SKU Key
       expr: "mha_sku_key"
-      comment: "对应 MHA 品项标识"
 
   measures:
     - name: KBD SKU Count
       expr: "COUNT(DISTINCT mha_sku_key)"
-      comment: "铺货 SKU 数"
 
     - name: KBD POC Count
       expr: "COUNT(DISTINCT poc_middle_id)"
-      comment: "铺货售点数"
 
     - name: KBD Subbrand Count
       expr: "COUNT(DISTINCT subbrand)"
-      comment: "铺货子品牌数"
 
     - name: KBD Pack Count
       expr: "COUNT(DISTINCT pack)"
-      comment: "包装规格数"
 
     - name: KBD TSBF Count
       expr: "COUNT(DISTINCT tsbf)"
-      comment: "TSBF 分类数"
 $$
 ```
 
@@ -783,7 +724,7 @@ SELECT
   MEASURE(`KBD POC Count`) AS kbd_pocs,
   MEASURE(`KBD SKU Count`) AS kbd_skus,
   MEASURE(`KBD Subbrand Count`) AS kbd_subbrands
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kbd_coverage_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kbd_coverage_metrics
 WHERE `Year Month` = 202604
 GROUP BY ALL;
 
@@ -793,7 +734,7 @@ SELECT
   `Subbrand`,
   `Pack`,
   MEASURE(`KBD SKU Count`) AS sku_count
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kbd_coverage_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kbd_coverage_metrics
 WHERE `Year Month` = 202604 AND `POC ID` = '1234567'
 GROUP BY ALL
 ORDER BY `Subbrand`;
@@ -816,7 +757,7 @@ ORDER BY `Subbrand`;
 | **B3 机会识别** | "差 1 个 Group 的店" | MV1 | 先得未达成 POC → MV1 看 Group 差数 |
 | **C4 订单匹配** | "扫码无对应订单" | MV4 | BEES order count vs scan count |
 | **D1 售点概览** | "这家店基本情况" | MV2 + MV4 + MV5 | 多维数据聚合 |
-| **D3 销量层级** | "同行中销量水平" | MV4 | Channel 内 Order Count percentile |
+| **D3 销量层级** | "负责范围内销量水平" | MV4 | M1 内 Order Count 排名 |
 | **E1 区域对比** | "大区达成率对比" | MV1 + MV3 | 按 Region 分组 |
 | **E2 渠道对比** | "TT vs KA 达成" | MV2 | 按 Channel 分组 |
 | **E3 业态对比** | "大卖场 vs 便利店" | MV2 | 按 Format Category 分组 |
@@ -833,13 +774,13 @@ ORDER BY `Subbrand`;
 Agent 查询计划:
 1. 意图识别: 场景E1+E2 (达成率 + 下钻渠道), Region=用户所属大区, 时间=当月
 2. 查询 MV2 (POC Achievement):
-   SELECT Region, Channel, MEASURE(POC Achievement Rate), MEASURE(Achieved POC Count)
-   WHERE Year Month = 当月 AND Region = '华东'
-   GROUP BY Region, Channel
+   SELECT `Region`, `Channel`, MEASURE(`POC Achievement Rate`), MEASURE(`Achieved POC Count`)
+   WHERE `Year Month` = 当月 AND `Region` = '华东'
+   GROUP BY `Region`, `Channel`
 3. 如果发现某渠道达成低, 追问 MV1 (Detail):
-   SELECT Channel, Format Name, GROUP Code, MEASURE(SKU Achievement Rate)
-   WHERE Year Month = 当月 AND Region = '华东' AND Channel = 'TT'
-   GROUP BY Channel, Format Name, Group Code
+   SELECT `Channel`, `Format Name`, `Group Code`, MEASURE(`SKU Achievement Rate`)
+   WHERE `Year Month` = 当月 AND `Region` = '华东' AND `Channel` = 'TT'
+   GROUP BY `Channel`, `Format Name`, `Group Code`
 4. 回答: "华东大区当月达成率 78%, 其中 TT 渠道偏低(65%), 主要拖累的 Group 是..."
 ```
 
@@ -849,34 +790,33 @@ Agent 查询计划:
 
 ### 8.1 创建顺序
 
-由于 MV3 引用了 `m1_scan_distribution_achievement_summary` 作为 join，需先创建 MV1 和 MV2，再创建 MV3。
+5 个 Metric View 之间没有对象依赖；只依赖各自的源表和 `employee_relation_m1m2m3_monthly` 组织关系表。可按任意顺序创建。
 
 ```
-MV2 (POC Achievement) → MV1 (Detail + Org) → MV3 (KPI Benchmark)
-MV4 (BEES) 和 MV5 (KBD) 无依赖，可并行创建
+MV1, MV2, MV3, MV4, MV5 可并行创建
 ```
 
-### 8.2 MCP 创建命令
+### 8.2 集群创建命令
 
-所有 MV 通过 `manage_metric_views` MCP tool 创建，使用 `or_replace=True` 确保幂等。
+在 DBR 16.4 ML 集群上使用 `spark.sql(<DDL>)` 执行上面的 `CREATE OR REPLACE VIEW ... WITH METRICS` 语句。目标 schema 需要 `USE SCHEMA` 和 `CREATE TABLE` 权限；否则会返回 `PERMISSION_DENIED`。
 
 ### 8.3 权限管理
 
 ```sql
 -- 授予 Data Agent 服务账号查询权限
-GRANT SELECT ON brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics TO `data-agent@company.com`;
-GRANT SELECT ON brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics TO `data-agent@company.com`;
-GRANT SELECT ON brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics TO `data-agent@company.com`;
-GRANT SELECT ON brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_bees_coverage_metrics TO `data-agent@company.com`;
-GRANT SELECT ON brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kbd_coverage_metrics TO `data-agent@company.com`;
+GRANT SELECT ON ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics TO `data-agent@company.com`;
+GRANT SELECT ON ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics TO `data-agent@company.com`;
+GRANT SELECT ON ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics TO `data-agent@company.com`;
+GRANT SELECT ON ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_bees_coverage_metrics TO `data-agent@company.com`;
+GRANT SELECT ON ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kbd_coverage_metrics TO `data-agent@company.com`;
 
 -- 授予 M2/M3 用户组查询权限
-GRANT SELECT ON brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics TO `m2_managers`;
-GRANT SELECT ON brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics TO `m2_managers`;
+GRANT SELECT ON ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics TO `m2_managers`;
+GRANT SELECT ON ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics TO `m2_managers`;
 
 -- 授予 M1 用户组查询权限 (仅限自己数据—由 Agent 层实现行级过滤)
-GRANT SELECT ON brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics TO `m1_sales`;
-GRANT SELECT ON brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_bees_coverage_metrics TO `m1_sales`;
+GRANT SELECT ON ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics TO `m1_sales`;
+GRANT SELECT ON ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_bees_coverage_metrics TO `m1_sales`;
 ```
 
 ### 8.4 维护注意事项
@@ -885,7 +825,7 @@ GRANT SELECT ON brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_bees_coverage_
 2. **渠道映射变更**：如 `channel_name` 新增渠道类别，需更新 `Channel` Dimension 的 CASE 逻辑
 3. **业态阈值调整**：如达成判定阈值变化（≥5 / ≥4），需更新 MV2 的 `Format Category` 和相关 Measure
 4. **组织层级变更**：`employee_relation_m1m2m3_monthly` 的 org 字段如新增层级，MV1 和 MV3 需新增对应 Dimension
-5. **T2WS 排除**：所有 MV 的 filter 已排除 `channel = 'T2WS'`，如业务不再需要此排除逻辑，移除 filter 中的 `AND channel != 'T2WS'`
+5. **T2WS 排除**：MV1/MV2 的 filter 使用 `(channel IS NULL OR channel != 'T2WS')`，保留 NULL 渠道并在 `Channel` Dimension 中映射为 KA。如业务不再需要此排除逻辑，移除该条件。
 
 ### 8.5 数据验证记录 (2026-05-19)
 
@@ -900,6 +840,17 @@ GRANT SELECT ON brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_bees_coverage_
 | MV3 空值 | 202605: 7,141 records 全部 actualvalue=NULL (当月未结束) | 查询时需过滤 |
 | BEES subbrand | 202601 subbrand_count=0 (数据质量问题), 其他月份正常 | 使用 `subbrand` 维度时需注意空值 |
 | Channels | KA, TT, CR, NL, T2WS 五种渠道 | 已排除 T2WS |
+
+### 8.6 Runtime 验证记录 (2026-05-21)
+
+在 `ds_dev_cn3` (DBR 16.4 ML) 上使用目标 schema `ds_uc_china_dev.gld_apc_sales_m1_scan_dw` 执行验证：
+
+| 验证项 | 结果 | 说明 |
+|--------|------|------|
+| 目标 schema | 已创建 | `ds_uc_china_dev.gld_apc_sales_m1_scan_dw` |
+| MV1-MV5 DDL | 全部创建成功 | 使用本文件中的 `version: 0.1` SQL |
+| MV1-MV5 smoke query | 全部查询成功 | 以 202604 / `28036110` 做单用户指标查询 |
+| Metric View 对象 | 已保留 | 5 个 Metric View 已创建在目标 dev schema |
 
 ---
 

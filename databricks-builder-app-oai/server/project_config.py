@@ -48,7 +48,7 @@ def default_project_settings() -> dict[str, Any]:
         'discovery_sources': {},
         'metric_views': [],
       },
-      'preferred_tables': [],
+      'input_tables': [],
       'deprecated_tables': [],
       'glossary': {},
       'sample_queries': [],
@@ -125,6 +125,15 @@ def normalize_project_settings(settings: Mapping[str, Any] | None) -> dict[str, 
     normalized['resources'] = resources
   for key in RESOURCE_SETTING_KEYS:
     resources.setdefault(key, None)
+
+  semantics = normalized.get('semantics')
+  if not isinstance(semantics, dict):
+    semantics = copy.deepcopy(default_project_settings()['semantics'])
+    normalized['semantics'] = semantics
+  legacy_tables = semantics.pop('preferred_tables', None)
+  if legacy_tables and not semantics.get('input_tables'):
+    semantics['input_tables'] = copy.deepcopy(legacy_tables)
+  semantics.setdefault('input_tables', [])
 
   return normalized
 

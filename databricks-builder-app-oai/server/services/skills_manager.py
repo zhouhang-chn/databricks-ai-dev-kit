@@ -24,7 +24,8 @@ BASE_TOOL_NAMES = frozenset(
     'read_project_file',
     'execute_sql',
     'execute_sql_multi',
-    'get_table_stats_and_schema',
+    'get_table_schema',
+    'get_table_stats',
     'check_operation_status',
     'list_operations',
   }

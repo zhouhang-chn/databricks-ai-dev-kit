@@ -109,7 +109,8 @@ def test_databricks_analysis_gets_minimal_read_only_tools():
     'edit_project_file',
     'execute_sql',
     'execute_sql_multi',
-    'get_table_stats_and_schema',
+    'get_table_schema',
+    'get_table_stats',
     'list_compute',
     'get_current_user',
     'manage_cluster',
@@ -128,11 +129,23 @@ def test_databricks_analysis_gets_minimal_read_only_tools():
     'read_project_file',
     'execute_sql',
     'execute_sql_multi',
-    'get_table_stats_and_schema',
+    'get_table_schema',
+    'get_table_stats',
     'list_compute',
     'get_current_user',
     'mcp__databricks__execute_sql',
   ]
+
+
+def test_databricks_analysis_skill_documents_metric_view_first_routing():
+  """The analysis skill should route governed KPI questions through Metric Views first."""
+  skill_path = Path(__file__).resolve().parents[2] / 'databricks-skills' / 'databricks-analysis' / 'SKILL.md'
+  skill = skill_path.read_text(encoding='utf-8')
+
+  assert 'Semantic layer first' in skill
+  assert 'Query Metric Views through `execute_sql` using `MEASURE(...)`' in skill
+  assert 'Do not call input tables "preferred" tables' in skill
+  assert 'Do not silently skip to raw input tables' in skill
 
 
 def test_scenario_onboarding_skill_gets_artifact_and_semantic_tools():
@@ -148,7 +161,8 @@ def test_scenario_onboarding_skill_gets_artifact_and_semantic_tools():
     'grep_project_files',
     'get_project_tree',
     'execute_sql',
-    'get_table_stats_and_schema',
+    'get_table_schema',
+    'get_table_stats',
     'manage_metric_views',
     'manage_volume_files',
     'get_volume_folder_details',
@@ -171,7 +185,8 @@ def test_scenario_onboarding_skill_gets_artifact_and_semantic_tools():
     'grep_project_files',
     'get_project_tree',
     'execute_sql',
-    'get_table_stats_and_schema',
+    'get_table_schema',
+    'get_table_stats',
     'manage_metric_views',
     'manage_volume_files',
     'get_volume_folder_details',

@@ -6,9 +6,6 @@ Provides user-scoped CRUD operations using async SQLAlchemy.
 import json
 from typing import Any, Optional
 
-from sqlalchemy import delete, select
-from sqlalchemy.orm import selectinload
-
 from server.db import Conversation, Execution, Message, Project, session_scope
 from server.project_config import (
   DEFAULT_PROJECT_STATUS,
@@ -17,6 +14,8 @@ from server.project_config import (
   merge_project_settings,
   serialize_project_settings,
 )
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import selectinload
 
 
 class ProjectStorage:
@@ -167,17 +166,32 @@ class ConversationStorage:
   async def get_all(self) -> list[Conversation]:
     """Get all conversations for the project, newest first."""
     async with session_scope() as session:
+      message_counts = (
+        select(
+          Message.conversation_id,
+          func.count(Message.id).label('message_count'),
+        )
+        .group_by(Message.conversation_id)
+        .subquery()
+      )
       result = await session.execute(
-        select(Conversation)
+        select(
+          Conversation,
+          func.coalesce(message_counts.c.message_count, 0).label('message_count'),
+        )
         .join(Project, Conversation.project_id == Project.id)
-        .options(selectinload(Conversation.messages))
+        .outerjoin(message_counts, Conversation.id == message_counts.c.conversation_id)
         .where(
           Conversation.project_id == self.project_id,
           Project.user_email == self.user_email,
         )
         .order_by(Conversation.created_at.desc())
       )
-      return list(result.scalars().all())
+      conversations: list[Conversation] = []
+      for conversation, message_count in result.all():
+        conversation.__dict__['_message_count'] = int(message_count or 0)
+        conversations.append(conversation)
+      return conversations
 
   async def get(self, conversation_id: str) -> Optional[Conversation]:
     """Get a specific conversation with messages."""

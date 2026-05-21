@@ -17,9 +17,8 @@ registered source tables, workspace notebook, and candidate Metric Views.
 
 | Gap | Impact | Next Action |
 |---|---|---|
-| Candidate Metric Views are registered but not certified | Runtime can prefer semantic paths, but answers must disclose candidate status if direct validation is absent | Run `get_table_stats_and_schema` for MV1-MV3 and source tables, then query with `MEASURE()` |
+| Candidate Metric Views are registered but not certified | Runtime can prefer semantic paths, but answers must disclose candidate status if direct validation is absent | Run `get_table_schema` for MV1-MV3 and source tables, use selected-column `get_table_stats` only where profiling is needed, then query with `MEASURE()` |
 | Direct SQL oracles are not stored as separate files yet | Reconciliation is harder to repeat | Keep validation query templates under `metric-views/` and update with final SQL after live validation |
 | No SQL warehouse is configured | Validation may rely on cluster SQL execution, which is slower and less aligned with DBSQL Metric View usage | Add `warehouse_id` when available |
 | MV4-MV5 are design-only | Fraud, coverage, and profile questions should not be treated as ready | Keep MV4-MV5 candidate/deferred until source outputs stabilize |
 | No input volumes are declared | File-based evidence cannot be used | Add only when a requirement depends on files |
-

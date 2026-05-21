@@ -52,7 +52,6 @@ class DatabricksResources(BaseModel):
   workspace_folders: list[str] = Field(default_factory=list)
   workspace_files: list[str] = Field(default_factory=list)
   workflows: list[str] = Field(default_factory=list)
-  input_schemas: list[str] = Field(default_factory=list)
   input_tables: list[str] = Field(default_factory=list)
   input_metric_views: list[str] = Field(default_factory=list)
   input_volume_paths: list[str] = Field(default_factory=list)
@@ -68,7 +67,6 @@ class DatabricksResources(BaseModel):
     'workspace_folders',
     'workspace_files',
     'workflows',
-    'input_schemas',
     'input_tables',
     'input_metric_views',
     'input_volume_paths',
@@ -316,14 +314,10 @@ def default_project_setting(
     f'{default_catalog}.{default_schema}' if default_catalog and default_schema else None
   )
 
-  preferred_tables = _coerce_string_list(semantics.get('preferred_tables'))
-  metric_views = _coerce_string_list(semantics.get('metric_views'))
-  input_schemas = _unique_preserve_order(
-    [
-      *(_schema_from_table_name(table) for table in preferred_tables),
-      *(_schema_from_table_name(view) for view in metric_views),
-    ]
+  input_tables = _coerce_string_list(
+    semantics.get('input_tables') or semantics.get('preferred_tables')
   )
+  metric_views = _coerce_string_list(semantics.get('metric_views'))
 
   workspace_folder = _coerce_optional_string(resources.get('workspace_folder'))
 
@@ -337,8 +331,7 @@ def default_project_setting(
       workspace_folders=[workspace_folder] if workspace_folder else [],
       workspace_files=[],
       workflows=_coerce_string_list(workflows.get('enabled')),
-      input_schemas=input_schemas,
-      input_tables=preferred_tables,
+      input_tables=input_tables,
       input_metric_views=metric_views,
       input_volume_paths=[],
       output_schema=output_schema,
@@ -452,7 +445,6 @@ def render_project_setting_yaml(setting: ProjectSetting) -> str:
   _append_string_list(lines, 'workspace_folders', resources.workspace_folders)
   _append_string_list(lines, 'workspace_files', resources.workspace_files)
   _append_string_list(lines, 'workflows', resources.workflows)
-  _append_string_list(lines, 'input_schemas', resources.input_schemas)
   _append_string_list(lines, 'input_tables', resources.input_tables)
   _append_string_list(lines, 'input_metric_views', resources.input_metric_views)
   _append_string_list(lines, 'input_volume_paths', resources.input_volume_paths)
@@ -528,7 +520,6 @@ def project_update_from_setting(setting: ProjectSetting) -> dict[str, Any]:
       *resources.workspace_folders,
       *resources.workspace_files,
       *resources.workflows,
-      *resources.input_schemas,
       *resources.input_tables,
       *resources.input_metric_views,
       *resources.input_volume_paths,
@@ -552,7 +543,7 @@ def project_update_from_setting(setting: ProjectSetting) -> dict[str, Any]:
       'semantics': {
         'metric_views': resources.input_metric_views,
         'metric_view_context': _yaml_data(setting.metric_view_context),
-        'preferred_tables': resources.input_tables,
+        'input_tables': resources.input_tables,
         'known_caveats': setting.analysis_notes,
       },
       'scenario_onboarding': {
@@ -952,7 +943,6 @@ def validate_project_setting(setting: ProjectSetting) -> ProjectSettingValidatio
     checks, resources.workspace_files, expected_directory=False, name='workspace_file'
   )
   _validate_workflows(checks, resources.workflows)
-  _validate_schemas(checks, resources.input_schemas)
   _validate_tables(checks, resources.input_tables, resources)
   _validate_metric_views(checks, resources.input_metric_views)
   _validate_volume_paths(

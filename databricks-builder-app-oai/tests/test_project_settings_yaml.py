@@ -83,7 +83,8 @@ def test_project_update_from_setting_maps_yaml_to_runtime_defaults():
   assert patch['settings']['resources']['warehouse_id'] == 'warehouse-1'
   assert patch['settings']['resources']['default_catalog'] == 'out'
   assert patch['settings']['resources']['default_schema'] == 'schema'
-  assert patch['settings']['semantics']['preferred_tables'] == ['cat.sch.table']
+  assert patch['settings']['semantics']['input_tables'] == ['cat.sch.table']
+  assert 'preferred_tables' not in patch['settings']['semantics']
   assert patch['settings']['semantics']['metric_views'] == ['cat.sch.metric_view']
   assert patch['settings']['semantics']['known_caveats'] == ['Known caveat']
   assert patch['settings']['workflows']['enabled'] == ['daily_refresh']
