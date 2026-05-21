@@ -109,7 +109,7 @@ require_command() {
 
 validate_runtime() {
   require_command docker
-  docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required"
+  sudo docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required"
 }
 
 validate_port() {
@@ -296,7 +296,7 @@ SH
 }
 
 compose() {
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  sudo docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
 print_endpoints() {
