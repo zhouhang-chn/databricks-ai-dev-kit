@@ -10,6 +10,7 @@ NO_CACHE=false
 PULL=false
 SERVICES=(backend frontend)
 USE_CONFIG=false
+PLATFORM_OVERRIDE=""
 
 usage() {
   cat <<'EOF'
@@ -23,8 +24,19 @@ Options:
   --config PATH        Env file to use (default: databricks-builder-app-oai/.deploy/docker.env)
   --no-cache           Build without Docker layer cache
   --pull               Always pull newer base images
+  --platform PLATFORM  Target platform (default: linux/amd64)
   -h, --help           Show this help
 EOF
+}
+
+require_value() {
+  local option="$1"
+  local value="${2:-}"
+  if [[ -z "$value" || "$value" == --* ]]; then
+    echo "$option requires a value" >&2
+    usage >&2
+    exit 1
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -38,6 +50,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --config)
+      require_value "$1" "${2:-}"
       CONFIG_FILE="$2"
       USE_CONFIG=true
       shift 2
@@ -49,6 +62,11 @@ while [[ $# -gt 0 ]]; do
     --pull)
       PULL=true
       shift
+      ;;
+    --platform)
+      require_value "$1" "${2:-}"
+      PLATFORM_OVERRIDE="$2"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -82,8 +100,12 @@ IMAGE_REGISTRY_PREFIX="${IMAGE_REGISTRY_PREFIX:-azrbrewdatnonprodce2acr.azurecr.
 IMAGE_VERSION="${IMAGE_VERSION:-latest}"
 BACKEND_IMAGE_NAME="${BACKEND_IMAGE_NAME:-builder-app-oai-backend}"
 FRONTEND_IMAGE_NAME="${FRONTEND_IMAGE_NAME:-builder-app-oai-frontend}"
+IMAGE_PLATFORM="${IMAGE_PLATFORM:-linux/amd64}"
+if [[ -n "$PLATFORM_OVERRIDE" ]]; then
+  IMAGE_PLATFORM="$PLATFORM_OVERRIDE"
+fi
 
-BUILD_ARGS=(--push)
+BUILD_ARGS=(--push --platform "$IMAGE_PLATFORM")
 if [[ "$NO_CACHE" == true ]]; then
   BUILD_ARGS+=(--no-cache)
 fi
@@ -97,7 +119,7 @@ build_service() {
   local dockerfile="$3"
   local tag="${IMAGE_REGISTRY_PREFIX}${image_name}:${IMAGE_VERSION}"
 
-  echo "Building and pushing $service image: $tag"
+  echo "Building and pushing $service image: $tag ($IMAGE_PLATFORM)"
   docker buildx build \
     "${BUILD_ARGS[@]}" \
     -t "$tag" \

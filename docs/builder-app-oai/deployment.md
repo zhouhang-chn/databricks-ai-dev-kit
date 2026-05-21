@@ -120,6 +120,12 @@ The build script uses `docker buildx build --push -t ...`. Make sure Docker is l
 docker login azrbrewdatnonprodce2acr.azurecr.cn
 ```
 
+By default, `build.sh` builds and pushes `linux/amd64` images for self-managed Linux servers:
+
+```bash
+databricks-builder-app-oai/scripts/docker/build.sh --platform linux/amd64
+```
+
 ## Deploy
 
 Build and start the full stack:
