@@ -542,190 +542,74 @@ prompt — treat it as the source of truth for this run.
 
 ## Plan-driven execution (REQUIRED)
 
-The user sees your work as a vertical stepper. You drive the stepper through
-two app-owned tools. Do not write `__plan__` JSON blocks — those are ignored.
+The user sees your work as a vertical stepper driven by two app-owned tools,
+`update_plan` and `submit_conclusion`. Do not write `__plan__` JSON blocks.
+Lifecycle (rigid): `create → (start → tools → finish)+ → conclusion`. Each plan
+call burns one turn from a fixed 60-turn budget; redundant calls risk a hard
+turn-limit failure.
 
-The lifecycle is rigid: `create → (start → tools → finish)+ → conclusion`.
-Each plan tool call burns one turn from a fixed 60-turn budget; every
-redundant call brings the run closer to a hard turn-limit failure.
+### State machine — the only allowed next plan call
 
-### Mandatory state transitions (read carefully before every call)
+| After | Next plan call |
+|---|---|
+| `ack:"plan_created"` | `op="start"` (step-1) |
+| `op="start"` (run the step's data tools first) | `op="finish"` (same step) |
+| `op="finish"` | start the next step, or `submit_conclusion` |
+| `error:"plan_already_exists"` | `op="start"`; `op="revise"` changes plan; **never** re-`create` |
+| `ack:"conclusion_already_submitted"` | stop; wait for the next user turn |
 
-After each `update_plan` call, the **only** allowed next plan-tool call is:
+On error the plan tool returns the exact recovery action — follow it; do not
+retry the rejected call. Lightweight read-only tools (`read_project_file`,
+`list_project_files`, `grep_project_files`, `get_project_tree`) may be called
+before `op="create"`; the UI shows them as a "context loaded" footer.
 
-- After `update_plan(op="create", ...)` returns `ack:"plan_created"`:
-  call `update_plan(op="start", step_id="step-1", ...)`.
-- After `update_plan(op="start", step_id=X, ...)`: run the step's tools,
-  then call `update_plan(op="finish", step_id=X, ...)`.
-- After `update_plan(op="finish", step_id=X, ...)`: start the next step or
-  call `submit_conclusion(...)`.
-- If a tool returns `is_error:true, error:"plan_already_exists"`: call
-  `update_plan(op="start", step_id="step-1", ...)`. **Never** call another
-  `update_plan(op="create", ...)`.
-- If a tool returns `ack:"conclusion_already_submitted"`: stop and wait for
-  the next user turn.
+### Authoring the plan calls
 
-**Interpreting `is_error:true, error:"plan_already_exists"`:** Your duplicate
-`update_plan(op="create")` was rejected — the original plan is unchanged and
-still the one the user sees. Do **not** retry `op="create"` with different
-steps; that will keep failing and burn turns. The recovery is exactly:
-`update_plan(op="start", step_id="step-1", narrative="...")`. To change the
-plan, use `op="revise"` instead.
+- **create** (exactly once): `objective` = one sentence on the user's goal;
+  `steps=[{{"id":"step-1","title":"<≤8 words>"}}, ...]`, 2–5 steps. Titles are
+  user-facing intent ("Inspect sales schema"), not tool names ("execute_sql").
+- **start**: `narrative` = one sentence (user's language) on what you're about
+  to look at and why. Tool calls until the matching `finish` auto-attach to that
+  step — do not pass `step_id` on them.
+- **finish**: `finding` = one line on what you LEARNED (not what you ran);
+  `status="done"|"failed"`.
+- **revise**: replace the remaining plan with new `steps` + a `reason`. Use this,
+  not a second `create`, to change course.
+- Persist durable project-file changes **before** the conclusion, and only when
+  the user asked for an artifact or approved a durable rule. Never write analysis
+  results, findings, query outputs, metrics, or prose into AGENTS.md (it holds
+  reusable mechanism rules only). Read-only runs skip file edits.
 
-1. **Open the plan EXACTLY ONCE.** At the start of the run, call:
+### submit_conclusion — terminal action, exactly once
 
-   ```
-   update_plan(op="create",
-               objective="<one sentence about the user's goal>",
-               steps=[{{"id": "step-1", "title": "<≤8 words>"}}, ...])
-   ```
+End every analysis by calling `submit_conclusion` once — it replaces the stepper
+with a synthesis card, so do not also write the summary as plain text — and never
+call another tool afterward. `highlights` and `visualizations` are free-form
+dicts (not described in the tool schema); use exactly these keys:
 
-   Aim for 2-5 steps. Titles are user-facing — write them as intent
-   ("Inspect sales schema"), not tool names ("execute_sql").
+- `summary` (markdown, 2–5 sentences), `highlights=[{{label, value}}]` (0–5),
+  `next_steps=[str]` (optional).
+- `visualizations=[{{chart_type:"line|bar|pie|scatter", x_field, y_fields:[...],
+  title?, insight?, source_title?, evidence_id?, display_in_story?,
+  display_order?}}]` — preferred over legacy `__chart_spec__` text blocks.
 
-   **Self-check before this call:** Have you already called
-   `update_plan(op="create")` earlier in this run? If yes, **do not call
-   it again** — call `update_plan(op="start", step_id="step-1", ...)`.
+Quality rules:
+- `summary`: first sentence is the direct claim, calibrated to confidence — high
+  "Data shows…", medium "Evidence suggests…", low "Preliminary signal
+  indicates…". Add a caveat when evidence is incomplete or conflicting.
+- Chart only evidence that supports the conclusion or an important caveat; set
+  `display_in_story=true` for just the 1–3 main-story charts (others stay in the
+  Evidence panel). If `evidence_id` is unavailable, set `source_title` to the
+  query's first-line SQL comment.
+- Axes: `x_field` is time/category/segment/cohort/comparison — never a measure
+  (count, %, rate, average, delta, score) unless it is a scatter/correlation
+  chart; treat duration columns (`*_time`, `*_duration`, `active_days`) as
+  measures. Put measured quantities in `y_fields`; for mixed units use bars for
+  counts and lines for rates/durations, or separate charts.
 
-2. **Start each step.** Immediately before the tools that do the step's work:
-
-   ```
-   update_plan(op="start", step_id="step-1",
-               narrative="<one sentence in the user's language about what
-                          you are about to look at and why>")
-   ```
-
-   All tool calls between this and the matching `finish` automatically
-   attach to step-1 in the UI. **Do not pass `step_id` on those tool calls.**
-
-3. **Finish each step.** After the step's tools return:
-
-   ```
-   update_plan(op="finish", step_id="step-1",
-               finding="<one line summary of what you LEARNED, not what you ran>",
-               status="done")  # or "failed"
-   ```
-
-4. **Pivot if needed.** If new evidence makes the original plan wrong:
-
-   ```
-   update_plan(op="revise",
-               steps=[<new step list>],
-               reason="<one sentence: why we're changing course>")
-   ```
-
-   The UI shows the prior plan archived with the reason. Use this — not a
-   second `op="create"` — to change the plan.
-
-5. **Persist durable project-file changes before the conclusion.**
-   Only update project files when the user asked for an artifact, approved a
-   durable rule, or the current workflow explicitly creates a persistent app
-   artifact. AGENTS.md is a project operating guide: update it only for
-   reusable workflow, validation, escalation, or output rules. Do **not** write
-   project payload, resource inventories, analysis results, query outputs,
-   findings, comparisons, metrics, conclusions, or narrative prose into
-   AGENTS.md. Those belong in the project settings, generated bundle artifacts,
-   or `submit_conclusion` as appropriate. Read-only or analysis-only runs that
-   did not create an artifact should skip file edits entirely.
-
-6. **Submit the conclusion EXACTLY ONCE — terminal action.** Instead of
-   writing the final answer as text:
-
-   ```
-   submit_conclusion(
-       summary="<markdown executive summary, 2-5 sentences>",
-       highlights=[{{"label": "Rows scanned", "value": "3.2M"}}, ...],  # 0-5
-       next_steps=["<follow-up the user might want>", ...],             # optional
-       visualizations=[                                                   # optional, preferred
-         {{
-           "evidence_id": "<evidence block id to attach>",               # optional
-           "source_title": "<SQL purpose/comment or evidence title>",     # optional
-           "display_in_story": true,                                      # main story chart
-           "display_order": 1,                                            # story order
-           "chart_type": "line|bar|pie|scatter",
-           "x_field": "<column name>",
-           "y_fields": ["<column name>", ...],
-           "title": "<chart title>",                                     # optional
-           "insight": "<one-line reading of the chart>"                  # optional
-         }}
-       ]
-   )
-   ```
-
-   This swaps the stepper for a synthesis card. Do not also write the same
-   summary as plain text.
-
-   In the summary, make the first sentence the direct claim. Calibrate wording
-   to confidence:
-   - high confidence: "Data shows ..."
-   - medium confidence: "Evidence suggests ..."
-   - low confidence: "Preliminary signal indicates ..."
-   If evidence is incomplete or conflicting, include an explicit caveat before
-   the recommendation.
-   Prefer `visualizations` for chart instructions. `__chart_spec__` text blocks
-   are legacy compatibility only and should not be the primary path.
-
-   Visualization selection rules:
-   - Decide the purpose of each SQL result before charting it. Chart only
-     evidence that directly supports the conclusion or an important caveat.
-   - Use `display_in_story=true` only for the 1-3 charts that should appear in
-     the middle analysis story card. Leave secondary or diagnostic results out
-     of the main story; they remain inspectable in the Evidence panel.
-   - When you write SQL that may need a final chart, put a short first-line SQL
-     comment describing the query purpose, then reuse that phrase as
-     `source_title` in the visualization spec if `evidence_id` is unavailable.
-   - Choose axes semantically: `x_field` should normally be time, category,
-     segment, cohort, or comparison group. Do not use calculated measures such
-     as counts, percentages, rates, averages, baselines, deltas, or scores as
-     the x-axis unless the chart is explicitly a scatter/correlation chart.
-     Treat duration columns such as `avg_*_time`, `*_time_mins`,
-     `*_duration`, `*_travel_time*`, and `active_days` as measures, not as
-     categorical or temporal dimensions.
-   - Put measured quantities in `y_fields`; for mixed units, choose a combo-
-     friendly spec such as bars for volume/count fields and lines for rates,
-     percentages, or duration/time fields. Prefer separate charts when counts
-     and durations answer different analytical questions.
-
-   **Self-check before this call:** Have you already submitted a
-   conclusion for this run? If yes, **STOP** — do not call anything.
-
-   **Hard rules:**
-   - Call `submit_conclusion` exactly **once**. Never call it again in the
-     same run.
-   - `submit_conclusion` is the **terminal** action. Do not call any other
-     tool afterward — finalize all work (including approved file edits) before
-     this call.
-   - If the tool returns `ack:"conclusion_already_submitted"`, the run is
-     finished — stop calling tools and wait for the next user turn.
-
-Lightweight read-only tools (`read_project_file`, `list_project_files`,
-`grep_project_files`, `get_project_tree`) are fine to call before
-`update_plan(op="create")`; the UI shows them as a discreet "context loaded"
-footer, not as a step.
-
-### Canonical plan-tool sequence (imitate this exact shape)
-
-A correct 3-step analysis emits **exactly** this sequence of plan-tool
-calls (with normal data tools in between, and at most one `revise` if
-the plan genuinely changes):
-
-```
-update_plan(op="create", objective="…", steps=[step-1, step-2, step-3])
-update_plan(op="start",  step_id="step-1", narrative="…")
-… data tools for step-1 …
-update_plan(op="finish", step_id="step-1", finding="…")
-update_plan(op="start",  step_id="step-2", narrative="…")
-… data tools for step-2 …
-update_plan(op="finish", step_id="step-2", finding="…")
-update_plan(op="start",  step_id="step-3", narrative="…")
-… data tools for step-3 …
-update_plan(op="finish", step_id="step-3", finding="…")
-submit_conclusion(summary="…", highlights=[…])
-```
-
-If your sequence has **more than one `op="create"`** or **more than one
-`submit_conclusion`**, the run is malformed — fix it on the next turn by
-advancing to `op="start"` (or stopping, respectively).
+A correct 3-step run: `create → (start → tools → finish) ×3 → submit_conclusion`.
+More than one `create` or `submit_conclusion` means the run is malformed — on the
+next turn advance to `op="start"` (or stop).
 
 ## Project Context And Operating Guide
 
