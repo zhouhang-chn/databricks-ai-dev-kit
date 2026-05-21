@@ -2,6 +2,7 @@
 
 import json
 import logging
+import warnings
 from dataclasses import dataclass
 
 import pytest
@@ -12,6 +13,9 @@ from server.services.agent_runtime.openai_runtime import (
   _extract_embedded_http_status,
   _resolve_enabled_skills,
   _retry_on_wrapped_real_503,
+)
+from server.services.agent_runtime.openai_warning_filters import (
+  suppress_known_agents_dependency_warnings,
 )
 from server.services.logging_utils import ensure_logger_active
 from server.services.project_operating_guide import (
@@ -649,7 +653,8 @@ def test_analysis_skill_openai_filter_exposes_minimal_tools():
     Tool('read_project_file'),
     Tool('write_project_file'),
     Tool('execute_sql'),
-    Tool('get_table_stats_and_schema'),
+    Tool('get_table_schema'),
+    Tool('get_table_stats'),
     Tool('list_compute'),
     Tool('get_current_user'),
     Tool('manage_cluster'),
@@ -666,7 +671,8 @@ def test_analysis_skill_openai_filter_exposes_minimal_tools():
     'submit_conclusion',
     'read_project_file',
     'execute_sql',
-    'get_table_stats_and_schema',
+    'get_table_schema',
+    'get_table_stats',
     'list_compute',
     'get_current_user',
   ]
@@ -674,10 +680,51 @@ def test_analysis_skill_openai_filter_exposes_minimal_tools():
 
 def test_user_preview_databricks_tool_filter_blocks_write_tools():
   """Generated Databricks tools in user preview should be read-oriented."""
-  assert _is_read_only_tool_name('get_table_stats_and_schema') is True
+  assert _is_read_only_tool_name('get_table_schema') is True
+  assert _is_read_only_tool_name('get_table_stats') is True
   assert _is_read_only_tool_name('query_vs_index') is True
   assert _is_read_only_tool_name('manage_jobs') is False
   assert _is_read_only_tool_name('delete_tracked_resource') is False
+
+
+def test_table_schema_tool_schema_arg_does_not_emit_pydantic_warning(monkeypatch):
+  """The public schema argument should not trigger a Pydantic shadow warning."""
+  monkeypatch.setattr(
+    'server.services.tools.databricks_openai._load_fastmcp_tools',
+    lambda **_kwargs: [],
+  )
+
+  with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter('always')
+    tools = create_databricks_tools()
+
+  table_schema = next(tool for tool in tools if tool.name == 'get_table_schema')
+
+  assert 'schema' in table_schema.params_json_schema['properties']
+  assert not any(
+    'Field name "schema" in "get_table_schema_args"' in str(warning.message)
+    for warning in caught
+  )
+
+
+def test_agents_dependency_warning_filter_suppresses_key_value_beartype_warning():
+  """The known py-key-value-aio/beartype import warning should stay out of logs."""
+  from beartype.roar import BeartypeClawDecorWarning
+
+  with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter('always')
+    suppress_known_agents_dependency_warnings()
+    warnings.warn(
+      (
+        'Coroutine factory method '
+        'key_value.aio.stores.base.BaseContextManagerStore.__aenter__() '
+        'not decoratable by @beartype, as:'
+      ),
+      BeartypeClawDecorWarning,
+      stacklevel=1,
+    )
+
+  assert caught == []
 
 
 def test_databricks_tools_require_active_plan_not_agents_read(tmp_path):
@@ -741,7 +788,7 @@ def test_schema_history_events_unlock_configured_project_tables(tmp_path):
   seeded = run_state.seed_schema_inspections_from_events([
     {
       'type': 'tool_result',
-      'tool_name': 'get_table_stats_and_schema',
+      'tool_name': 'get_table_schema',
       'tool_input': {
         'catalog': 'cat',
         'schema': 'sch',
@@ -775,7 +822,7 @@ def test_failed_schema_history_event_does_not_unlock_sql(tmp_path):
   seeded = run_state.seed_schema_inspections_from_events([
     {
       'type': 'tool_result',
-      'tool_name': 'get_table_stats_and_schema',
+      'tool_name': 'get_table_schema',
       'tool_input': {
         'catalog': 'cat',
         'schema': 'sch',
@@ -839,7 +886,7 @@ def test_execute_sql_uses_configured_cluster_when_warehouse_missing(monkeypatch,
   assert multi_result['cluster_id'] == 'cluster-1'
 
 
-def test_table_stats_marks_schema_inspected_before_sql(monkeypatch, tmp_path):
+def test_table_schema_marks_schema_inspected_before_sql(monkeypatch, tmp_path):
   """Schema inspection unlocks later SQL against configured project tables."""
   run_state = AgentToolRunState(
     project_dir=tmp_path,
@@ -847,10 +894,10 @@ def test_table_stats_marks_schema_inspected_before_sql(monkeypatch, tmp_path):
   )
   run_state.active_step_id = 'step-1'
 
-  captured_table_stats_kwargs = {}
+  captured_table_schema_kwargs = {}
 
-  def fake_table_stats(**kwargs):
-    captured_table_stats_kwargs.update(kwargs)
+  def fake_table_schema(**kwargs):
+    captured_table_schema_kwargs.update(kwargs)
     return {
       'catalog': 'cat',
       'schema_name': 'sch',
@@ -864,8 +911,8 @@ def test_table_stats_marks_schema_inspected_before_sql(monkeypatch, tmp_path):
     return [{'total_bdrs': 43}]
 
   monkeypatch.setattr(
-    'databricks_tools_core.sql.table_stats.get_table_stats_and_schema',
-    fake_table_stats,
+    'databricks_tools_core.sql.table_stats.get_table_schema',
+    fake_table_schema,
   )
   monkeypatch.setattr('databricks_tools_core.sql.sql.execute_sql', fake_execute_sql)
 
@@ -873,16 +920,15 @@ def test_table_stats_marks_schema_inspected_before_sql(monkeypatch, tmp_path):
     default_warehouse_id='warehouse-1',
     run_state=run_state,
   )
-  stats = next(tool for tool in tools if tool.name == 'get_table_stats_and_schema')
+  schema_tool = next(tool for tool in tools if tool.name == 'get_table_schema')
   execute_sql = next(tool for tool in tools if tool.name == 'execute_sql')
 
   _invoke_tool(
-    stats,
+    schema_tool,
     json.dumps({
       'catalog': 'cat',
       'schema': 'sch',
       'table_names': '["pilot_bdr_visit_record_seg"]',
-      'table_stat_level': 'NONE',
     }),
   )
   result = json.loads(_invoke_tool(
@@ -893,12 +939,35 @@ def test_table_stats_marks_schema_inspected_before_sql(monkeypatch, tmp_path):
     ),
   ))
 
-  assert captured_table_stats_kwargs['table_names'] == ['pilot_bdr_visit_record_seg']
+  assert captured_table_schema_kwargs['table_names'] == ['pilot_bdr_visit_record_seg']
   assert result == [{'total_bdrs': 43}]
 
 
-def test_table_stats_defaults_to_none_when_level_is_omitted(monkeypatch, tmp_path):
-  """Schema inspection should be cheap unless the caller requests real stats."""
+def test_get_table_stats_requires_selected_columns(monkeypatch, tmp_path):
+  """Stats profiling should fail fast unless the caller passes selected columns."""
+  run_state = AgentToolRunState(project_dir=tmp_path)
+  run_state.active_step_id = 'step-1'
+
+  tools = create_databricks_tools(
+    default_warehouse_id='warehouse-1',
+    run_state=run_state,
+  )
+  stats = next(tool for tool in tools if tool.name == 'get_table_stats')
+
+  result = json.loads(_invoke_tool(
+    stats,
+    json.dumps({
+      'catalog': 'cat',
+      'schema': 'sch',
+      'table_name': 'pilot_bdr_visit_record_seg',
+    }),
+  ))
+
+  assert 'columns is required' in result['error']
+
+
+def test_get_table_stats_profiles_only_selected_columns(monkeypatch, tmp_path):
+  """Stats profiling should forward the explicit column subset to core."""
   run_state = AgentToolRunState(project_dir=tmp_path)
   run_state.active_step_id = 'step-1'
   captured_table_stats_kwargs = {}
@@ -912,7 +981,7 @@ def test_table_stats_defaults_to_none_when_level_is_omitted(monkeypatch, tmp_pat
     }
 
   monkeypatch.setattr(
-    'databricks_tools_core.sql.table_stats.get_table_stats_and_schema',
+    'databricks_tools_core.sql.table_stats.get_table_stats',
     fake_table_stats,
   )
 
@@ -920,18 +989,20 @@ def test_table_stats_defaults_to_none_when_level_is_omitted(monkeypatch, tmp_pat
     default_warehouse_id='warehouse-1',
     run_state=run_state,
   )
-  stats = next(tool for tool in tools if tool.name == 'get_table_stats_and_schema')
+  stats = next(tool for tool in tools if tool.name == 'get_table_stats')
 
   _invoke_tool(
     stats,
     json.dumps({
       'catalog': 'cat',
       'schema': 'sch',
-      'table_names': ['pilot_bdr_visit_record_seg'],
+      'table_name': 'pilot_bdr_visit_record_seg',
+      'columns': 'employee_no, visit_date',
     }),
   )
 
-  assert captured_table_stats_kwargs['table_stat_level'].value == 'none'
+  assert captured_table_stats_kwargs['table_name'] == 'pilot_bdr_visit_record_seg'
+  assert captured_table_stats_kwargs['columns'] == ['employee_no', 'visit_date']
 
 
 def test_agent_logger_guard_writes_to_configured_file(tmp_path, monkeypatch):

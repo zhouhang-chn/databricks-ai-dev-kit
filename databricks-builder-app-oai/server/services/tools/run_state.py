@@ -240,7 +240,7 @@ class AgentToolRunState:
       if not isinstance(tool_input, dict):
         tool_input = {}
 
-      if tool_name == 'get_table_stats_and_schema':
+      if tool_name in {'get_table_schema', 'get_table_stats', 'get_table_stats_and_schema'}:
         content = _parse_json_value(event.get('content'))
         if not isinstance(content, dict) or content.get('error'):
           continue
@@ -249,7 +249,11 @@ class AgentToolRunState:
         table_names = _table_names_from_schema_payload(content)
         if isinstance(tables_value, list) and not table_names:
           continue
-        table_names = table_names or _coerce_table_names(tool_input.get('table_names'))
+        table_names = (
+          table_names
+          or _coerce_table_names(tool_input.get('table_names'))
+          or _coerce_table_names(tool_input.get('table_name'))
+        )
         before = (len(self.inspected_tables), len(self.inspected_schemas))
         self.mark_schema_inspected(
           catalog=content.get('catalog') or content.get('catalog_name') or tool_input.get('catalog'),
@@ -299,9 +303,9 @@ class AgentToolRunState:
       ),
       'missing_schema_for_tables': sorted(set(missing)),
       'required_action': (
-        'Call get_table_stats_and_schema for the table with table_stat_level="NONE" '
-        'unless the next decision explicitly needs actual stats, then retry the SQL '
-        'using the returned column names.'
+        'Call get_table_schema for the table, then retry the SQL using the returned '
+        'column names. Use get_table_stats only after schema discovery, and only for '
+        'specific columns that need profiling.'
       ),
     }
 

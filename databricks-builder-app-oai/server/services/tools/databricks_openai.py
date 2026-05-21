@@ -3,7 +3,7 @@
 Two layers feed the agent's tool list:
 
 1. **Typed wrappers** (``execute_sql``, ``execute_sql_multi``,
-   ``get_table_stats_and_schema``, ``list_sql_warehouses``,
+   ``get_table_schema``, ``get_table_stats``, ``list_sql_warehouses``,
    ``get_best_sql_warehouse``, ``list_compute``) keep ergonomic,
    default-aware coverage for the most common operations. They use the project
    default catalog/schema/warehouse/cluster and are always available.
@@ -47,12 +47,86 @@ _TYPED_WRAPPER_NAMES: frozenset[str] = frozenset(
   {
     'execute_sql',
     'execute_sql_multi',
+    'get_table_schema',
+    'get_table_stats',
+    # Deprecated combined tool. Keep it here so FastMCP does not expose it to
+    # the model; the split wrappers below are the intended public surface.
     'get_table_stats_and_schema',
     'list_sql_warehouses',
     'get_best_sql_warehouse',
     'list_compute',
   }
 )
+
+_OPTIONAL_STRING_SCHEMA = {'anyOf': [{'type': 'string'}, {'type': 'null'}]}
+_TABLE_SCHEMA_PARAMS_JSON_SCHEMA: dict[str, Any] = {
+  'type': 'object',
+  'properties': {
+    'catalog': {
+      **_OPTIONAL_STRING_SCHEMA,
+      'description': 'Unity Catalog catalog name. Uses the project default when omitted.',
+    },
+    'schema': {
+      **_OPTIONAL_STRING_SCHEMA,
+      'description': 'Unity Catalog schema name. Uses the project default when omitted.',
+    },
+    'table_names': {
+      'anyOf': [
+        {'type': 'array', 'items': {'type': 'string'}},
+        {'type': 'string'},
+        {'type': 'null'},
+      ],
+      'description': 'Optional table name, wildcard pattern, JSON list string, or list.',
+    },
+    'warehouse_id': {
+      **_OPTIONAL_STRING_SCHEMA,
+      'description': 'SQL warehouse ID. Uses the project default when omitted.',
+    },
+    'timeout': {
+      'type': 'integer',
+      'default': 180,
+      'minimum': 1,
+      'description': 'Timeout in seconds for cluster fallback execution.',
+    },
+  },
+  'additionalProperties': True,
+}
+_TABLE_STATS_PARAMS_JSON_SCHEMA: dict[str, Any] = {
+  'type': 'object',
+  'properties': {
+    'catalog': {
+      **_OPTIONAL_STRING_SCHEMA,
+      'description': 'Unity Catalog catalog name. Uses the project default when omitted.',
+    },
+    'schema': {
+      **_OPTIONAL_STRING_SCHEMA,
+      'description': 'Unity Catalog schema name. Uses the project default when omitted.',
+    },
+    'table_name': {
+      'type': 'string',
+      'description': 'Single table name to profile. Use get_table_schema first to discover columns.',
+    },
+    'columns': {
+      'anyOf': [
+        {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1},
+        {'type': 'string'},
+      ],
+      'description': 'Required explicit columns to profile. Do not request every column unless the user asks.',
+    },
+    'warehouse_id': {
+      **_OPTIONAL_STRING_SCHEMA,
+      'description': 'SQL warehouse ID. Uses the project default when omitted.',
+    },
+    'timeout': {
+      'type': 'integer',
+      'default': 180,
+      'minimum': 1,
+      'description': 'Timeout in seconds for cluster fallback execution.',
+    },
+  },
+  'required': ['table_name', 'columns'],
+  'additionalProperties': True,
+}
 
 
 def _jsonable(value: Any) -> Any:
@@ -74,6 +148,25 @@ async def _to_thread_with_context(fn, *args, **kwargs):
   return await asyncio.to_thread(lambda: ctx.run(fn, *args, **kwargs))
 
 
+def _optional_str(value: Any) -> str | None:
+  """Return a non-empty string, or None for omitted JSON tool arguments."""
+  if value is None:
+    return None
+  text = str(value).strip()
+  return text or None
+
+
+def _optional_int(value: Any, *, default: int) -> int:
+  """Return a positive integer from JSON tool arguments, or a default."""
+  if value is None:
+    return default
+  try:
+    parsed = int(value)
+  except (TypeError, ValueError):
+    return default
+  return parsed if parsed > 0 else default
+
+
 def create_databricks_tools(
   *,
   default_catalog: str | None = None,
@@ -84,7 +177,7 @@ def create_databricks_tools(
   run_state: AgentToolRunState | None = None,
 ) -> list:
   """Create the full Databricks tool set: typed wrappers + generated FastMCP."""
-  from agents import function_tool
+  from agents import FunctionTool, function_tool
 
   def _is_read_only_sql(sql_query: str) -> bool:
     normalized = sql_query.strip().lower()
@@ -256,23 +349,15 @@ print(json.dumps({{"columns": columns, "rows": rows}}))
       payload.setdefault('cluster_id', default_cluster_id)
     return json.dumps(payload, default=str)
 
-  @function_tool(strict_mode=False)
-  async def get_table_stats_and_schema(
+  async def _invoke_get_table_schema(
     catalog: str | None = None,
     schema: str | None = None,
     table_names: list[str] | str | None = None,
-    table_stat_level: str = 'NONE',
     warehouse_id: str | None = None,
     timeout: int = 180,
   ) -> str:
-    """Get table schema/stats on the configured warehouse or cluster fallback.
-
-    Always choose ``table_stat_level`` explicitly:
-    - ``NONE`` for schema discovery and column validation
-    - ``SIMPLE`` when row counts or basic column health are needed
-    - ``DETAILED`` when profiling needs distributions or richer statistics
-    """
-    gate_error = _gate_databricks_tool('get_table_stats_and_schema')
+    """Get table schema on the configured warehouse or cluster fallback."""
+    gate_error = _gate_databricks_tool('get_table_schema')
     if gate_error:
       return gate_error
 
@@ -286,20 +371,18 @@ print(json.dumps({{"columns": columns, "rows": rows}}))
         )
       })
 
-    normalized_level = _normalize_table_stat_level(table_stat_level)
     normalized_table_names = _coerce_table_names(table_names)
     effective_warehouse_id = warehouse_id or default_warehouse_id
     if effective_warehouse_id or not default_cluster_id:
       from databricks_tools_core.sql.table_stats import (
-        get_table_stats_and_schema as _get_table_stats_and_schema,
+        get_table_schema as _get_table_schema,
       )
 
       result = await _to_thread_with_context(
-        _get_table_stats_and_schema,
+        _get_table_schema,
         catalog=effective_catalog,
         schema=effective_schema,
         table_names=normalized_table_names,
-        table_stat_level=normalized_level,
         warehouse_id=effective_warehouse_id,
       )
     else:
@@ -312,7 +395,7 @@ print(json.dumps({{"columns": columns, "rows": rows}}))
         catalog=effective_catalog,
         schema=effective_schema,
         table_names=normalized_table_names,
-        table_stat_level=normalized_level,
+        include_row_counts=False,
         cluster_id=default_cluster_id,
         timeout=timeout,
       )
@@ -324,6 +407,128 @@ print(json.dumps({{"columns": columns, "rows": rows}}))
         table_names=normalized_table_names,
       )
     return json.dumps(_jsonable(result), default=str)
+
+  async def _invoke_get_table_stats(
+    catalog: str | None = None,
+    schema: str | None = None,
+    table_name: str | None = None,
+    columns: list[str] | str | None = None,
+    warehouse_id: str | None = None,
+    timeout: int = 180,
+  ) -> str:
+    """Get selected-column table stats on the configured warehouse or cluster fallback."""
+    gate_error = _gate_databricks_tool('get_table_stats')
+    if gate_error:
+      return gate_error
+
+    effective_catalog = catalog or default_catalog
+    effective_schema = schema or default_schema
+    if not effective_catalog or not effective_schema:
+      return json.dumps({
+        'error': (
+          'catalog and schema are required. Provide them explicitly or configure '
+          'default catalog/schema in project settings.'
+        )
+      })
+
+    normalized_table_name = _optional_str(table_name)
+    normalized_columns = _coerce_columns(columns)
+    if not normalized_table_name:
+      return json.dumps({'error': 'table_name is required.'})
+    normalized_table_name = _table_name_from_configured_context(
+      effective_catalog,
+      effective_schema,
+      normalized_table_name,
+    )
+    if not normalized_columns:
+      return json.dumps({
+        'error': (
+          'columns is required. Call get_table_schema first, then request stats '
+          'only for the specific columns needed.'
+        )
+      })
+
+    effective_warehouse_id = warehouse_id or default_warehouse_id
+    if effective_warehouse_id or not default_cluster_id:
+      from databricks_tools_core.sql.table_stats import get_table_stats as _get_table_stats
+
+      result = await _to_thread_with_context(
+        _get_table_stats,
+        catalog=effective_catalog,
+        schema=effective_schema,
+        table_name=normalized_table_name,
+        columns=normalized_columns,
+        warehouse_id=effective_warehouse_id,
+      )
+    else:
+      logger.info(
+        'Profiling selected table columns through configured cluster fallback: cluster_id=%s',
+        default_cluster_id,
+      )
+      result = await _to_thread_with_context(
+        _get_selected_table_stats_with_cluster_fallback,
+        catalog=effective_catalog,
+        schema=effective_schema,
+        table_name=normalized_table_name,
+        columns=normalized_columns,
+        cluster_id=default_cluster_id,
+        timeout=timeout,
+      )
+
+    if run_state:
+      run_state.mark_schema_inspected(
+        catalog=effective_catalog,
+        schema=effective_schema,
+        table_names=[normalized_table_name],
+      )
+    return json.dumps(_jsonable(result), default=str)
+
+  async def _get_table_schema_on_invoke(_ctx, raw_args: str) -> str:
+    args = _coerce_args(raw_args)
+    return await _invoke_get_table_schema(
+      catalog=_optional_str(args.get('catalog')),
+      schema=_optional_str(
+        args.get('schema') or args.get('schema_name') or args.get('database_schema')
+      ),
+      table_names=args.get('table_names'),
+      warehouse_id=_optional_str(args.get('warehouse_id')),
+      timeout=_optional_int(args.get('timeout'), default=180),
+    )
+
+  async def _get_table_stats_on_invoke(_ctx, raw_args: str) -> str:
+    args = _coerce_args(raw_args)
+    return await _invoke_get_table_stats(
+      catalog=_optional_str(args.get('catalog')),
+      schema=_optional_str(
+        args.get('schema') or args.get('schema_name') or args.get('database_schema')
+      ),
+      table_name=_optional_str(args.get('table_name') or args.get('table')),
+      columns=args.get('columns'),
+      warehouse_id=_optional_str(args.get('warehouse_id')),
+      timeout=_optional_int(args.get('timeout'), default=180),
+    )
+
+  get_table_schema_tool = FunctionTool(
+    name='get_table_schema',
+    description=(
+      'Get Databricks table schemas only. Use for column discovery before SQL; '
+      'does not compute row counts or column statistics.'
+    ),
+    params_json_schema=_TABLE_SCHEMA_PARAMS_JSON_SCHEMA,
+    on_invoke_tool=_get_table_schema_on_invoke,
+    strict_json_schema=False,
+  )
+
+  get_table_stats_tool = FunctionTool(
+    name='get_table_stats',
+    description=(
+      'Get selected-column Databricks table statistics. Requires columns; use '
+      'get_table_schema first and profile only columns needed for the analysis.'
+    ),
+    params_json_schema=_TABLE_STATS_PARAMS_JSON_SCHEMA,
+    on_invoke_tool=_get_table_stats_on_invoke,
+    strict_json_schema=False,
+  )
 
   @function_tool(strict_mode=False)
   async def list_sql_warehouses(limit: int = 20) -> str:
@@ -375,7 +580,8 @@ print(json.dumps({{"columns": columns, "rows": rows}}))
   typed = [
     execute_sql,
     execute_sql_multi,
-    get_table_stats_and_schema,
+    get_table_schema_tool,
+    get_table_stats_tool,
     list_sql_warehouses,
     get_best_sql_warehouse,
     list_compute,
@@ -398,7 +604,8 @@ def _is_read_only_tool_name(name: str) -> bool:
     'ask_genie',
     'execute_sql',
     'execute_sql_multi',
-    'get_table_stats_and_schema',
+    'get_table_schema',
+    'get_table_stats',
     'get_volume_folder_details',
     'list_compute',
     'list_tracked_resources',
@@ -435,16 +642,6 @@ def _is_read_only_tool_name(name: str) -> bool:
   return lowered.startswith(prefixes)
 
 
-def _normalize_table_stat_level(level: str | None):
-  """Coerce OpenAI/FastMCP stat-level strings into the core enum."""
-  from databricks_tools_core.sql.sql_utils.models import TableStatLevel
-
-  normalized = (level or 'NONE').strip().lower()
-  if normalized not in {'none', 'simple', 'detailed'}:
-    normalized = 'none'
-  return TableStatLevel(normalized)
-
-
 def _coerce_table_names(value: list[str] | str | None) -> list[str] | None:
   """Accept table_names as a real list or a JSON-encoded list string."""
   if value is None:
@@ -462,6 +659,42 @@ def _coerce_table_names(value: list[str] | str | None) -> list[str] | None:
     if isinstance(parsed, list):
       return [str(item) for item in parsed if item]
   return [stripped]
+
+
+def _coerce_columns(value: list[str] | str | None) -> list[str]:
+  """Accept columns as a real list, JSON list string, or comma/newline string."""
+  if value is None:
+    return []
+  raw_items: list[Any]
+  if isinstance(value, list):
+    raw_items = value
+  else:
+    stripped = str(value).strip()
+    if not stripped:
+      return []
+    parsed: Any = None
+    if stripped.startswith('['):
+      try:
+        parsed = json.loads(stripped)
+      except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, list):
+      raw_items = parsed
+    else:
+      raw_items = re.split(r'[\n,]+', stripped)
+
+  seen: set[str] = set()
+  columns: list[str] = []
+  for item in raw_items:
+    column = str(item).strip().strip('`')
+    if not column:
+      continue
+    key = column.lower()
+    if key in seen:
+      continue
+    seen.add(key)
+    columns.append(column)
+  return columns
 
 
 def _quote_sql_identifier(value: str) -> str:
@@ -527,19 +760,22 @@ def _extract_single_count(output: str | None) -> int | None:
   return matches[-1] if matches else None
 
 
+def _sql_literal(value: str) -> str:
+  return "'" + value.replace("'", "''") + "'"
+
+
 def _get_table_stats_with_cluster_fallback(
   *,
   catalog: str,
   schema: str,
   table_names: list[str] | None,
-  table_stat_level,
+  include_row_counts: bool,
   cluster_id: str,
   timeout: int,
 ) -> dict[str, Any]:
   """Collect table schema via UC metadata and row counts via cluster SQL."""
   from databricks_tools_core.auth import get_workspace_client
   from databricks_tools_core.compute import execute_databricks_command
-  from databricks_tools_core.sql.sql_utils.models import TableStatLevel
 
   client = get_workspace_client()
   resolved_names = _resolve_table_names(client, catalog, schema, table_names)
@@ -568,7 +804,7 @@ def _get_table_stats_with_cluster_fallback(
     except Exception as exc:
       table_payload['error'] = f'Failed to fetch table metadata: {exc}'
 
-    if table_stat_level != TableStatLevel.NONE:
+    if include_row_counts:
       count_sql = (
         'SELECT COUNT(*) AS total_rows '
         f'FROM {_qualified_sql_table(catalog, schema, table_name)}'
@@ -602,6 +838,177 @@ def _get_table_stats_with_cluster_fallback(
       'Schema was read from Unity Catalog metadata. Row counts, when requested, '
       'were executed on the configured cluster because no SQL warehouse is configured.'
     ),
+  }
+
+
+def _build_column_stats_sql(catalog: str, schema: str, table_name: str, columns: dict[str, str]) -> str:
+  table_ref = _qualified_sql_table(catalog, schema, table_name)
+  statements: list[str] = []
+  for column_name, data_type in columns.items():
+    escaped_col = _quote_sql_identifier(column_name)
+    lowered_type = data_type.lower()
+    is_complex = any(t in lowered_type for t in ('array', 'struct', 'map', 'variant'))
+    is_numeric = any(t in lowered_type for t in ('int', 'bigint', 'float', 'double', 'decimal', 'numeric'))
+    is_temporal = 'date' in lowered_type or 'timestamp' in lowered_type
+    if is_complex:
+      min_expr = 'NULL'
+      max_expr = 'NULL'
+      avg_expr = 'NULL'
+      unique_expr = 'NULL'
+    elif is_numeric:
+      min_expr = f'CAST(MIN({escaped_col}) AS STRING)'
+      max_expr = f'CAST(MAX({escaped_col}) AS STRING)'
+      avg_expr = f'CAST(AVG({escaped_col}) AS DOUBLE)'
+      unique_expr = f'approx_count_distinct({escaped_col})'
+    elif is_temporal:
+      min_expr = f'CAST(MIN({escaped_col}) AS STRING)'
+      max_expr = f'CAST(MAX({escaped_col}) AS STRING)'
+      avg_expr = 'NULL'
+      unique_expr = f'approx_count_distinct({escaped_col})'
+    else:
+      min_expr = 'NULL'
+      max_expr = 'NULL'
+      avg_expr = 'NULL'
+      unique_expr = f'approx_count_distinct({escaped_col})'
+
+    statements.append(f"""
+      SELECT
+        {_sql_literal(column_name)} AS column_name,
+        {_sql_literal(data_type)} AS data_type,
+        COUNT(*) AS total_count,
+        SUM(CASE WHEN {escaped_col} IS NULL THEN 1 ELSE 0 END) AS null_count,
+        {unique_expr} AS unique_count,
+        {min_expr} AS min_val,
+        {max_expr} AS max_val,
+        {avg_expr} AS avg_val
+      FROM {table_ref}
+    """)
+  return '\nUNION ALL\n'.join(statements)
+
+
+def _get_selected_table_stats_with_cluster_fallback(
+  *,
+  catalog: str,
+  schema: str,
+  table_name: str,
+  columns: list[str],
+  cluster_id: str,
+  timeout: int,
+) -> dict[str, Any]:
+  """Collect selected column stats on a configured cluster."""
+  from databricks_tools_core.auth import get_workspace_client
+  from databricks_tools_core.compute import execute_databricks_command
+
+  client = get_workspace_client()
+  resolved_table_name = _table_name_from_configured_context(catalog, schema, table_name)
+  full_name = f'{catalog}.{schema}.{resolved_table_name}'
+  table_payload: dict[str, Any] = {'name': full_name}
+
+  try:
+    table = client.tables.get(full_name=full_name)
+    comment = getattr(table, 'comment', None)
+    if comment:
+      table_payload['comment'] = comment
+    table_columns = getattr(table, 'columns', None) or []
+  except Exception as exc:
+    return {
+      'catalog': catalog,
+      'schema_name': schema,
+      'tables': [{'name': full_name, 'error': f'Failed to fetch table metadata: {exc}'}],
+      'table_count': 1,
+      'compute': 'cluster',
+      'cluster_id': cluster_id,
+    }
+
+  requested = {column.lower(): column for column in columns}
+  selected_columns: dict[str, str] = {}
+  for column in table_columns:
+    name = getattr(column, 'name', None)
+    if not name or name.lower() not in requested:
+      continue
+    selected_columns[name] = _column_type_text(column)
+
+  missing = sorted(set(requested) - {name.lower() for name in selected_columns})
+  if missing:
+    table_payload['missing_columns'] = [requested[name] for name in missing]
+  if not selected_columns:
+    table_payload['error'] = 'None of the requested columns exist on this table.'
+    return {
+      'catalog': catalog,
+      'schema_name': schema,
+      'tables': [table_payload],
+      'table_count': 1,
+      'compute': 'cluster',
+      'cluster_id': cluster_id,
+    }
+
+  stats_sql = _build_column_stats_sql(catalog, schema, resolved_table_name, selected_columns)
+  python_code = f"""
+import json
+
+stats_sql = {json.dumps(stats_sql)}
+rows = [json.loads(row) for row in spark.sql(stats_sql).toJSON().collect()]
+print(json.dumps({{"rows": rows}}, default=str))
+"""
+  result = execute_databricks_command(
+    code=python_code,
+    cluster_id=cluster_id,
+    language='python',
+    timeout=timeout,
+    destroy_context_on_completion=True,
+  )
+  if not getattr(result, 'success', False):
+    table_payload['error'] = getattr(result, 'error', 'Failed to collect selected column stats.')
+    return {
+      'catalog': catalog,
+      'schema_name': schema,
+      'tables': [table_payload],
+      'table_count': 1,
+      'compute': 'cluster',
+      'cluster_id': cluster_id,
+    }
+
+  try:
+    payload = json.loads(getattr(result, 'output', '') or '{}')
+    rows = payload.get('rows') or []
+  except json.JSONDecodeError:
+    table_payload['raw_output'] = getattr(result, 'output', None)
+    rows = []
+
+  column_details: dict[str, dict[str, Any]] = {}
+  total_rows = None
+  for row in rows:
+    column_name = row.get('column_name')
+    if not column_name:
+      continue
+    total_rows = row.get('total_count') if total_rows is None else total_rows
+    detail = {
+      'name': column_name,
+      'data_type': row.get('data_type') or selected_columns.get(column_name) or 'unknown',
+      'total_count': row.get('total_count'),
+      'null_count': row.get('null_count'),
+      'unique_count': row.get('unique_count'),
+    }
+    if row.get('min_val') is not None:
+      detail['min'] = row.get('min_val')
+    if row.get('max_val') is not None:
+      detail['max'] = row.get('max_val')
+    if row.get('avg_val') is not None:
+      detail['avg'] = row.get('avg_val')
+    column_details[column_name] = detail
+
+  table_payload['column_details'] = column_details
+  if total_rows is not None:
+    table_payload['total_rows'] = total_rows
+
+  return {
+    'catalog': catalog,
+    'schema_name': schema,
+    'tables': [table_payload],
+    'table_count': 1,
+    'compute': 'cluster',
+    'cluster_id': cluster_id,
+    'stats_note': 'Stats were computed only for explicitly requested columns.',
   }
 
 

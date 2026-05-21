@@ -35,6 +35,8 @@ router = APIRouter()
 # SSE streaming window duration (seconds) - break before 60s timeout
 SSE_WINDOW_SECONDS = 50
 SCHEMA_HISTORY_TOOL_NAMES = {
+    'get_table_schema',
+    'get_table_stats',
     'get_table_stats_and_schema',
     'execute_sql',
     'execute_sql_multi',

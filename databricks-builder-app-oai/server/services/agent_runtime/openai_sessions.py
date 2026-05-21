@@ -3,6 +3,8 @@
 import os
 from pathlib import Path
 
+from .openai_warning_filters import suppress_known_agents_dependency_warnings
+
 
 def build_session_id(project_id: str, conversation_id: str) -> str:
   """Return a stable session key for SDK-managed model memory."""
@@ -15,6 +17,7 @@ def get_openai_session(project_id: str, conversation_id: str):
   This is the local/MVP path. A later phase can swap this for
   SQLAlchemySession against the app database without changing callers.
   """
+  suppress_known_agents_dependency_warnings()
   from agents import SQLiteSession
 
   session_id = build_session_id(project_id, conversation_id)

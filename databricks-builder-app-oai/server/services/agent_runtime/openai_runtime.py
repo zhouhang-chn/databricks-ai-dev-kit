@@ -30,6 +30,7 @@ from .base import AgentRunRequest
 from .openai_events import normalize_openai_event
 from .openai_models import build_agent_model, load_model_settings
 from .openai_sessions import build_session_id, get_openai_session
+from .openai_warning_filters import suppress_known_agents_dependency_warnings
 
 logger = logging.getLogger(__name__)
 ensure_logger_active(logger, set_propagate_false=True)
@@ -142,7 +143,7 @@ def _schema_required_tables_from_context(project_context: dict[str, Any] | None)
     return set()
 
   tables: set[str] = set()
-  for key in ('preferred_tables', 'metric_views'):
+  for key in ('input_tables', 'metric_views', 'preferred_tables'):
     values = semantics.get(key)
     if not isinstance(values, list):
       continue
@@ -206,6 +207,7 @@ class OpenAIAgentRuntime:
     )
 
     try:
+      suppress_known_agents_dependency_warnings()
       from agents import (
         Agent,
         ModelRetryBackoffSettings,
