@@ -95,11 +95,34 @@ def _with_run_metadata(event: dict, request: AgentRunRequest, trace_id: str | No
 
 def _tool_name(tool: Any) -> str:
   """Best-effort tool name for OpenAI SDK tool objects."""
-  return str(
-    getattr(tool, 'name', None)
-    or getattr(tool, '__name__', None)
-    or type(tool).__name__
-  )
+  return str(getattr(tool, 'name', None) or getattr(tool, '__name__', None) or type(tool).__name__)
+
+
+# Tool names/prefixes that indicate a run can create or persist a resource.
+# Plain query/read tools (execute_sql, get_table_schema, list_*) are excluded:
+# a read-only / analysis run that only reads does not need the resource-link or
+# permission-grant guidance, so it can be omitted from the system prompt.
+_RESOURCE_CREATION_TOOL_PREFIXES = ('manage_', 'create_', 'deploy_')
+_RESOURCE_CREATION_TOOL_NAMES = frozenset(
+  {
+    'execute_code',
+    'generate_and_upload_pdf',
+    'manage_workspace_files',
+    'write_project_file',
+    'edit_project_file',
+  }
+)
+
+
+def _tools_can_create_resources(tools: list[Any]) -> bool:
+  """Whether the (already skill-filtered) tool set can create/persist resources."""
+  for tool in tools:
+    name = _tool_name(tool).lower()
+    if name in _RESOURCE_CREATION_TOOL_NAMES:
+      return True
+    if any(name.startswith(prefix) for prefix in _RESOURCE_CREATION_TOOL_PREFIXES):
+      return True
+  return False
 
 
 def _resolve_enabled_skills(
@@ -166,10 +189,7 @@ class OpenAIAgentRuntime:
     session_id = build_session_id(request.project_id, conversation_id)
     cancel_check = request.is_cancelled_fn or (lambda: False)
     mlflow_tracing = is_mlflow_tracing_configured()
-    tracing_disabled = (
-      not mlflow_tracing
-      and (settings.tracing_disabled or bool(settings.base_url))
-    )
+    tracing_disabled = not mlflow_tracing and (settings.tracing_disabled or bool(settings.base_url))
     trace_id: str | None = None
 
     logger.info(
@@ -258,25 +278,11 @@ class OpenAIAgentRuntime:
       )
       if seeded_schema_inspections:
         logger.info(
-          'Seeded schema inspections from conversation history: events=%s '
-          'tables=%s schemas=%s',
+          'Seeded schema inspections from conversation history: events=%s tables=%s schemas=%s',
           seeded_schema_inspections,
           len(tool_run_state.inspected_tables),
           len(tool_run_state.inspected_schemas),
         )
-
-      instructions = get_system_prompt(
-        cluster_id=request.cluster_id,
-        default_catalog=request.default_catalog,
-        default_schema=request.default_schema,
-        warehouse_id=request.warehouse_id,
-        workspace_folder=request.workspace_folder,
-        workspace_url=request.databricks_host,
-        enabled_skills=enabled_skills,
-        skill_guidance=skill_guidance,
-        project_context=request.project_context,
-        project_operating_guide=project_operating_guide,
-      )
 
       tools = [
         *create_plan_tools(run_state=tool_run_state),
@@ -305,6 +311,30 @@ class OpenAIAgentRuntime:
         'OpenAI tools after skill filtering: count=%s names=%s',
         len(tools),
         ','.join(_tool_name(tool) for tool in tools),
+      )
+
+      # Resource-link / permission-grant guidance is only useful when the run
+      # can actually create resources; omit it for read-only runs and runs whose
+      # filtered tool set has no resource-creating tools to keep the prompt lean.
+      can_create_resources = not read_only_run and _tools_can_create_resources(tools)
+      logger.info(
+        'OpenAI runtime resource guidance: can_create_resources=%s read_only=%s',
+        can_create_resources,
+        read_only_run,
+      )
+
+      instructions = get_system_prompt(
+        cluster_id=request.cluster_id,
+        default_catalog=request.default_catalog,
+        default_schema=request.default_schema,
+        warehouse_id=request.warehouse_id,
+        workspace_folder=request.workspace_folder,
+        workspace_url=request.databricks_host,
+        enabled_skills=enabled_skills,
+        skill_guidance=skill_guidance,
+        project_context=request.project_context,
+        project_operating_guide=project_operating_guide,
+        can_create_resources=can_create_resources,
       )
 
       agent = Agent(
@@ -379,14 +409,18 @@ class OpenAIAgentRuntime:
         trace_id,
         request.mlflow_experiment_name,
       )
-      yield _with_run_metadata({
-        'type': 'system',
-        'subtype': 'trace_started',
-        'data': {
-          'trace_id': trace_id,
-          'mlflow_experiment_name': request.mlflow_experiment_name,
+      yield _with_run_metadata(
+        {
+          'type': 'system',
+          'subtype': 'trace_started',
+          'data': {
+            'trace_id': trace_id,
+            'mlflow_experiment_name': request.mlflow_experiment_name,
+          },
         },
-      }, request, trace_id)
+        request,
+        trace_id,
+      )
 
       started_at = time.time()
       cancelled = False

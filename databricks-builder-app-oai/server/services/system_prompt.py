@@ -259,6 +259,7 @@ def get_system_prompt(
   skill_guidance: str = '',
   project_context: dict[str, Any] | None = None,
   project_operating_guide: str = '',
+  can_create_resources: bool = True,
 ) -> str:
   """Generate the system prompt for the OpenAI agent runtime.
 
@@ -275,6 +276,10 @@ def get_system_prompt(
       skill_guidance: Rendered Markdown guidance from selected project skills.
       project_context: Optional structured project-management context.
       project_operating_guide: Optional AGENTS.md mechanism-guide snapshot.
+      can_create_resources: Whether this run can create Databricks resources
+          (i.e. it is not read-only and has resource-creating/managing tools).
+          When False, the resource-link and permission-grant guidance is
+          omitted as dead weight.
 
   Returns:
       System prompt string
@@ -447,6 +452,68 @@ Use this to construct clickable links in your responses (see Resource Links sect
 
   project_context_section = _render_project_context(project_context)
   project_operating_guide_section = _render_project_operating_guide(project_operating_guide)
+
+  # Resource-link and permission-grant guidance only matters when the run can
+  # actually create Databricks resources. Read-only / analysis runs that lack
+  # resource-creating tools skip it as dead weight.
+  resource_links_section = ''
+  permission_grants_section = ''
+  if can_create_resources:
+    resource_links_section = rf"""
+
+## Resource Links
+
+**CRITICAL: After creating ANY Databricks resource, ALWAYS provide a clickable
+link so the user can verify it.**
+
+Use these URL patterns.
+Workspace URL: `{workspace_url or 'https://your-workspace.databricks.com'}`
+
+- Table:
+  `{workspace_url or 'WORKSPACE_URL'}/explore/data/{{catalog}}/{{schema}}/{{table}}`
+- Volume:
+  `{workspace_url or 'WORKSPACE_URL'}/explore/data/volumes/{{catalog}}/{{schema}}/{{volume}}`
+- Pipeline: `{workspace_url or 'WORKSPACE_URL'}/pipelines/{{pipeline_id}}`
+- Job: `{workspace_url or 'WORKSPACE_URL'}/jobs/{{job_id}}`
+- Notebook: `{workspace_url or 'WORKSPACE_URL'}#workspace{{path}}`
+
+**Example response after creating resources:**
+
+> Data generation complete! I created:
+> - **Volume:** raw_data
+>   `{workspace_url or 'WORKSPACE_URL'}/explore/data/volumes/ai_dev_kit/demo_schema/raw_data`
+> - **Tables:** 3 parquet datasets (customers, orders, tickets)
+>
+> **Next step:** Open the volume link above to verify the data was written correctly.
+
+Always include a "Next step" suggesting the user verify the created resources."""
+    permission_grants_section = r"""
+
+## Permission Grants (IMPORTANT)
+
+**After creating ANY resource, ALWAYS grant permissions to all workspace users.**
+
+This ensures all team members can access resources created by this app.
+
+- **Table:**
+  `GRANT ALL PRIVILEGES ON TABLE catalog.schema.table_name TO \`account users\``
+- **Schema:**
+  `GRANT ALL PRIVILEGES ON SCHEMA catalog.schema_name TO \`account users\``
+- **Volume:**
+  `GRANT READ VOLUME, WRITE VOLUME ON VOLUME catalog.schema.volume_name TO \`account users\``
+- **View:**
+  `GRANT ALL PRIVILEGES ON VIEW catalog.schema.view_name TO \`account users\``
+
+**Example after creating a table:**
+
+CREATE TABLE my_catalog.my_schema.customers AS SELECT ...;
+GRANT ALL PRIVILEGES ON TABLE my_catalog.my_schema.customers TO `account users`;
+
+**Example after creating a schema:**
+
+CREATE SCHEMA my_catalog.new_schema;
+GRANT ALL PRIVILEGES ON SCHEMA my_catalog.new_schema TO `account users`;
+ALTER DEFAULT PRIVILEGES IN SCHEMA my_catalog.new_schema GRANT ALL ON TABLES TO `account users`;"""
 
   return rf"""# Databricks AI Dev Kit
 {cluster_section}{warehouse_section}{workspace_folder_section}{catalog_schema_section}{workspace_url_section}{project_context_section}{project_operating_guide_section}
@@ -719,59 +786,6 @@ conclusions.
   ask your questions directly in your text response as a normal conversation
   turn. The user will reply naturally.
 
-{skills_section}
-
-## Resource Links
-
-**CRITICAL: After creating ANY Databricks resource, ALWAYS provide a clickable
-link so the user can verify it.**
-
-Use these URL patterns.
-Workspace URL: `{workspace_url or 'https://your-workspace.databricks.com'}`
-
-- Table:
-  `{workspace_url or 'WORKSPACE_URL'}/explore/data/{{catalog}}/{{schema}}/{{table}}`
-- Volume:
-  `{workspace_url or 'WORKSPACE_URL'}/explore/data/volumes/{{catalog}}/{{schema}}/{{volume}}`
-- Pipeline: `{workspace_url or 'WORKSPACE_URL'}/pipelines/{{pipeline_id}}`
-- Job: `{workspace_url or 'WORKSPACE_URL'}/jobs/{{job_id}}`
-- Notebook: `{workspace_url or 'WORKSPACE_URL'}#workspace{{path}}`
-
-**Example response after creating resources:**
-
-> Data generation complete! I created:
-> - **Volume:** raw_data
->   `{workspace_url or 'WORKSPACE_URL'}/explore/data/volumes/ai_dev_kit/demo_schema/raw_data`
-> - **Tables:** 3 parquet datasets (customers, orders, tickets)
->
-> **Next step:** Open the volume link above to verify the data was written correctly.
-
-Always include a "Next step" suggesting the user verify the created resources.
-
-## Permission Grants (IMPORTANT)
-
-**After creating ANY resource, ALWAYS grant permissions to all workspace users.**
-
-This ensures all team members can access resources created by this app.
-
-- **Table:**
-  `GRANT ALL PRIVILEGES ON TABLE catalog.schema.table_name TO \`account users\``
-- **Schema:**
-  `GRANT ALL PRIVILEGES ON SCHEMA catalog.schema_name TO \`account users\``
-- **Volume:**
-  `GRANT READ VOLUME, WRITE VOLUME ON VOLUME catalog.schema.volume_name TO \`account users\``
-- **View:**
-  `GRANT ALL PRIVILEGES ON VIEW catalog.schema.view_name TO \`account users\``
-
-**Example after creating a table:**
-
-CREATE TABLE my_catalog.my_schema.customers AS SELECT ...;
-GRANT ALL PRIVILEGES ON TABLE my_catalog.my_schema.customers TO `account users`;
-
-**Example after creating a schema:**
-
-CREATE SCHEMA my_catalog.new_schema;
-GRANT ALL PRIVILEGES ON SCHEMA my_catalog.new_schema TO `account users`;
-ALTER DEFAULT PRIVILEGES IN SCHEMA my_catalog.new_schema GRANT ALL ON TABLES TO `account users`;
+{skills_section}{resource_links_section}{permission_grants_section}
 
 {skill_workflow_section}"""
