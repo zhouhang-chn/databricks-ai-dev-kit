@@ -50,7 +50,7 @@ def manage_dashboard(
     CRITICAL: Before calling this tool to create or edit a dashboard, you MUST:
     0. Review the databricks-aibi-dashboards skill to understand widget definitions.
        You must EXACTLY follow the JSON structure detailed in the skill.
-    1. Call get_table_stats_and_schema() to get table schemas for your queries.
+    1. Call get_table_schema() to get table schemas for your queries.
     2. Call execute_sql() to TEST EVERY dataset query before using in dashboard.
     If you skip validation, widgets WILL show errors!
 

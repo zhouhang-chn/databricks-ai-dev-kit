@@ -212,7 +212,11 @@ class TableStatsCollector:
             return ""
 
     def collect_column_stats(
-        self, catalog: str, schema: str, table_name: str
+        self,
+        catalog: str,
+        schema: str,
+        table_name: str,
+        columns: Optional[List[str]] = None,
     ) -> Tuple[Dict[str, ColumnDetail], Optional[int], List[Dict[str, Any]]]:
         """
         Collect enhanced column statistics for a UC table.
@@ -221,6 +225,8 @@ class TableStatsCollector:
             catalog: Catalog name
             schema: Schema name
             table_name: Table name
+            columns: Optional explicit column list to profile. When provided,
+                only those columns are scanned for per-column statistics.
 
         Returns:
             Tuple of (column_details dict, total_rows, sample_data)
@@ -232,6 +238,7 @@ class TableStatsCollector:
             schema=schema,
             use_describe_table=True,
             fetch_value_counts_table=f"{catalog}.{schema}.{table_name}",
+            columns=columns,
         )
 
     def collect_volume_stats(
@@ -289,6 +296,7 @@ class TableStatsCollector:
         schema: Optional[str],
         use_describe_table: bool,
         fetch_value_counts_table: Optional[str],
+        columns: Optional[List[str]] = None,
     ) -> Tuple[Dict[str, ColumnDetail], Optional[int], List[Dict[str, Any]]]:
         """
         Internal method to collect column statistics for any table reference.
@@ -299,6 +307,7 @@ class TableStatsCollector:
             schema: Schema for query context (optional)
             use_describe_table: If True, use DESCRIBE TABLE; otherwise infer from SELECT
             fetch_value_counts_table: Table name for value counts query (None to skip)
+            columns: Optional explicit column list to profile.
 
         Returns:
             Tuple of (column_details dict, total_rows, sample_data)
@@ -336,6 +345,35 @@ class TableStatsCollector:
                         data_type = "string"
                     describe_result.append({"col_name": col_name, "data_type": data_type})
 
+            requested_columns: List[str] = []
+            if columns:
+                seen_requested: set[str] = set()
+                for column in columns:
+                    normalized = str(column).strip().strip("`")
+                    if normalized and normalized.lower() not in seen_requested:
+                        requested_columns.append(normalized)
+                        seen_requested.add(normalized.lower())
+
+            if requested_columns:
+                requested_lookup = {column.lower() for column in requested_columns}
+                available_lookup = {
+                    str(col.get("col_name") or "").lower()
+                    for col in describe_result
+                    if col.get("col_name")
+                }
+                missing_columns = sorted(set(requested_lookup) - available_lookup)
+                if missing_columns:
+                    logger.warning(
+                        "Requested columns not found for %s: %s",
+                        table_ref,
+                        ", ".join(missing_columns),
+                    )
+                describe_result = [
+                    col
+                    for col in describe_result
+                    if str(col.get("col_name") or "").lower() in requested_lookup
+                ]
+
             # Map describe columns to ColumnDetail
             column_details = {}
             for col in describe_result:
@@ -363,7 +401,16 @@ class TableStatsCollector:
             columns_needing_value_counts: List[Tuple[str, str]] = []
 
             base_ref = "base"
-            base_cte = f"WITH {base_ref} AS (SELECT * FROM {table_ref})\n"
+            if describe_result:
+                selected_columns = [
+                    f"`{str(col.get('col_name', '')).replace('`', '``')}`"
+                    for col in describe_result
+                    if col.get("col_name")
+                ]
+                selected_columns_sql = ", ".join(selected_columns) if selected_columns else "*"
+            else:
+                selected_columns_sql = "*"
+            base_cte = f"WITH {base_ref} AS (SELECT {selected_columns_sql} FROM {table_ref})\n"
 
             for col_info in describe_result:
                 col_name = col_info.get("col_name", "")
@@ -422,8 +469,9 @@ class TableStatsCollector:
             # Step 4: Get sample data
             sample_result = []
             try:
+                sample_select = selected_columns_sql if requested_columns and selected_columns_sql != "*" else "*"
                 sample_result = self.executor.execute(
-                    sql_query=f"SELECT * FROM {table_ref} LIMIT {SAMPLE_ROW_COUNT}",
+                    sql_query=f"SELECT {sample_select} FROM {table_ref} LIMIT {SAMPLE_ROW_COUNT}",
                     catalog=catalog,
                     schema=schema,
                     timeout=45,
@@ -669,6 +717,7 @@ class TableStatsCollector:
         updated_at_ms: Optional[int],
         comment: Optional[str],
         collect_stats: bool = True,
+        columns: Optional[List[str]] = None,
     ) -> TableInfo:
         """
         Get complete info for a single table.
@@ -680,6 +729,7 @@ class TableStatsCollector:
             updated_at_ms: Table's updated_at timestamp (for cache validation)
             comment: Table comment
             collect_stats: Whether to collect column statistics
+            columns: Optional explicit column list to profile.
 
         Returns:
             TableInfo with DDL and optionally column stats
@@ -689,7 +739,7 @@ class TableStatsCollector:
 
         with table_lock:
             # Check cache (only if collecting stats)
-            if collect_stats:
+            if collect_stats and not columns:
                 cached = _check_cache(catalog, schema, table_name, updated_at_ms)
                 if cached:
                     logger.debug(f"Using cached info for {full_table_name}")
@@ -705,7 +755,12 @@ class TableStatsCollector:
 
             try:
                 if collect_stats:
-                    column_details, total_rows, sample_data = self.collect_column_stats(catalog, schema, table_name)
+                    column_details, total_rows, sample_data = self.collect_column_stats(
+                        catalog,
+                        schema,
+                        table_name,
+                        columns=columns,
+                    )
                 else:
                     column_details = self._describe_columns(catalog, schema, table_name)
             except Exception as e:
@@ -722,7 +777,7 @@ class TableStatsCollector:
             )
 
             # Update cache (only if we collected stats)
-            if collect_stats and not table_info.error:
+            if collect_stats and not columns and not table_info.error:
                 _update_cache(catalog, schema, table_name, updated_at_ms, table_info)
 
             return table_info
@@ -733,6 +788,7 @@ class TableStatsCollector:
         schema: str,
         tables: List[Dict[str, Any]],
         collect_stats: bool = True,
+        columns: Optional[List[str]] = None,
     ) -> List[TableInfo]:
         """
         Get info for multiple tables in parallel.
@@ -742,6 +798,7 @@ class TableStatsCollector:
             schema: Schema name
             tables: List of table info dicts with 'name', 'updated_at', 'comment'
             collect_stats: Whether to collect column statistics
+            columns: Optional explicit column list to profile.
 
         Returns:
             List of TableInfo objects
@@ -756,7 +813,15 @@ class TableStatsCollector:
             comment = table_info.get("comment")
 
             try:
-                return self.get_table_info(catalog, schema, table_name, updated_at_ms, comment, collect_stats)
+                return self.get_table_info(
+                    catalog,
+                    schema,
+                    table_name,
+                    updated_at_ms,
+                    comment,
+                    collect_stats,
+                    columns=columns,
+                )
             except Exception as e:
                 logger.error(f"Failed to get info for {catalog}.{schema}.{table_name}: {e}")
                 return TableInfo(

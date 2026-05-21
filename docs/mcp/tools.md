@@ -15,7 +15,8 @@ For the underlying functions, see the matching pages under [`../tools/`](../tool
 | `execute_sql` | 60s | (no dispatch) | Markdown output by default (`output_format="json"` to override). Auto-selects warehouse if `warehouse_id` omitted. |
 | `execute_sql_multi` | 120s | (no dispatch) | Dependency-aware parallel execution. Sample rows in each query result are also markdown-formatted. |
 | `manage_warehouse` | 30s | `list`, `get_best` | |
-| `get_table_stats_and_schema` | 60s | (no dispatch) | `table_stat_level`: `NONE` / `SIMPLE` / `DETAILED`. |
+| `get_table_schema` | 60s | (no dispatch) | Schema-only discovery; does not compute stats. |
+| `get_table_stats` | 120s | (no dispatch) | Selected-column profiling; requires explicit `columns`. |
 | `get_volume_folder_details` | 60s | (no dispatch) | UC Volume folder listing with sizes. |
 
 ## Compute — `tools/compute.py`

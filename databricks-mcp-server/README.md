@@ -84,7 +84,8 @@ Claude now has both:
 | `execute_sql_multi` | Execute multiple SQL statements with parallel execution |
 | `list_warehouses` | List all SQL warehouses in the workspace |
 | `get_best_warehouse` | Get the ID of the best available warehouse |
-| `get_table_stats_and_schema` | Get table schema and statistics |
+| `get_table_schema` | Get table schemas without computing stats |
+| `get_table_stats` | Get statistics for explicit selected columns |
 
 ### Compute
 

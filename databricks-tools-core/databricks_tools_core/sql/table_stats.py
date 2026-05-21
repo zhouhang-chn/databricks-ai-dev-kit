@@ -5,6 +5,7 @@ High-level functions for getting table details and statistics.
 Supports both Unity Catalog tables and Volume folder data.
 """
 
+import fnmatch
 import logging
 from typing import List, Literal, Optional
 
@@ -27,12 +28,32 @@ def _has_glob_pattern(name: str) -> bool:
     return any(c in name for c in ["*", "?", "[", "]"])
 
 
+def _normalize_table_name(table_name: str) -> str:
+    """Accept plain, schema-qualified, or fully qualified table names."""
+    parts = [part.strip().strip("`") for part in str(table_name).split(".") if part.strip()]
+    if len(parts) >= 3:
+        return parts[-1]
+    if len(parts) == 2:
+        return parts[-1]
+    return parts[0] if parts else str(table_name).strip()
+
+
+def _column_type_text(column) -> str:
+    """Return the most readable type string from a UC column object."""
+    for attr in ("type_text", "type_name", "type_json"):
+        value = getattr(column, attr, None)
+        if value:
+            return str(value)
+    return "unknown"
+
+
 def get_table_stats_and_schema(
     catalog: str,
     schema: str,
     table_names: Optional[List[str]] = None,
     table_stat_level: TableStatLevel = TableStatLevel.SIMPLE,
     warehouse_id: Optional[str] = None,
+    columns: Optional[List[str]] = None,
 ) -> TableSchemaResult:
     """
     Get schema and statistics for tables in a Unity Catalog schema.
@@ -60,6 +81,8 @@ def get_table_stats_and_schema(
             - DETAILED: Full stats including cardinality, min/max,
               null counts, histograms, and percentiles per column
         warehouse_id: Optional warehouse ID. If not provided, auto-selects one.
+        columns: Optional explicit column list to profile. Only used when
+            collecting stats for exact table names; schema-only calls ignore it.
 
     Returns:
         TableSchemaResult containing table information with requested stat level
@@ -103,7 +126,7 @@ def get_table_stats_and_schema(
     collector = TableStatsCollector(warehouse_id=warehouse_id)
 
     # Determine if we need to list tables
-    table_names = table_names or []
+    table_names = [_normalize_table_name(name) for name in table_names or [] if str(name).strip()]
     has_patterns = any(_has_glob_pattern(name) for name in table_names)
     needs_listing = len(table_names) == 0 or has_patterns
     failed_tables: List[DataSourceInfo] = []
@@ -159,6 +182,7 @@ def get_table_stats_and_schema(
         schema=schema,
         tables=tables_to_fetch,
         collect_stats=collect_stats,
+        columns=columns if collect_stats else None,
     )
 
     # Append any tables that failed metadata lookup with their error info
@@ -180,6 +204,113 @@ def get_table_stats_and_schema(
     else:
         # DETAILED - return everything
         return result
+
+
+def get_table_schema(
+    catalog: str,
+    schema: str,
+    table_names: Optional[List[str]] = None,
+    warehouse_id: Optional[str] = None,
+) -> TableSchemaResult:
+    """
+    Get table schemas without collecting row or column statistics.
+
+    Use this for schema discovery and column validation before analytical SQL.
+    This is the cheap path: it reads Unity Catalog metadata and does not require
+    SQL compute.
+    """
+    # Kept for API compatibility with get_table_stats_and_schema. Schema lookup
+    # is metadata-only and intentionally does not use SQL compute.
+    _ = warehouse_id
+    client = get_workspace_client()
+    normalized_names = [_normalize_table_name(name) for name in table_names or [] if str(name).strip()]
+    needs_listing = not normalized_names or any(_has_glob_pattern(name) for name in normalized_names)
+    failed_tables: List[DataSourceInfo] = []
+
+    def from_uc_table(table) -> DataSourceInfo:
+        name = getattr(table, "name", None)
+        full_name = f"{catalog}.{schema}.{name}" if name else f"{catalog}.{schema}"
+        column_details = {}
+        for column in getattr(table, "columns", None) or []:
+            column_name = getattr(column, "name", None)
+            if not column_name:
+                continue
+            column_details[column_name] = ColumnDetail(name=column_name, data_type=_column_type_text(column).lower())
+        return DataSourceInfo(
+            name=full_name,
+            comment=getattr(table, "comment", None),
+            column_details=column_details or None,
+            updated_at=getattr(table, "updated_at", None),
+        )
+
+    if needs_listing:
+        try:
+            listed_tables = list(client.tables.list(catalog_name=catalog, schema_name=schema))
+        except Exception as e:
+            raise Exception(
+                f"Failed to list tables in {catalog}.{schema}: {str(e)}. "
+                f"Check that the catalog and schema exist and you have access."
+            )
+        if normalized_names:
+            listed_tables = [
+                table
+                for table in listed_tables
+                if any(fnmatch.fnmatchcase(getattr(table, "name", "") or "", pattern) for pattern in normalized_names)
+            ]
+        tables = [from_uc_table(table) for table in listed_tables if getattr(table, "name", None)]
+        return TableSchemaResult(catalog=catalog, schema_name=schema, tables=tables)
+
+    tables: List[DataSourceInfo] = []
+    for name in normalized_names:
+        full_name = f"{catalog}.{schema}.{name}"
+        try:
+            tables.append(from_uc_table(client.tables.get(full_name)))
+        except Exception as e:
+            logger.warning(f"Failed to fetch metadata for {full_name}: {e}")
+            failed_tables.append(
+                DataSourceInfo(
+                    name=full_name,
+                    error=f"Failed to fetch table metadata: {e}",
+                )
+            )
+
+    if failed_tables:
+        tables.extend(failed_tables)
+    return TableSchemaResult(catalog=catalog, schema_name=schema, tables=tables)
+
+
+def get_table_stats(
+    catalog: str,
+    schema: str,
+    table_name: str,
+    columns: List[str],
+    warehouse_id: Optional[str] = None,
+) -> TableSchemaResult:
+    """
+    Get table statistics for an explicit list of columns.
+
+    ``columns`` is required so callers do not accidentally profile every column
+    in a wide or large table. Use ``get_table_schema`` first to discover column
+    names, then call this function only for columns needed by the current
+    analysis decision.
+    """
+    normalized_columns = [str(column).strip().strip("`") for column in columns or [] if str(column).strip()]
+    if not normalized_columns:
+        raise ValueError(
+            "columns is required. Call get_table_schema first, then request stats "
+            "only for the specific columns needed."
+        )
+    if not table_name or not str(table_name).strip():
+        raise ValueError("table_name is required.")
+
+    return get_table_stats_and_schema(
+        catalog=catalog,
+        schema=schema,
+        table_names=[_normalize_table_name(table_name)],
+        table_stat_level=TableStatLevel.DETAILED,
+        warehouse_id=warehouse_id,
+        columns=normalized_columns,
+    )
 
 
 def _parse_volume_path(volume_path: str) -> str:

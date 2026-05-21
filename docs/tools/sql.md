@@ -24,7 +24,8 @@ Wraps the SQL Warehouse Statement Execution API for query execution and adds opi
 
 | Function | Returns | Notes |
 |----------|---------|-------|
-| `get_table_stats_and_schema(table_name, level=TableStatLevel.SCHEMA, warehouse_id=None)` | `TableSchemaResult` | Pulls schema, partitioning, row counts, sample rows. Stat depth controlled by `TableStatLevel`. Accepts glob patterns for batch summaries. |
+| `get_table_schema(catalog, schema, table_names=None, warehouse_id=None)` | `TableSchemaResult` | Pulls schema from Unity Catalog metadata without computing row or column stats. Accepts glob patterns for batch summaries. |
+| `get_table_stats(catalog, schema, table_name, columns, warehouse_id=None)` | `TableSchemaResult` | Profiles explicit selected columns only. `columns` is required to avoid accidental full-table profiling. |
 | `get_volume_folder_details(volume_path, recursive=False, warehouse_id=None)` | `VolumeFolderResult` | Lists files under a UC Volume path with sizes / counts. |
 
 ### Errors and types

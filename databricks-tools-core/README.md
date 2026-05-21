@@ -167,49 +167,50 @@ warehouse_id = get_best_warehouse()
 # Prefers: running shared endpoints > running warehouses > stopped warehouses
 ```
 
-### Table Statistics
+### Table Schema And Statistics
 
-Get detailed table information and column statistics:
+Separate schema discovery from selected-column profiling:
 
 ```python
-from databricks_tools_core.sql import get_table_stats_and_schema, TableStatLevel
+from databricks_tools_core.sql import get_table_schema, get_table_stats
 
-# Get all tables in a schema with basic stats
-result = get_table_stats_and_schema(
+# Get all table schemas in a schema
+result = get_table_schema(
     catalog="my_catalog",
     schema="my_schema",
 )
 
-# Get specific tables (faster - no listing required)
-result = get_table_stats_and_schema(
+# Get specific table schemas (faster - no listing required)
+result = get_table_schema(
     catalog="my_catalog",
     schema="my_schema",
     table_names=["customers", "orders"],
 )
 
 # Use glob patterns
-result = get_table_stats_and_schema(
+result = get_table_schema(
     catalog="my_catalog",
     schema="my_schema",
     table_names=["raw_*", "gold_customers"],  # Mix of patterns and exact names
 )
 
-# Control stat level
-result = get_table_stats_and_schema(
+# Profile only columns needed for the current decision
+result = get_table_stats(
     catalog="my_catalog",
     schema="my_schema",
-    table_names=["customers"],
-    table_stat_level=TableStatLevel.DETAILED,  # NONE, SIMPLE, or DETAILED
+    table_name="customers",
+    columns=["customer_id", "created_at", "status"],
 )
 ```
 
-**TableStatLevel options:**
+`get_table_stats_and_schema` remains available for backward compatibility, but new callers should prefer `get_table_schema` and `get_table_stats` so wide tables are not accidentally profiled in full.
 
-| Level | Description | Use Case |
-|-------|-------------|----------|
-| `NONE` | DDL only, no stats | Quick schema lookup |
-| `SIMPLE` | Basic stats (samples, min/max, cardinality) | Default, cached |
-| `DETAILED` | Full stats (histograms, percentiles, value counts) | Data profiling |
+**Function choices:**
+
+| Function | Description | Use Case |
+|----------|-------------|----------|
+| `get_table_schema` | Columns and types from Unity Catalog metadata only | Quick schema lookup and column validation |
+| `get_table_stats` | Row and column stats for explicit columns | Targeted profiling after schema discovery |
 
 ### Jobs
 
@@ -323,7 +324,7 @@ databricks-tools-core/
 │   ├── sql/                          # SQL operations
 │   │   ├── sql.py                    # execute_sql, execute_sql_multi
 │   │   ├── warehouse.py              # list_warehouses, get_best_warehouse
-│   │   ├── table_stats.py            # get_table_stats_and_schema
+│   │   ├── table_stats.py            # get_table_schema, get_table_stats
 │   │   └── sql_utils/                # Internal utilities
 │   │       ├── executor.py           # SQLExecutor class
 │   │       ├── parallel_executor.py  # Multi-statement execution
@@ -401,7 +402,7 @@ tests/
 |-----------|----------|
 | `test_warehouse.py` | `list_warehouses`, `get_best_warehouse` |
 | `test_sql.py` | `execute_sql`, `execute_sql_multi`, error handling, parallel execution |
-| `test_table_stats.py` | `get_table_stats_and_schema`, all stat levels, glob patterns, caching |
+| `test_table_stats.py` | `get_table_schema`, `get_table_stats`, legacy stat levels, glob patterns, caching |
 | `test_jobs.py` | `list_jobs`, `find_job_by_name`, `create_job`, `get_job`, `update_job`, `delete_job` |
 | `test_runs.py` | `run_job_now`, `get_run`, `cancel_run`, `list_runs`, `wait_for_run` |
 

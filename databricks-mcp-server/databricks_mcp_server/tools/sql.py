@@ -4,7 +4,8 @@ Tools:
 - execute_sql: Single SQL query
 - execute_sql_multi: Multiple SQL statements with parallel execution
 - manage_warehouse: list, get_best
-- get_table_stats_and_schema: Schema and stats for tables
+- get_table_schema: Schema only for tables
+- get_table_stats: Selected-column stats for one table
 - get_volume_folder_details: Schema for volume files
 """
 
@@ -15,7 +16,8 @@ from databricks_tools_core.sql import (
     execute_sql_multi as _execute_sql_multi,
     list_warehouses as _list_warehouses,
     get_best_warehouse as _get_best_warehouse,
-    get_table_stats_and_schema as _get_table_stats_and_schema,
+    get_table_schema as _get_table_schema,
+    get_table_stats as _get_table_stats,
     get_volume_folder_details as _get_volume_folder_details,
     TableStatLevel,
 )
@@ -148,26 +150,40 @@ def manage_warehouse(
 
 
 @mcp.tool(timeout=60)
-def get_table_stats_and_schema(
+def get_table_schema(
     catalog: str,
     schema: str,
     table_names: List[str] = None,
-    table_stat_level: str = "SIMPLE",
     warehouse_id: str = None,
 ) -> Dict[str, Any]:
-    """Get schema and stats for tables. table_stat_level: NONE (schema only), SIMPLE (default, +row count), DETAILED (full per-column profile incl. null/unique/value counts and samples — runs many aggregations per column and can take several minutes on wide or large tables; only use when the user explicitly asks for a data profile, otherwise stick to SIMPLE).
+    """Get table schemas only. Use for column discovery before SQL; does not compute row counts or column stats.
 
     table_names: list or glob patterns, None=all tables."""
-    # Convert string to enum
-    level = TableStatLevel[table_stat_level.upper()]
-    result = _get_table_stats_and_schema(
+    result = _get_table_schema(
         catalog=catalog,
         schema=schema,
         table_names=table_names,
-        table_stat_level=level,
         warehouse_id=warehouse_id,
     )
-    # Convert to dict for JSON serialization
+    return result.model_dump(exclude_none=True) if hasattr(result, "model_dump") else result
+
+
+@mcp.tool(timeout=120)
+def get_table_stats(
+    catalog: str,
+    schema: str,
+    table_name: str,
+    columns: List[str],
+    warehouse_id: str = None,
+) -> Dict[str, Any]:
+    """Get selected-column statistics for one table. columns is required; call get_table_schema first."""
+    result = _get_table_stats(
+        catalog=catalog,
+        schema=schema,
+        table_name=table_name,
+        columns=columns,
+        warehouse_id=warehouse_id,
+    )
     return result.model_dump(exclude_none=True) if hasattr(result, "model_dump") else result
 
 
