@@ -942,7 +942,7 @@ function toCategoryComboData(
       role,
     };
   }));
-  const weightField = spec.yFields.find((field) => inferMetricRole(field, tabular) === 'value');
+  const weightField = chooseWeightField(spec.yFields, tabular);
 
   const rows: ChartRow[] = Array.from(groups.values()).map((group) => {
     const first = group.entries[0];
@@ -986,7 +986,7 @@ function toAggregatedComboData(tabular: RowOriented, spec: ChartSpec, limit: num
     groups.set(label, current);
   });
 
-  const weightField = spec.yFields.find((field) => inferMetricRole(field, tabular) === 'value');
+  const weightField = chooseWeightField(spec.yFields, tabular);
   const series = spec.yFields.map((field, index) => ({
     key: seriesKey(index),
     field,
@@ -1046,6 +1046,72 @@ function aggregateMetricValue(
   return role === 'duration' || shouldAverageField(field)
     ? values.reduce((sum, entry) => sum + entry.value, 0) / values.length
     : values.reduce((sum, entry) => sum + entry.value, 0);
+}
+
+function chooseWeightField(yFields: string[], tabular: RowOriented): string | undefined {
+  const explicitValueField = yFields.find((field) => inferMetricRole(field, tabular) === 'value');
+  if (explicitValueField) return explicitValueField;
+
+  const percentField = yFields.find((field) => inferMetricRole(field, tabular) === 'percent');
+  if (!percentField) return undefined;
+
+  return findRateWeightField(percentField, tabular);
+}
+
+function findRateWeightField(rateField: string, tabular: RowOriented): string | undefined {
+  const candidates = tabular.columns
+    .filter((column) => column !== rateField)
+    .filter((column) => inferMetricRole(column, tabular) === 'value')
+    .filter((column) => isDenominatorMetricField(column))
+    .filter((column) => tabular.rows.some((row) => coerceNumber(row[column]) !== undefined))
+    .map((column) => ({ column, score: rateWeightScore(rateField, column) }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((left, right) => right.score - left.score);
+
+  return candidates[0]?.column;
+}
+
+function rateWeightScore(rateField: string, candidateField: string): number {
+  const rateTokens = metricTokens(rateField);
+  const candidateTokens = metricTokens(candidateField);
+  const overlap = candidateTokens.filter((token) => rateTokens.includes(token)).length;
+  const normalized = normalizeFieldName(candidateField);
+  let score = overlap * 4;
+  if (/(^|_)(total|base|denominator)(_|$)/.test(normalized)) score += 3;
+  if (/(^|_)(count|cnt|num|number)(_|$)/.test(normalized)) score += 1;
+  if (/(^|_)(achieved|complete|completed|success|numerator)(_|$)/.test(normalized)) score -= 3;
+  return score;
+}
+
+function metricTokens(field: string): string[] {
+  return normalizeFieldName(field)
+    .split('_')
+    .filter((token) => token && !METRIC_STOP_WORDS.has(token));
+}
+
+const METRIC_STOP_WORDS = new Set([
+  'achv',
+  'achievement',
+  'achieved',
+  'avg',
+  'average',
+  'count',
+  'cnt',
+  'num',
+  'number',
+  'pct',
+  'percent',
+  'percentage',
+  'rate',
+  'ratio',
+  'share',
+  'total',
+]);
+
+function isDenominatorMetricField(field: string): boolean {
+  const normalized = normalizeFieldName(field);
+  return /(^|_)(total|base|denominator|count|cnt|num|number)(_|$)/.test(normalized)
+    && !/(^|_)(achieved|complete|completed|success|numerator)(_|$)/.test(normalized);
 }
 
 function toScatterRows(tabular: RowOriented, spec: ChartSpec, limit: number): ChartRow[] {
@@ -1220,17 +1286,18 @@ function inferMetricRole(field: string, tabular?: RowOriented): MetricRole {
   if (values.length === 0) return 'value';
   const min = Math.min(...values);
   const max = Math.max(...values);
-  if (min >= 0 && max <= 1 && /(rate|ratio|share)/i.test(field)) return 'percent';
+  if (min >= 0 && max <= 1 && /(^|_)(rate|ratio|share)(_|$)/.test(normalizeFieldName(field))) return 'percent';
   return 'value';
 }
 
 function isPercentField(field: string): boolean {
-  return /(^|_)(pct|percent|percentage|rate|ratio|share)(_|$)/i.test(field)
-    || /(pct|percent|percentage|rate|ratio|share)$/i.test(field);
+  const normalized = normalizeFieldName(field);
+  return /(^|_)(pct|percent|percentage|rate|ratio|share)(_|$)/i.test(normalized)
+    || /(pct|percent|percentage|rate|ratio|share)$/i.test(normalized);
 }
 
 function isDurationField(field: string): boolean {
-  const normalized = field.toLowerCase();
+  const normalized = normalizeFieldName(field);
   if (/(^|_)(duration|elapsed|latency|wait|travel_time|visit_time|drive_time|service_time|handle_time|processing_time|response_time|resolution_time)(_|$)/.test(normalized)) {
     return true;
   }
@@ -1241,29 +1308,46 @@ function isDurationField(field: string): boolean {
 }
 
 function shouldAverageField(field: string): boolean {
-  return /(^|_)(avg|average|mean|median)(_|$)/i.test(field)
-    || /(avg|average|mean|median)$/i.test(field);
+  const normalized = normalizeFieldName(field);
+  return /(^|_)(avg|average|mean|median)(_|$)/i.test(normalized)
+    || /(avg|average|mean|median)$/i.test(normalized);
 }
 
 function formatMetricValue(value: unknown, field: string): string {
   const numeric = typeof value === 'number' ? value : coerceNumber(value);
   if (numeric === undefined) return cellToString(value);
-  if (inferMetricRole(field) === 'percent') return `${formatNumber(numeric)}%`;
+  if (inferMetricRole(field) === 'percent') return formatPercentValue(numeric);
   if (inferMetricRole(field) === 'duration') return `${formatNumber(numeric)}${durationUnitSuffix(field)}`;
   return formatNumber(numeric);
 }
 
 function formatAxisValue(value: unknown, role: MetricRole, unitSuffix = ''): string {
-  if (role === 'percent') return `${formatNumber(value)}%`;
+  if (role === 'percent') return formatPercentValue(value);
   if (role === 'duration') return `${formatNumber(value)}${unitSuffix || 'm'}`;
   return formatNumber(value);
 }
 
 function durationUnitSuffix(field: string): string {
-  if (/(^|_)(hours|hour|hrs|hr)(_|$)/i.test(field)) return 'h';
-  if (/(^|_)(seconds|second|secs|sec)(_|$)/i.test(field)) return 's';
-  if (/(^|_)(days|day)(_|$)/i.test(field)) return 'd';
+  const normalized = normalizeFieldName(field);
+  if (/(^|_)(hours|hour|hrs|hr)(_|$)/i.test(normalized)) return 'h';
+  if (/(^|_)(seconds|second|secs|sec)(_|$)/i.test(normalized)) return 's';
+  if (/(^|_)(days|day)(_|$)/i.test(normalized)) return 'd';
   return 'm';
+}
+
+function formatPercentValue(value: unknown): string {
+  const numeric = typeof value === 'number' ? value : coerceNumber(value);
+  if (numeric === undefined) return cellToString(value);
+  const scaled = Math.abs(numeric) <= 1 ? numeric * 100 : numeric;
+  return `${formatNumber(scaled)}%`;
+}
+
+function normalizeFieldName(field: string): string {
+  return field
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 function renderLineDot(
