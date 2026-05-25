@@ -409,87 +409,135 @@ WITH METRICS
 LANGUAGE YAML
 AS $$
   version: 0.1
-  source: brewdat_uc_china_prod.md_exchange_brewdat_ods.tsvc_base_sys_kpiachieverate
-  filter: kpicode = 'KPI725'
-
-  joins:
-    - name: scan_summary
-      source: brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_summary
-      on: "source.EmployeeCode = scan_summary.m1_no AND CAST(DATE_FORMAT(source.startdate, 'yyyyMM') AS STRING) = scan_summary.yearmonth"
-    - name: org
-      source: brewdat_uc_china_prod.org_datahub_dw.employee_relation_m1m2m3_monthly
-      on: "source.EmployeeCode = org.employee_no AND CAST(DATE_FORMAT(source.startdate, 'yyyyMM') AS STRING) = org.relation_month"
+  source: >
+    WITH kpi725 AS (
+      SELECT
+        CAST(DATE_FORMAT(startdate, 'yyyyMM') AS INT) AS year_month,
+        CAST(DATE_FORMAT(startdate, 'yyyyMM') AS STRING) AS relation_month,
+        EmployeeCode AS employee_code,
+        MAX(username) AS username,
+        MAX(userrolecode) AS role,
+        MAX(postcode) AS post_code,
+        SUM(targetvalue) AS total_target_value,
+        SUM(actualvalue) AS total_actual_value
+      FROM brewdat_uc_china_prod.md_exchange_brewdat_ods.tsvc_base_sys_kpiachieverate
+      WHERE kpicode = 'KPI725'
+      GROUP BY
+        CAST(DATE_FORMAT(startdate, 'yyyyMM') AS INT),
+        CAST(DATE_FORMAT(startdate, 'yyyyMM') AS STRING),
+        EmployeeCode
+    ),
+    scan_summary AS (
+      SELECT
+        CAST(yearmonth AS INT) AS year_month,
+        m1_no AS employee_code,
+        COUNT(DISTINCT CASE WHEN achievement_date IS NOT NULL THEN poc_middle_id END) AS scan_side_achieved_poc_count
+      FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_summary
+      WHERE COALESCE(channel, 'KA') != 'T2WS'
+      GROUP BY CAST(yearmonth AS INT), m1_no
+    ),
+    org AS (
+      SELECT
+        relation_month,
+        employee_no AS employee_code,
+        MAX(bu) AS bu,
+        MAX(region) AS region,
+        MAX(area) AS area,
+        MAX(territory) AS territory
+      FROM brewdat_uc_china_prod.org_datahub_dw.employee_relation_m1m2m3_monthly
+      GROUP BY relation_month, employee_no
+    )
+    SELECT
+      kpi725.year_month,
+      kpi725.employee_code,
+      kpi725.username,
+      kpi725.role,
+      kpi725.post_code,
+      org.bu,
+      org.region,
+      org.area,
+      org.territory,
+      kpi725.total_target_value,
+      kpi725.total_actual_value,
+      COALESCE(scan_summary.scan_side_achieved_poc_count, 0) AS scan_side_achieved_poc_count
+    FROM kpi725
+    LEFT JOIN scan_summary
+      ON kpi725.year_month = scan_summary.year_month
+      AND kpi725.employee_code = scan_summary.employee_code
+    LEFT JOIN org
+      ON kpi725.relation_month = org.relation_month
+      AND kpi725.employee_code = org.employee_code
 
   dimensions:
     - name: Year Month
-      expr: "CAST(DATE_FORMAT(source.startdate, 'yyyyMM') AS INT)"
+      expr: source.year_month
 
     - name: Employee Code
-      expr: "source.EmployeeCode"
+      expr: source.employee_code
 
     - name: Username
       expr: "source.username"
 
     - name: Role
-      expr: "source.userrolecode"
+      expr: source.role
 
     - name: Post Code
-      expr: "source.postcode"
+      expr: source.post_code
 
     - name: BU
-      expr: "org.bu"
+      expr: source.bu
 
     - name: Region
-      expr: "org.region"
+      expr: source.region
 
     - name: Area
-      expr: "org.area"
+      expr: source.area
 
     - name: Territory
-      expr: "org.territory"
+      expr: source.territory
 
     - name: Has Target
-      expr: "CASE WHEN source.targetvalue IS NOT NULL AND source.targetvalue > 0 THEN 'Has Target' ELSE 'No Target' END"
+      expr: "CASE WHEN source.total_target_value IS NOT NULL AND source.total_target_value > 0 THEN 'Has Target' ELSE 'No Target' END"
 
     - name: Has Actual
-      expr: "CASE WHEN source.actualvalue IS NOT NULL THEN 'Has Actual' ELSE 'No Actual' END"
+      expr: "CASE WHEN source.total_actual_value IS NOT NULL THEN 'Has Actual' ELSE 'No Actual' END"
 
   measures:
     - name: Total Target Value
-      expr: "SUM(source.targetvalue)"
+      expr: "SUM(source.total_target_value)"
 
     - name: Total Actual Value
-      expr: "SUM(source.actualvalue)"
+      expr: "SUM(source.total_actual_value)"
 
     - name: KPI Achievement Rate
-      expr: "SUM(source.actualvalue) / NULLIF(SUM(source.targetvalue), 0)"
+      expr: "SUM(source.total_actual_value) / NULLIF(SUM(source.total_target_value), 0)"
 
     - name: Target-Actual Gap
-      expr: "SUM(source.targetvalue) - SUM(source.actualvalue)"
+      expr: "SUM(source.total_target_value) - SUM(source.total_actual_value)"
 
     - name: Employee Count
-      expr: "COUNT(DISTINCT source.EmployeeCode)"
+      expr: "COUNT(DISTINCT source.employee_code)"
 
     - name: Employee Count with Zero Actual
-      expr: "COUNT(DISTINCT CASE WHEN source.actualvalue = 0 OR source.actualvalue IS NULL THEN source.EmployeeCode END)"
+      expr: "COUNT(DISTINCT CASE WHEN source.total_actual_value = 0 OR source.total_actual_value IS NULL THEN source.employee_code END)"
 
     - name: Employee Count with Fractional Actual
-      expr: "COUNT(DISTINCT CASE WHEN source.actualvalue % 1 != 0 THEN source.EmployeeCode END)"
+      expr: "COUNT(DISTINCT CASE WHEN source.total_actual_value % 1 != 0 THEN source.employee_code END)"
 
     - name: Scan Side Achieved POC Count
-      expr: "SUM(CASE WHEN scan_summary.achievement_date IS NOT NULL THEN 1 ELSE 0 END)"
+      expr: "SUM(source.scan_side_achieved_poc_count)"
 
     - name: KPI-vs-Scan Difference
-      expr: "SUM(source.actualvalue) - SUM(CASE WHEN scan_summary.achievement_date IS NOT NULL THEN 1 ELSE 0 END)"
+      expr: "SUM(source.total_actual_value) - SUM(source.scan_side_achieved_poc_count)"
 
     - name: Max Actual Value
-      expr: "MAX(source.actualvalue)"
+      expr: "MAX(source.total_actual_value)"
 
     - name: Min Actual Value
-      expr: "MIN(source.actualvalue)"
+      expr: "MIN(source.total_actual_value)"
 
     - name: Median Actual Value
-      expr: "PERCENTILE(source.actualvalue, 0.5)"
+      expr: "PERCENTILE(source.total_actual_value, 0.5)"
 $$
 ```
 

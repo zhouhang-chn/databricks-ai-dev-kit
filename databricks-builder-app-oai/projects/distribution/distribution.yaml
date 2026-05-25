@@ -19,7 +19,7 @@ analysis_notes:
 databricks_resources:
   databricks_host: https://adb-960767945362324.0.databricks.azure.cn
   cluster_id: 1021-020841-thvbkra7
-  warehouse_id: null
+  warehouse_id: 1af3859d87e5fce6
   workspace_folders:
     - /Workspace/Users/sabrina.yu@budweiserapac.com/Distribution
   workspace_files:
@@ -64,7 +64,7 @@ metric_view_context:
     data_profile: design-record-only
   metric_views:
     - full_name: ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics
-      status: candidate
+      status: validated
       source_objects:
         - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_detail
         - brewdat_uc_china_prod.org_datahub_dw.employee_relation_m1m2m3_monthly
@@ -98,11 +98,12 @@ metric_view_context:
         tolerance:
           count_fields: exact
           rate_fields: 0.01
+        checked_at: "2026-05-25T07:46:30Z"
         known_caveats:
-          - Live Metric View query validation is still required before certification.
+          - Validated for 202604 across 6990 M1s; achieved SKU, total SKU, rate, distinct POC, distinct group, and POC-group counts all matched direct SQL with zero mismatches.
           - Channel cleaning excludes T2WS and maps IH to TT, NULL to KA.
     - full_name: ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
-      status: candidate
+      status: validated
       source_objects:
         - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_summary
       grain:
@@ -134,10 +135,11 @@ metric_view_context:
         tolerance:
           count_fields: exact
           rate_fields: 0.01
+        checked_at: "2026-05-25T07:46:30Z"
         known_caveats:
-          - Live Metric View query validation is still required before certification.
+          - Validated for 202604 across 6990 M1s; total POC, achieved POC, not achieved POC, and POC achievement rate all matched direct SQL with zero mismatches.
     - full_name: ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
-      status: candidate
+      status: validated
       source_objects:
         - brewdat_uc_china_prod.md_exchange_brewdat_ods.tsvc_base_sys_kpiachieverate
         - brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_scan_distribution_achievement_summary
@@ -168,15 +170,18 @@ metric_view_context:
         tolerance:
           count_fields: exact
           rate_fields: 0.01
+        checked_at: "2026-05-25T10:14:59Z"
         known_caveats:
-          - Live Metric View query validation is still required before certification.
+          - Recreated with an inline employee-month source query that pre-aggregates KPI725 and scan summary before Metric View measures are applied.
+          - Validated for 202604 across 7254 employees; target, actual, KPI achievement rate, scan-side achieved POC count, and KPI-vs-Scan Difference all matched direct SQL with zero mismatches.
+          - Monthly aggregates for 202601-202604 matched direct SQL after recreation.
           - 202605 actualvalue can be NULL while the month is still open.
 
 readiness_summary:
   status: partially_ready
-  checked_at: "2026-05-20"
-  ready_for: candidate Metric View routing and v0.4 golden-case drafting
+  checked_at: "2026-05-25T10:14:59Z"
+  ready_for: validated MV1/MV2/MV3 routing and v0.4 golden-case drafting for achievement and KPI reconciliation questions
   blocked_until:
-    - MV1-MV3 are queried through Metric View SQL with MEASURE().
-    - MV1-MV3 are reconciled against direct SQL oracles.
-    - Validation timestamps and tolerances are recorded.
+    - MV1/MV2 certification scope is expanded beyond the 202604 validation slice if production certification requires more months.
+    - MV3 certification scope is expanded beyond 202601-202604 monthly aggregates and 202604 employee-level validation if production certification requires more months.
+    - MV4-MV5 remain candidate until fraud, BEES coverage, and KBD coverage scenarios stabilize.

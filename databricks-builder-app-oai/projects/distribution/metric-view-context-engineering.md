@@ -54,14 +54,18 @@ Distribution onboarding should produce:
 
 | Status | Metric View | Grain | Primary questions |
 |---|---|---|---|
-| Target | `brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics` | POC x Group x SKU Key x Month | unachieved POC groups, M2/M3 team ranking, gap drill-down |
-| Target | `brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics` | POC x Month | M1 monthly achievement, remaining POCs, near-achievement POCs |
-| Target | `brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics` | Employee x Month | KPI725 benchmark, scan-vs-KPI reconciliation |
-| Candidate | `brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_bees_coverage_metrics` | POC x SKU x Month | BEES coverage and later fraud/profile cases |
-| Candidate | `brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kbd_coverage_metrics` | POC x SKU x Month | KBD coverage and later profile cases |
+| Validated for 202604 | `ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics` | POC x Group x SKU Key x Month | unachieved POC groups, M2/M3 team ranking, gap drill-down |
+| Validated for 202604 | `ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics` | POC x Month | M1 monthly achievement, remaining POCs, near-achievement POCs |
+| Validated for 202604 employee-level and 202601-202604 monthly aggregate | `ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics` | Employee x Month | KPI725 benchmark, scan-vs-KPI reconciliation |
+| Candidate | `ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_bees_coverage_metrics` | POC x SKU x Month | BEES coverage and later fraud/profile cases |
+| Candidate | `ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kbd_coverage_metrics` | POC x SKU x Month | KBD coverage and later profile cases |
 
-The first v0.3.5 slice should certify MV1-MV3. MV4-MV5 can stay candidate until
-their downstream scenarios become stable release candidates.
+The first v0.3.5 validation slice validates MV1-MV2 for 202604 and validates
+the recreated MV3 for 202604 employee-level reconciliation plus 202601-202604
+monthly aggregates. MV3 uses an inline source query that pre-aggregates KPI725
+and scan summary to employee-month before Metric View measures are applied.
+MV4-MV5 can stay candidate until their downstream scenarios become stable
+release candidates.
 
 ## Business Terms
 

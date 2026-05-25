@@ -1,12 +1,13 @@
 # Distribution Readiness Summary
 
-Date: 2026-05-20
+Date: 2026-05-25
 
 Status: partially ready.
 
-The Distribution seed is ready for candidate Metric View routing and v0.4
-golden-case drafting. It is not ready to certify answers as governed semantic
-answers until MV1-MV3 are queried and reconciled with direct SQL.
+The Distribution seed is ready for validated MV1/MV2/MV3 routing and v0.4
+golden-case drafting for achievement and KPI-vs-scan reconciliation questions.
+It remains partially ready because MV4-MV5 are deferred and broader
+multi-month certification can still be expanded if required.
 
 ## Ready
 
@@ -14,6 +15,15 @@ answers until MV1-MV3 are queried and reconciled with direct SQL.
 - `distribution.yaml` includes a compact `metric_view_context` with status,
   grain, measures, dimensions, source objects, business terms, and validation
   references.
+- MV1 `m1_achievement_detail_metrics` and MV2
+  `m1_poc_achievement_metrics` were validated on 2026-05-25 for `202604`
+  across 6,990 M1s with zero direct-SQL mismatches.
+- MV3 `m1_kpi725_benchmark_metrics` was recreated on 2026-05-25 with an
+  employee-month source grain and validated for `202604` across 7,254
+  employees with zero direct-SQL mismatches. Monthly aggregates for
+  `202601`-`202604` also matched direct SQL.
+- `databricks_resources.warehouse_id` is set to `1af3859d87e5fce6`
+  (`Starter Warehouse`) for DBSQL-aligned validation.
 - `requirements.md` defines P0/P1 analysis requirements with grain, measures,
   dimensions, filters, required assets, and answer contracts.
 - `inventory.md` lists source tables, workspace code, Metric Views, schemas,
@@ -24,19 +34,19 @@ answers until MV1-MV3 are queried and reconciled with direct SQL.
 
 | Blocker | Blocks | Resolution |
 |---|---|---|
-| MV1-MV3 have candidate status | Certified semantic-layer runtime path | Query each Metric View with explicit dimensions and `MEASURE()` |
-| Direct SQL reconciliation not recorded | Validation gate and v0.4 golden-case data fidelity | Run source-table oracle SQL and compare counts exactly, rates within 0.01 |
-| No checked timestamp in validation metadata | Staleness assessment | Update `metric_view_context.metric_views[].validation.checked_at` after validation |
-| Warehouse ID is null | DBSQL-aligned validation | Add `databricks_resources.warehouse_id` when a SQL warehouse is available |
+| MV1/MV2 validated on one month only | Broader production certification | Expand validation to additional months if production certification requires multi-period coverage |
+| MV3 employee-level validation currently covers 202604 | Broader production certification | Expand employee-level reconciliation to additional months if production certification requires multi-period coverage |
+| MV4-MV5 remain candidate | Fraud, BEES coverage, and KBD coverage golden paths | Keep deferred until downstream scenarios and source outputs stabilize |
 
 ## Handoff Notes
 
-- KPI, aggregate, ranking, trend, and comparison questions should attempt the
-  registered Metric View path first.
-- Because status is `candidate`, runtime answers should disclose that the
-  Metric View is not yet certified when direct validation has not been run.
+- Achievement, aggregate, ranking, trend, and comparison questions covered by
+  MV1/MV2 can use the validated Metric View path for the 202604 validation
+  slice.
+- KPI-vs-scan reconciliation questions covered by MV3 can use the validated
+  Metric View path for 202601-202604 monthly aggregates and the 202604
+  employee-level validation slice.
 - Raw tables remain the approved path for validation, row-level drill-down,
   unsupported grains, and source-data debugging.
-- v0.4 golden cases may reference MV1-MV3 for the happy path only after the
-  certification blockers are closed or explicitly accepted as partial.
-
+- v0.4 golden cases may reference MV1/MV2 for achievement paths and MV3 for
+  KPI-vs-scan reconciliation paths, keeping direct SQL as the eval oracle.

@@ -1,5 +1,12 @@
--- MV3 candidate validation: KPI725 benchmark and scan reconciliation.
+-- MV3 validation: KPI725 benchmark and scan reconciliation.
 -- Replace :yearmonth before execution.
+-- Live check 2026-05-25: MV3 was recreated with an employee-month source
+-- query that pre-aggregates KPI725 and scan summary before Metric View
+-- measures are applied.
+-- Validation passed for 202604 across 7254 employees with zero mismatches
+-- for target, actual, KPI achievement rate, scan-side achieved POC count, and
+-- KPI-vs-Scan Difference. Monthly aggregates for 202601-202604 also matched
+-- direct SQL.
 
 -- Metric View path.
 SELECT
@@ -10,7 +17,7 @@ SELECT
   MEASURE(`KPI Achievement Rate`) AS kpi_achievement_rate,
   MEASURE(`Scan Side Achieved POC Count`) AS scan_side_achieved_poc_count,
   MEASURE(`KPI-vs-Scan Difference`) AS kpi_vs_scan_difference
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics
 WHERE `Year Month` = :yearmonth
 GROUP BY ALL;
 
@@ -50,4 +57,3 @@ FROM kpi725
 LEFT JOIN scan_summary
   ON kpi725.year_month = scan_summary.year_month
   AND kpi725.employee_code = scan_summary.employee_code;
-

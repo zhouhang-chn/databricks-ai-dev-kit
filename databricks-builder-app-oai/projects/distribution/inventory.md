@@ -1,11 +1,11 @@
 # Distribution Asset Inventory
 
-Date: 2026-05-20
+Date: 2026-05-25
 
 This inventory records the configured assets for the v0.3.5 Distribution
 onboarding slice. It intentionally separates registered assets from validation
-status; candidate Metric Views are not certified until `readiness.md` records
-direct SQL reconciliation.
+status; Metric View certification state is tracked in `readiness.md` and
+`distribution.yaml`.
 
 ## Project Setting Source
 
@@ -22,7 +22,8 @@ direct SQL reconciliation.
 
 | Schema | Purpose | Status |
 |---|---|---|
-| `brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw` | Distribution achievement, scan, BEES, and KBD source tables plus target Metric Views | Registered |
+| `brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw` | Distribution achievement, scan, BEES, and KBD source tables | Registered |
+| `ds_uc_china_dev.gld_apc_sales_m1_scan_dw` | Distribution Metric View semantic layer | Registered and partially validated |
 | `techsales_uc_china_prod.techsales_db` | Visit-base and related source references | Registered |
 | `brewdat_uc_china_prod.bcc_dmdsrintegrationproject_ods` | SKU mapping source | Registered |
 
@@ -44,12 +45,11 @@ direct SQL reconciliation.
 
 | Metric View | Status | Grain | Certification Target |
 |---|---|---|---|
-| `brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics` | Candidate | POC x Group x SKU Key x Month | v0.3.5 MV1 |
-| `brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics` | Candidate | POC x Month | v0.3.5 MV2 |
-| `brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics` | Candidate | Employee x Month | v0.3.5 MV3 |
+| `ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_achievement_detail_metrics` | Validated for 202604 | POC x Group x SKU Key x Month | v0.3.5 MV1 |
+| `ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics` | Validated for 202604 | POC x Month | v0.3.5 MV2 |
+| `ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_kpi725_benchmark_metrics` | Validated for 202604 employee-level and 202601-202604 monthly aggregate | Employee x Month | v0.3.5 MV3 |
 
 ## Volumes
 
 No input volume paths are declared. Add volume paths only if onboarding finds
 required file evidence, notebook exports, PDFs, CSVs, or image assets.
-

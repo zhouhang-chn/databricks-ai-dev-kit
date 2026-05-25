@@ -1,5 +1,8 @@
--- MV2 candidate validation: POC achievement metrics.
+-- MV2 validation: POC achievement metrics.
 -- Replace :yearmonth and :m1_no before execution.
+-- Live check 2026-05-25: validated for 202604 across 6990 M1s with zero
+-- mismatches against direct SQL for total POC, achieved POC, not achieved POC,
+-- and POC achievement rate.
 
 -- Metric View path.
 SELECT
@@ -9,7 +12,7 @@ SELECT
   MEASURE(`Achieved POC Count`) AS achieved_poc_count,
   MEASURE(`Not Achieved POC Count`) AS not_achieved_poc_count,
   MEASURE(`POC Achievement Rate`) AS poc_achievement_rate
-FROM brewdat_uc_china_prod.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
+FROM ds_uc_china_dev.gld_apc_sales_m1_scan_dw.m1_poc_achievement_metrics
 WHERE `Year Month` = :yearmonth
   AND `M1 No` = :m1_no
 GROUP BY ALL;
@@ -28,4 +31,3 @@ WHERE CAST(yearmonth AS INT) = :yearmonth
   AND m1_no = :m1_no
   AND COALESCE(channel, 'KA') != 'T2WS'
 GROUP BY m1_no, CAST(yearmonth AS INT);
-
