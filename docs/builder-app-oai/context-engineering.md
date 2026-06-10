@@ -63,8 +63,8 @@ default, wasting attention and budget.
 
 Context Assets are governed information the agent relies on to route, execute,
 validate, and disclose an analysis. They are not incidental prompt text. They
-should have owners, source-of-truth locations, freshness expectations, loading
-behavior, and observability.
+should have owners, source-of-truth locations, format, storage, freshness
+expectations, loading behavior, and observability.
 
 The basic design uses a **Context Asset Pack** per project. The pack contains
 the minimum governed assets needed to answer the launched question families, plus
@@ -103,6 +103,8 @@ A full asset manifest can be added later.
 | `asset_type` | The job this Context Asset performs | Required as the organizing field; see Section 2.3 |
 | `defense_claim` | Failure mode or operating risk this asset defends against | Required for new or changed assets where a carrier exists |
 | `content` | Knowledge, evidence, rule, or control record | Required in the carrier or implied by the referenced object |
+| `format` | Physical or logical representation: Metric View, Markdown, YAML/JSON, SQL, trace event, table row, etc. | Required by asset type where a carrier exists; see Section 2.3 |
+| `storage` | Durable location or carrier the product reads from | Required for project-owned assets; distinct from `source_of_truth` when an asset is copied, indexed, or synchronized |
 | `owner` | Person or team accountable for correctness and freshness | Required for metric definitions and launch readiness |
 | `source_of_truth` | DB setting, authored file, derived file, trace, or telemetry table | Required for project-owned assets |
 | `freshness_policy` | When the asset must be reviewed or regenerated | Target field; can start as notes or validation metadata |
@@ -113,16 +115,21 @@ A full asset manifest can be added later.
 
 ### 2.3 Asset Types
 
-| `asset_type` | Content | Typical `loading_behavior` | Typical `scope` | Readiness Rule |
-|---|---|---|---|---|
-| `platform_mechanism` | System prompt core, tool schemas, plan state machine, read-only rules, response contract | `resident_platform`, `tool_schema` | Platform | Mechanism is covered by prompt/tool-shape tests |
-| `data_foundation` | Governed source tables, transforms, tests, schema metadata, lineage, code-derived and LLM-optimized table docs | `warehouse_object`, `metadata_inspection`, `compiled_summary` | Project | The data estate is legible enough to distinguish similar entities |
-| `semantic_truth` | Metric Views, canonical measures, dimensions, grains, approved raw paths, owners, validation status, fallback policy | `compiled_core`, `on_demand_file`, `warehouse_query` | Project | Every launched KPI/aggregate family maps to a validated MV or approved raw path |
-| `business_context` | Business terms, aliases, gotchas, caveats, launch/incident notes, interpretation guidance, decision context | `compiled_summary`, `on_demand_file`, `retrieved` | Project/turn | Ambiguous terms have one canonical interpretation or an explicit fallback policy |
-| `analyst_workflow` | Knowledge Router contract, senior-analyst SOP, analysis patterns, review rubric | `compiled_core`, `on_demand_file` | Platform/project/turn | Rules that affect correctness are either enforced by tool state or covered by tests |
-| `turn_context_memory` | Matched project files, retrieved docs, saved corrections, project/personal memory | `on_demand_file`, `retrieved`, `history_memory` | Turn/history | Retrieved or remembered context is scoped, auditable, and does not silently override canonical definitions |
-| `runtime_evidence` | Schema inspections, executed SQL or MV query, raw rows, result shape, validation checks, footer metadata | `runtime_observed`, `final_disclosure`, `telemetry` | Run/turn | Runs are reproducible enough to verify source tier, validation status, and file compliance |
-| `control_plane` | Evals, readiness gates, telemetry, regression runbooks | `eval_only`, `telemetry` | Eval/control | Readiness and regression decisions are measurable and replayable |
+These asset types map to the Anthropic agentic analytics stack: data
+foundations reduce the candidate entity space; sources of truth turn business
+terms into governed entities; skills encode the procedure for finding and using
+those entities; validation assets detect drift and wrong answers.
+
+| `asset_type` | Stack Layer | Content | Format | Storage | Loading | Readiness Rule |
+|---|---|---|---|---|---|---|
+| `platform_mechanism` | Product/runtime mechanism | System prompt core, tool schemas, plan state machine, read-only rules, response contract | Prompt text, tool-schema JSON, typed config, contract Markdown | Application code/config, prompt templates, tool registry, project DB settings when configurable | `resident_platform`, `tool_schema`; loaded before project assembly | Mechanism is covered by prompt/tool-shape tests |
+| `data_foundation` | Data foundations | Governed source tables, transforms, tests, schema metadata, lineage, code-derived and LLM-optimized table docs | Unity Catalog objects, SQL/Python transforms, test definitions, schema/lineage metadata, generated Markdown | Databricks workspace/catalog, transform repository, project file store for generated docs | `warehouse_object` when queried, `metadata_inspection` during routing/validation, compact `compiled_summary` for launched domains | The data estate is legible enough to distinguish similar entities |
+| `semantic_truth` | Sources of truth: semantic layer and approved raw paths | Metric Views, canonical measures, dimensions, grains, approved raw paths, owners, validation status, fallback policy | Metric View definition, measure/dimension manifest, YAML/JSON metadata, curated Markdown reference | Databricks Metric Views/catalog, project settings DB, governed reference files | `compiled_core` for launched metrics, `warehouse_query` for execution, `on_demand_file` for detailed references | Every launched KPI/aggregate family maps to a validated MV or approved raw path |
+| `business_context` | Sources of truth: business context | Business terms, aliases, gotchas, caveats, launch/incident notes, interpretation guidance, decision context | Domain Markdown, glossary entries, indexed document snippets, decision/incident notes | Project files, curated knowledge base, retrieval index, linked planning/decision docs | `compiled_summary` for high-frequency terms, `on_demand_file` or `retrieved` when selected by the router | Ambiguous terms have one canonical interpretation or an explicit fallback policy |
+| `analyst_workflow` | Skills: procedure and analysis patterns | Knowledge Router contract, senior-analyst SOP, analysis patterns, review rubric | Markdown skill/module files, workflow checklist, pattern templates, rubric config | Repository or project skill folder, app-managed project files, synchronized MCP/resource copies where supported | Core SOP as `compiled_core`; selected pattern/rubric as `on_demand_file` | Rules that affect correctness are either enforced by tool state or covered by tests |
+| `turn_context_memory` | Cross-stack scoped memory | Matched project files, retrieved docs, saved corrections, project/personal memory | Retrieved snippets, file-read records, correction records, conversation summaries | App DB, retrieval index, trace history, project/user memory store | `on_demand_file`, `retrieved`, or `history_memory` only after scoping; never silently overrides canonical assets | Retrieved or remembered context is scoped, auditable, and does not silently override canonical definitions |
+| `runtime_evidence` | Validation and online verification | Schema inspections, executed SQL or MV query, raw rows, result shape, validation checks, footer metadata | Tool-call result, SQL/MV spec, row set, validation event, provenance footer fields | Run trace store, telemetry table, result/artifact metadata, optional cache | `runtime_observed` during the run, `final_disclosure` in the answer, `telemetry` after the run | Runs are reproducible enough to verify source tier, validation status, and file compliance |
+| `control_plane` | Validation, maintenance, and regression control | Evals, readiness gates, telemetry, regression runbooks | Eval cases, golden snapshots, scoring assertions, dashboard metrics, runbook Markdown | Repository eval files, CI results, telemetry tables, project settings, issue/PR queue | `eval_only` for scoring, `telemetry` for monitoring; not normal prompt content except summarized launch status | Readiness and regression decisions are measurable and replayable |
 
 ### 2.4 Loading Behaviors
 
@@ -176,7 +183,8 @@ A Context Asset Pack is ready only when these invariants hold:
 
 - every launched question family maps to required Context Assets;
 - every metric has exactly one canonical definition and owner;
-- every asset has declared `asset_type`, `loading_behavior`, and `scope`;
+- every asset has declared `asset_type`, `format`, `storage`,
+  `loading_behavior`, and `scope`;
 - new or changed assets carry a `defense_claim`;
 - every fallback path has an explicit disclosure policy;
 - every on-demand pointer resolves or degrades in a defined way;
@@ -262,31 +270,80 @@ implementation plans, not this top-level design.
 Execution answers: once the right entity is selected, how does the agent perform
 the analysis without making avoidable mistakes?
 
-The senior-analyst SOP is a family of `analyst_workflow` Context Assets. It
-should guide the agent through:
+The senior-analyst SOP is the procedural counterpart to the Knowledge Router.
+The router narrows the search space; the SOP defines how to operate once the
+space is narrowed. Following the Anthropic pattern, this should be represented
+as `analyst_workflow` Context Assets rather than scattered prompt prose: a small
+core workflow plus on-demand analysis patterns such as retention, funnel,
+cohort, rate decomposition, reconciliation, and drill-down.
 
-1. start from the routing decision;
-2. maintain a visible plan;
-3. load required Context Assets;
-4. clarify missing constraints when no documented default exists;
-5. acquire source and schema evidence;
-6. apply analytical conventions;
-7. execute the query or Metric View path;
-8. inspect suspicious outputs before concluding;
-9. prepare the evidence package for validation and disclosure.
+The SOP should guide the agent through:
+
+1. **Start from the routing decision.**
+   Use the selected source tier, metric/entity, grain, validation status,
+   required files, and fallback reason as the execution contract. Do not reopen
+   broad discovery unless validation later shows the routing decision was
+   wrong.
+2. **Check red flags and scope before querying.**
+   Restricted data, PII, access-control gaps, stale dashboards, pipeline
+   troubleshooting, causal/root-cause claims, or product/pricing
+   recommendations may require escalation, narrower disclosure, or a refusal to
+   answer beyond the data.
+3. **Clarify missing constraints only when no documented default exists.**
+   Required constraints include time period, segment, population, denominator,
+   decision context, comparison baseline, and output grain. If a project file
+   defines a default, use it and disclose it.
+4. **Load only the required Context Assets.**
+   Read the files selected by the router, plus the relevant analysis-pattern
+   module if one was selected. Do not scan the whole project knowledge graph
+   because a term is ambiguous.
+5. **Use the semantic path first.**
+   If a validated Metric View covers the ask, discover the measure/dimension,
+   compile the MV query, and execute that path. Raw SQL is a fallback only after
+   the semantic path is shown not to cover the ask or cannot compile/run.
+6. **Pre-rebut common raw-SQL shortcuts.**
+   Custom date filters, cohorts, joins, segments, and dimensions are not by
+   themselves reasons to skip a Metric View if the semantic layer already
+   supports them.
+7. **Decide time, freshness, and grain before querying.**
+   Resolve calendar vs trailing windows, timezone, freshness lag, max observed
+   data date, population grain, and aggregation grain before generating SQL or
+   a Metric View spec.
+8. **Acquire source and schema evidence.**
+   For MV paths, keep the compiled query/spec and relevant MV metadata. For raw
+   fallback paths, inspect schema, owner, freshness, lineage when available,
+   and documented joins/filters before writing SQL.
+9. **Execute with analytical conventions.**
+   Apply required filters, inclusions/exclusions, denominator rules, safe
+   division, null handling, deduplication, and sample-bias checks explicitly.
+10. **Inspect suspicious outputs before concluding.**
+    Re-check 0 rows, null spikes, unexpected grain changes, duplicate-count
+    risk, denominator collapse, impossible percentages, freshness gaps, or
+    implausible adjacent-period jumps.
+11. **Prepare the evidence package for validation and disclosure.**
+    Preserve the query/spec, result shape, row count, source tier, validation
+    status, freshness, owner, loaded files, applied defaults, caveats, and
+    fallback reason.
 
 Important execution conventions:
 
-- use the semantic path when a validated Metric View covers the question;
-- inspect schema before SQL fallback paths;
-- apply date/period rules explicitly;
-- apply denominator, safe division, filter, and grain constraints explicitly;
-- re-check suspicious results such as 0 rows, null spikes, unexpected grain
-  changes, or implausible adjacent-period jumps.
+- separate observations from interpretations: "the data shows X" is different
+  from "this suggests Y";
+- do not invent tables, columns, joins, filters, or business definitions;
+- prefer documented named segments and canonical filters over hand-written
+  approximations;
+- use reusable analysis patterns when the question matches one, rather than
+  reconstructing the method ad hoc;
+- when the answer is intended for leadership, financial, customer-impacting, or
+  other high-stakes use, require a stronger review tier before finalizing.
 
-Adversarial SQL review is not part of the basic always-on workflow. It can be
-introduced later for high-stakes domains if evals show that the correctness gain
-justifies the token and latency cost.
+Adversarial review should be a tiered control, not an unmeasured default. The
+basic workflow should always include self-checks against the SOP and suspicious
+result checks. A separate reviewer/sub-agent loop can be enabled for high-stakes
+domains or question families when evals show that the correctness gain justifies
+the token and latency cost. The trace should record whether review ran, which
+review tier was used, and any blocking findings that changed the query or
+answer.
 
 ### 3.3 Validation: Check Before Returning
 
