@@ -1,216 +1,571 @@
-# Context Engineering 总体设计（databricks-builder-app-oai）
+# Context Engineering - 基础设计（databricks-builder-app-oai）
 
-日期: 2026-06-10 ｜ English version: [`context-engineering.md`](./context-engineering.md)
+日期: 2026-06-10 | English version: [`context-engineering.md`](./context-engineering.md)
 
-本文是 builder-app-oai Context Engineering（CE）的**顶层设计**：它回答「我们如何系统性地决定什么进入模型上下文、以什么形态、付出什么成本、用什么守住质量」。它不绑定具体版本——版本化的现状基线、目标设计与落地任务见文档地图。
+本文定义 `databricks-builder-app-oai` 的基础 Context Engineering（CE）设计：产品如何决定有哪些上下文、上下文如何进入模型、如何被检查，以及如何随时间改进。
+
+范围说明：本文适用于 `docs/builder-app-oai/` 下的 `databricks-builder-app-oai` 设计线。除非 implementation plan 明确说明，否则本文不代表 legacy `databricks-builder-app/` package 的当前状态。
+
+本基础设计的非目标：
+
+- 详细 context versioning；
+- release-pinned reads 或 frozen release snapshots；
+- production role/scope enforcement；
+- deterministic golden-case execution paths。
+
+这些属于 future-version topics。本文只保留构建和评估可靠自助分析 agent 所需的基础 CE 概念。
 
 ## 0. 文档地图
 
 | 文档 | 角色 |
 |---|---|
-| 本文 | 顶层理念、架构与路线，版本无关 |
-| [`v0.3.6/gap-analysis.md`](./v0.3.6/gap-analysis.md) | 现状基线（as-is）：上下文来源、prompting、workflow、历史 |
-| [`v0.3.6/design.md`](./v0.3.6/design.md) | v0.3.6 目标设计：六层模型、预算、按需读取、契约与评测 |
-| [`v0.3.6/action-plan.md`](./v0.3.6/action-plan.md) | P1–P4 落地任务与验收 gate |
-| [`v0.4-golden-analysis-cases/`](./v0.4-golden-analysis-cases/) | 高频问题族的 canonical path / answer contract（下一版） |
-| [`../refer/`](../refer/) | 外部实践参照：nao、dash、anthropic、openai（见 §10 速查表） |
+| 本文 | Context Engineering 的基础产品与架构决策记录 |
+| [`v0.3.6/gap-analysis.md`](./v0.3.6/gap-analysis.md) | as-is 基线：上下文来源、prompting、workflow、history |
+| [`v0.3.6/design.md`](./v0.3.6/design.md) | 下一 build slice 的实现级目标设计与任务 |
+| [`v0.3.6/action-plan.md`](./v0.3.6/action-plan.md) | P1-P4 实施任务与验收 gate |
+| [`v0.4-golden-analysis-cases/`](./v0.4-golden-analysis-cases/) | 未来 golden-case work |
+| [`../refer/`](../refer/) | 外部实践参考：nao、dash、anthropic、openai |
 
-## 1. 问题定义：分析准确性是上下文 + 验证问题
+## 1. 问题定义
 
-与编码 agent 不同，数据分析问题通常**只有一个正确答案、对应一个正确来源**，且没有「测试天然护栏」。anthropic 的结论与我们的经验一致：**准确性不是 SQL 生成问题——把用户问题映射到正确实体之后，执行与 SQL 无足轻重**。绝大多数错误归于三种失败模式，CE 体系的每个组件都应能回答「我在防御哪一种」：
+分析正确性是上下文 + 验证问题。不同于 coding agents，数据分析问题通常有一个正确答案，并来自一个正确来源。Runtime 很少有天然测试，用户也常常无法从第一性原理验证答案。
 
-1. **概念 ↔ 实体歧义**：同一个业务词（"达成率"）对应多个看似可行的表/列/口径。防御：Metric View 语义层 + MECE 单一规范定义 + 业务术语映射。
-2. **数据陈旧**：schema、口径、文档随业务漂移，答案开始细微出错。防御：维护流程（colocation、评测即遥测、纠正收割）。
-3. **检索失败**：正确信息存在但 agent 找不到。防御：orchestration 指针 + `read_project_file` 按需读取（小规模）→ embedding 检索（超阈值后的毕业路径）。
+Entity resolution 通常是主要失败点：一旦用户问题被映射到正确 table、metric、grain 和 business definition，SQL 生成较少是瓶颈。但 execution errors 仍然重要，尤其是 date windows、filters、denominators 和 joins。
 
-无法归入任何一种失败模式的上下文，默认在白占预算。
+本文关注四类主要失败模式：
 
-## 2. 正确性与准确率如何保障：纵深防线
+1. **概念/实体歧义**：一个业务术语映射到多个看似合理的表、列、指标或定义。
+2. **数据陈旧**：schema、定义和文档随业务变化漂移。
+3. **检索失败**：正确信息存在，但 agent 没有找到或没有使用。
+4. **正确实体上的执行错误**：选对了 table 或 metric，但操作做错。
 
-CE 的最终交付物是「答案是对的」。没有任何单一机制能独立保证这一点——anthropic 的实测：裸模型在其评测上只有 ~21% 准确率，叠加全栈防线后稳定在 95%+。正确性靠**五道防线叠加**，每道主攻 §1 的一种失败模式；本节是总览，机制细节见对应章节。
+每个有意义的 context item 都应有 `defense_claim`：它要降低的 failure mode 或 operating risk。不能说明 claim 的上下文，默认是在浪费注意力和预算。
 
-| # | 防线 | 机制 | 主攻 | 详见 |
-|---|---|---|---|---|
-| 1 | **资产**（问之前） | validated Metric View 语义层；MECE 单一规范定义；口径由人定义（不让 LLM 生成）；范围纪律 ≤20/≤100 | 实体歧义——把"几十个看似可行的候选"收缩成一个受治理的唯一答案 | §3/§5/§9 |
-| 2 | **路由**（找答案） | metric-view-first + pre-rebutted「别过早 fallback」清单；orchestration 指针 + 遵从信号（`project_files_read`，确保模型真的读了规范来源） | 检索失败——答案存在但 agent 没找到/没用 | §5/§6 |
-| 3 | **执行**（写查询） | schema gate（先看 schema 再写 SQL）；日期/周期约定段（周边界、当前期是否计入——时间类问题的高频错因）；可疑中间结果自纠错（0 行 / null 暴增 / 相邻周期 10× / 聚合后行数=1 时先回查再下结论） | 正确实体上的错误操作（join/filter/日期窗错） | §6 |
-| 4 | **披露**（给答案） | provenance footer（来源层级 · 验证状态 · owner，一律从 trace/settings 推导、禁模型自评）；fallback 必须先披露状态与理由；区分 observation（"数据显示 X"）与 interpretation（"这暗示 Y"） | 静默失败的消费侧缓解——答案错时让消费者有判断依据 | §6/§8 |
-| 5 | **度量**（系统级） | 数据正确性评测（ground-truth SQL 逐行 diff，不是 LLM judge 打分）；per-domain go-live gate（~90% 前不宣布可用）；评测即遥测（时序捕捉漂移型回退）；被动监控 + 纠正收割回流评测集 | 陈旧 + 整体回归——知道自己现在到底多准 | §8 |
+## 2. 基础 Context Asset 模型
 
-四条配套判断：
+Context Assets 是 agent 用于 route、execute、validate 和 disclose 分析的受治理信息。它们不是偶然拼进 prompt 的文字。它们应该有 owners、source-of-truth locations、freshness expectations、loading behavior 和 observability。
 
-- **防线必须在系统侧，不能指望用户**。自助分析的最终用户不懂底层数据，无法替你验证答案——这是与「给数据科学家做工具」的本质区别，也是防线 4 存在的理由。
-- **准确率是叠加出来的，不是某一层给的**。第 1 道防线先把实体空间收敛，后面各道才有意义；跳过资产建设直接堆 prompt 技巧或评测，准确率上限就被锁死（"实体一旦定准，执行与 SQL 无足轻重"的另一面）。
-- **准确率有显式的预算旋钮**。对抗式评审 sub-agent（+6% 准确 / +32% token / +72% 延迟）这类高成本手段证据门控、按领域启用——"愿意为准确率多花多少钱"是必须显式回答的问题，不是默认全开。
-- **诚实对待残余风险：静默失败**（答案错但看起来合理、无异议地被采用）没有完美解。缓解是防线 4 + 高 stakes 输出人工 sign-off + 头部 KPI 常驻评测对照 blessed 看板；离线评测 ~100% 通过也只证明「无明显缺口」，不证明系统不会错——宣称绝对准确本身就是错误。
+基础设计使用每个 project 一个 **Context Asset Pack**。这个 pack 包含回答已发布 question families 所需的最小受治理资产，以及 agent 可按需读取的 long-tail assets 指针。
 
-### 2.1 各防线的就绪判据（readiness gate）
+### 2.1 目标状态
 
-「防线存在」不等于「防线就绪」。每道防线有明确的 ready bar、可执行的验证手段、以及未达标时的修复动作（诊断与修复分离——审计只诊断，每个发现路由到对应动作）：
+对于任何已发布 domain，Context Asset Pack 必须回答五个问题：
 
-**防线 1——资产**
+1. **agent 能回答什么？**
+   覆盖的 P0/P1 question families 及其 required `semantic_truth` assets。
+2. **哪些实体是 canonical？**
+   agent 应优先使用的 Metric Views、raw paths、measures、dimensions、grains 和 owner-approved definitions。
+3. **agent 应如何操作？**
+   防止常见分析错误的 workflow policies 和 conventions。
+4. **什么证据证明 readiness？**
+   Eval cases、validation SQL、launch tier、pass rule 和 trace requirements。
+5. **本次 run 使用了什么上下文？**
+   本次 run 加载或观测到的 project settings、project files、retrieved context、tool outputs 和 runtime evidence。
 
-- *就绪判据*：目标问题族（requirements P0/P1）逐条有 required assets 映射——validated MV 或批准的 raw path，无悬空；MV 在 validation slice 上验证过（如 Distribution 202604），candidate/deferred 有 fallback 披露策略；每指标单一规范定义且有 owner；范围 ≤20 表/MV（≤100 硬顶）。
-- *如何验证*：gap-analysis 覆盖检查 + readiness 文档；MECE 两级判定 contract test（fail/warn）；context 审计 rubric 的范围与逐 MV 覆盖项。
-- *未就绪时*：缺口走 onboarding 补资产（建/验证 MV、写口径）；超范围先收敛到 gold 层，不是先加上下文。
+如果一个 domain 无法回答这些问题，它就不是 ready 的产品表面，即使 prompt 可以生成看似合理的答案。
 
-**防线 2——路由**
+### 2.2 Asset Contract
 
-- *就绪判据*：编译核心确实在 L1（validated MV 的 grain/measures/dimensions、metric-view-first、pre-rebutted 清单、日期约定）；指针指向的文件全部存在或可降级，且受 release 冻结覆盖；`project_files_read` 跟踪上线，**指针未遵从率有数且低于阈值**；技能集按项目类型收敛、工具 schema 占用在冻结基线内。
-- *如何验证*：context rendering 测试（断言渲染出/未渲染哪些段）；release-pinned 测试含文件路径；评测断言「KPI case ⇒ trace 含对应文件读取」。
-- *未就绪时*：未遵从率超阈值 → 才立项 requirement matcher（证据门控）；文件缺失 → 降级编译态渲染并补文件。
+基础 asset contract 有意保持较小。它应由今天可用的 carriers 表示：DB settings、project files、traces 和 eval telemetry。完整 asset manifest 可以后续添加。
 
-**防线 3——执行**
-
-- *就绪判据*：plan 状态机 / schema gate / read-only（含注释、大小写、前导空白等绕过尝试）contract tests 全绿；日期/周期约定段渲染进 L1；自纠错触发器（0 行 / null 暴增 / 10× / 行数=1）写入 workflow 指南。
-- *如何验证*：contract tests 进 CI；评测里抽查含时间窗的 case 是否按约定取窗。
-- *未就绪时*：gate 漏判 → 修 gate 常量/正则并补用例；日期类 case 失败 → 先修约定段再考虑语义层。
-
-**防线 4——披露**
-
-- *就绪判据*：footer 在每个结论答案上出现且**可解析、可从 trace 复核**（来源层级与已执行 SQL 一致、验证状态与 settings 一致）；fallback 时状态与理由先于答案披露；高 stakes 输出的人工 sign-off 流程有定义。
-- *如何验证*：footer 解析测试 + trace 抽查比对；评测断言 fallback case 含披露语。
-- *未就绪时*：footer 字段失实 → 当 bug 修——它是静默失败的最后缓解，失实比缺失更糟。
-
-**防线 5——度量**
-
-- *就绪判据*：数据正确性评测基线**先于任何 prompt 内容改动**存在；每个 P0 问题族有足够用例（几十条/领域即边际递减），ground truth 钉死快照日期不漂移；结果落遥测表（skill 版本 / git SHA / model id）可时序查询；该领域清过 ~90% go-live 阈值。
-- *如何验证*：评测在 CI 可跑且有历史曲线；gate 可断言。
-- *未就绪时*：阈值未过 → 不对 stakeholder 宣布可用，按失败归类（数据模型 / 日期 / 测试本身 / 指标定义）路由到防线 1–3 修复。
-
-三条使用规则：
-
-- **防线 5 是仪器，先于其余就绪**。没有评测基线，防线 1–4 的"就绪"无法判定——就绪检查的顺序是先立仪器（防线 5 的基线部分），再逐线达标，最后才过 go-live gate。
-- **就绪是 per-domain / per-project 的**，不是系统全局开关：一个项目的 Distribution 域过了 gate，不代表新接入的域可用；新域从防线 1 的资产映射重新走一遍。
-- **就绪会腐烂**。文档描述的是每天在变的数据模型（无维护时准确率 95%→65%/月），所以就绪判据要绑定维护机制（colocation、code-review hook、纠正收割，见 §9）持续重验，遥测曲线是「仍然就绪」的证据。
-
-### 2.2 四个体系的关系与强制矩阵
-
-本文有四套编号体系，它们不是平行清单，而是同一系统的**四个正交轴**：五道防线是**目标分解**（正确性从哪来），十条原则（§3）是**决策规则**（设计取舍怎么判），六层（§4）是**运行时结构**（上下文物理上怎么装配），五件物（§7）是**数据治理**（内容的权威来源与流向）。一句话串起来：**原则约束层的构建方式；层承载的内容由件物契约治理；三者共同支撑防线；防线 5（度量）是验证前三轴确实成立的仪器**。不要尝试逐项 1:1 对齐——映射天然是多对多。
-
-两条辖域声明，避免误读：
-
-- **防线只分解 reliability**。CE 的目标是三维（reliability / speed / cost，原则 5），五道防线全部属 reliability 的分解；原则 2（cache）、原则 4（注意力/成本账）同时治理 speed/cost——它们映射不满防线是设计使然，不是孤儿原则。
-- **五件物只治理项目侧配置内容**（即 L1/L3 的来源）。L0 的事实源是代码、L2 是 request-scoped 参数、L4/L5 的权威存储是运行时产物（execution events / SDK session），均不在五件物之内（辖域细节见 §7）。
-
-| 防线 | 主要原则 | 涉及的层 | 涉及的件物 | 链接的强制手段 |
-|---|---|---|---|---|
-| 1 资产 | P6 MECE、P10 口径人定 | 层之外（warehouse 资产），经 L1 编译核心进入 | DB settings、下沉文件（两处不得分叉） | ✅ MECE 两级判定测试；⚠️ 范围纪律 ≤20/≤100 为审计告警 |
-| 2 路由 | P4 注意力、P3 可验证信号、P7 护栏、P2 cache | L1 指针 + L3 按需读取 + 工具 schema 面 | 下沉文件 + release 冻结 | ✅ `project_files_read` 遵从断言、release-pinned 文件路径测试、prompt shape snapshot；⚠️ P7「护栏而非菜谱」靠评审纪律 |
-| 3 执行 | P3 工具状态 > prompt 文字 | 不在内容层——run_state 工具状态承载；L4 喂 schema gate | —（行为契约，非配置内容） | ✅ plan / schema gate / read-only（含绕过尝试）contract tests |
-| 4 披露 | P3 的输出侧应用（信派生状态、不信模型自述） | 输出侧，不经装配层；从 trace 推导 | DB settings 的 validation 状态（footer 真实性依赖其新鲜度） | ✅ footer 解析 + trace 比对测试 |
-| 5 度量 | P5 三维成本、P8 证据门控、P9 先测量 | 整体之上（消费 `AssembledContext` 可观测性 + trace） | 遥测表（「准确率状态」的事实源，见 §7 辖域说明） | ✅ 评测基线先行（gate 排序）、go-live gate、遥测时序曲线 |
-
-图例：✅ = 有具名测试/信号机械强制；⚠️ = 只能靠评审纪律守住——「菜谱化」无法机械判定、范围线是建议值，这两条在评审 prompt/skill 改动与项目 onboarding 时必须人工把关。区分这两类是诚实的：声称「全部机械强制」会高估体系的自我保护能力。
-
-## 3. 设计原则
-
-1. **每个 token 都有目的**。上下文不是越多越好：过量浪费预算、稀释注意力、放大幻觉。
-2. **cache 友好优先**。稳定前缀在前（L0 静态指令 + 工具 schema），易变内容在后；跨项目共享前缀，分层与下沉都不得破坏它。
-3. **工具状态优先于 prompt 文字**。workflow 约束由工具状态承载（plan 状态机、schema gate、read-only 裁剪），prompt 只做说明；凡是只靠 prompt 文字的约束，都要补一个可验证信号（如指针遵从率）。防线 4 的「footer 一律从 trace/settings 推导、禁模型自评」是同一逻辑在输出侧的应用。
-4. **瘦 prompt 的理由是注意力，不是省钱**。prompt cache 下稳定编译内容近乎免费；JIT 读取是额外 turn + 全价 token + 随 history 重复计费。下沉与否的判据是准确率/注意力收益，**不是 prompt 体积**——「小 + 稳定 + 普遍相关」的编译核心永不下沉。
-5. **成本三维：reliability / speed / cost（含执行成本）**。token 之外，上下文不足引发的探索性 schema 查询（warehouse $ + 延迟）与 JIT 文件读取都是成本，评测一并采集（`tool_call_count`、文件读取次数）。
-6. **MECE：每个指标只有一个规范定义**。跨 MV、跨 raw table、跨 settings 与下沉文件不冲突；冲突必须可检测，不能让模型静默二选一。
-7. **护栏而非菜谱**。可规约「约束与事实」（别跳过语义层、这张是规范表、这个口径坑），不可规约「执行路径」（第一步做 X、第二步做 Y）——过度规约会把 agent 推向错路（openai 实测）。
-8. **证据门控**。每一项会增加约束或复杂度的机制（专用 MV 工具、requirement matcher、对抗式评审、embedding 检索），都先用评测量出收益/缺口再立项，不预先强加。
-9. **先测量、再改动**。任何改变「进 prompt 的内容」的工作，必须先有数据正确性评测基线作为对照组；「人工 smoke」不可替代基线。
-10. **口径定义由人负责**。用 LLM 生成文档/描述（business_terms、caveats、字段说明，可从 transform 代码反推草稿），但 measure/dimension 的口径定义不自动生成——LLM bootstrap 语义层在 anthropic 的评测上是净负面。
-
-## 4. 架构：显式 Context Engine 与六层模型
-
-上下文装配收敛进一个显式的 `ContextAssembler`（`server/services/context/`），在 SDK 执行循环之前完成，产出结构化的 `AssembledContext`（每层文本 + 占用 + 被截断字段清单），而非裸字符串拼接。
-
-| 层 | 命名 | 稳定性 | 内容 |
-|---|---|---|---|
-| L0 | immutable | 跨项目稳定（cache 前缀） | 角色、response format、plan 状态机、工具规则 |
-| L1 | project | 同项目/同 release 稳定 | settings、skills guidance、AGENTS.md、metric view 编译核心、日期约定 |
-| L2 | run | 每次 run | run_role、read_only、resource override |
-| L3 | turn | 每轮提问时装配 | 用户消息、按需读取/检索的细粒度上下文（预留 golden_case 槽位） |
-| L4 | observation | 轮内累积 | schema 历史 seed、工具结果 |
-| L5 | history | 跨轮 | SDK session + 压缩摘要（可观测） |
-
-两条结构性认识：
-
-- **工具 schema 是六层之外的常驻成本面**。SDK 把每个启用工具的 schema 每轮序列化进上下文，与技能数量正相关；技能选择因此本身就是 CE 手段（少开一个重 schema 技能 = 少十几份 schema + 更准的工具选择）。注意杠杆方向是「减少不同工具数」，不是合并成更大的多路复用工具——后者正是 schema 膨胀来源。
-- **预算显式且禁止静默截断**。每层预算是代码常量，超限丢弃必须在 `AssembledContext.dropped` 留痕；触达上限的第一选择是下沉为文件 + 指针，截断只是兜底。
-
-## 5. 内容组织：编译 vs 按需读取
-
-判据：**小 + 稳定 + 普遍相关 → 编译进常驻 prompt；大 + 条件相关 + 持续增长 → 下沉成项目文件，由 orchestration 指针引导模型 `read_project_file` 按需读取**。
-
-- **编译核心（不下沉）**：已验证 MV 的 full_name / status / grain / measures / dimensions、metric-view-first 策略与 pre-rebutted「别过早 fallback 到 raw SQL」清单、日期/周期约定段。这是 happy path，不该花读取 round-trip。
-- **按需长尾（下沉）**：business_terms 全文、known_caveats、sample_queries、requirements / readiness 细节。常驻 prompt 只留「何种问题先读哪个文件」的指路段。
-- **指针遵从必须可验证**：指针是 prompt 文字（原则 3 的警告形态），`run_state` 跟踪 `project_files_read`，评测断言「KPI 类问题 ⇒ trace 含对应文件读取」。未遵从率是是否升级为自动路由（requirement matcher → LLM intent 分类）的证据。
-- **毕业路径**：项目范围纪律为 **≤20 表/MV 理想、≤100 硬顶**（范围过大是可靠性失败的头号预测因子）。文件编排在硬顶内足够；突破硬顶才升级为 offline 聚合 + embedding 检索（openai 在 70k 数据集规模的做法）。范围纪律一身两用：既是可靠性手段，也是换检索机制的触发线。
-
-## 6. Workflow 契约
-
-行为约束由工具状态承载，写成可测试的契约：
-
-- **plan 状态机**：`create → start → tools → finish → conclusion`，重复操作返回结构化错误而非浪费 turn。
-- **schema gate**：引用配置表但本会话无 schema inspection 时拒绝 SQL，强制 schema-first；gate-exempt 前缀（DESCRIBE 等）是单一可测常量。
-- **metric-view-first**：KPI/聚合/趋势/对比问题优先用配置的 Metric View（`MEASURE(...)`）；raw table 仅用于 validation、drill-down、MV 不覆盖的问题；fallback 必须先披露状态与理由。pre-rebutted 清单内联在编译核心里，防止被一句话绕过。
-- **read-only**：preview run 工具裁剪 + SQL allowlist；正则守卫是软层，硬隔离需评估凭据层方案（SELECT-only UC grant / 低权限 SP），并正视其与 per-user pass-through 模型的冲突——pass-through 本身已保证 agent 不越过用户权限。
-- **可疑中间结果自查**：0 行、null 暴增、相邻周期 10×、聚合后行数=1 等触发器命中时，先回查 schema/过滤再给结论，把迭代从用户移进 agent。
-
-## 7. Source of Truth：五件物
-
-| 物件 | 角色 | 关键规则 |
+| Field | Meaning | Basic Carrier / Status |
 |---|---|---|
-| `project_setting.yaml` | 人编辑的源 | 保存时同步到 DB，run 时不直接重读 |
-| DB settings | run 时的事实源 | 每次 run 由 `build_project_context` 读取 |
-| release snapshot | 预览者看到的冻结源 | **覆盖 settings 与项目文件两者** |
-| AGENTS.md | 机制指南 snapshot | 只讲机制不放项目数据；每次 run 重读 |
-| 下沉上下文文件 | L1/L3 细粒度按需载体 | derived 类从 settings 物化（唯一写路径，禁手改）；authored 类人工编辑；release-pinned run 的 `read_project_file` 解析到冻结版本 |
+| `id` | 用于引用和 traces 的稳定标识符 | 已有 ID 的资产要求提供：MV names、file paths、eval case IDs |
+| `asset_type` | 该 Context Asset 执行的工作 | 作为组织字段要求提供；见 Section 2.3 |
+| `defense_claim` | 该 asset 防御的 failure mode 或 operating risk | 对已有 carrier 的新建/变更 assets 要求提供 |
+| `content` | 知识、证据、规则或控制记录 | 在 carrier 中要求提供，或由 referenced object 隐含 |
+| `owner` | 对正确性和新鲜度负责的个人或团队 | metric definitions 和 launch readiness 要求提供 |
+| `source_of_truth` | DB setting、authored file、derived file、trace 或 telemetry table | project-owned assets 要求提供 |
+| `freshness_policy` | asset 何时必须 review 或 regenerate | 目标字段；可先从 notes 或 validation metadata 开始 |
+| `validation_status` | Candidate、validated、certified、stale、missing 或 not applicable | `semantic_truth` assets 要求提供 |
+| `loading_behavior` | asset 如何或何时进入 run | context assembly 和 tests 要求提供 |
+| `scope` | Platform、project、run、turn、history 或 eval/control | access 和 observability decisions 要求提供 |
+| `observability_signal` | Trace field、file-read record、footer field、eval result 或 audit warning | runtime/eval assets 要求提供；所有 assets 的目标字段 |
 
-第五行是按需读取架构成立的前提：细粒度上下文下沉成文件后，若 release 冻结不覆盖文件，release pinning 就泄漏；若物化不是唯一写路径，settings 与文件会分叉出 MECE 冲突。
+### 2.3 Asset Types
 
-**辖域声明**：五件物治理的是**项目侧配置内容**（即 L1/L3 的来源）。其余层另有归属——L0 的事实源是**代码**（prompt shape snapshot 测试守护其稳定）；L2 是 request-scoped 参数；L4/L5 的权威存储是 execution events 与 SDK session（运行时产物，不是配置）；评测遥测表是「准确率状态」的事实源（§8）。它们不进本表，但「归谁所有、谁能写、何时读」对它们同样必须可回答。
+| `asset_type` | Content | Typical `loading_behavior` | Typical `scope` | Readiness Rule |
+|---|---|---|---|---|
+| `platform_mechanism` | System prompt core、tool schemas、plan state machine、read-only rules、response contract | `resident_platform`, `tool_schema` | Platform | mechanism 由 prompt/tool-shape tests 覆盖 |
+| `data_foundation` | 受治理 source tables、transforms、tests、schema metadata、lineage、code-derived 和 LLM-optimized table docs | `warehouse_object`, `metadata_inspection`, `compiled_summary` | Project | data estate 足够可读，可以区分相似实体 |
+| `semantic_truth` | Metric Views、canonical measures、dimensions、grains、approved raw paths、owners、validation status、fallback policy | `compiled_core`, `on_demand_file`, `warehouse_query` | Project | 每个已发布 KPI/aggregate family 都映射到 validated MV 或 approved raw path |
+| `business_context` | Business terms、aliases、gotchas、caveats、launch/incident notes、interpretation guidance、decision context | `compiled_summary`, `on_demand_file`, `retrieved` | Project/turn | 歧义术语有一个 canonical interpretation，或有明确 fallback policy |
+| `analyst_workflow` | Knowledge Router contract、senior-analyst SOP、analysis patterns、review rubric | `compiled_core`, `on_demand_file` | Platform/project/turn | 影响正确性的规则要么由 tool state 强制，要么由 tests 覆盖 |
+| `turn_context_memory` | Matched project files、retrieved docs、saved corrections、project/personal memory | `on_demand_file`, `retrieved`, `history_memory` | Turn/history | retrieved 或 remembered context 有 scope、可审计，且不会静默覆盖 canonical definitions |
+| `runtime_evidence` | Schema inspections、executed SQL or MV query、raw rows、result shape、validation checks、footer metadata | `runtime_observed`, `final_disclosure`, `telemetry` | Run/turn | runs 可复现到足以验证 source tier、validation status 和 file compliance |
+| `control_plane` | Evals、readiness gates、telemetry、regression runbooks | `eval_only`, `telemetry` | Eval/control | readiness 和 regression decisions 可度量、可 replay |
 
-## 8. 验证体系
+### 2.4 Loading Behaviors
 
-**离线（基线先行）**：
+`loading_behavior` 是 assembly、traces 和 budget telemetry 的封闭词表。新增取值应谨慎，因为它影响可比较性。
 
-- **数据正确性评测**是地基：NL prompt → agent 答案抽结构化 → 对照 ground-truth SQL 逐行 diff（归一化、忽略行序、数值容差），接入 `.test/`（MLflow + GEPA）。测试 prompt 要像真实聊天（不含表名/列名），输出列名编码单位而非来源，防泄漏。
-- **contract tests** 守「上下文长什么样」：prompt shape snapshot（保护 cache 前缀）、budget 截断留痕、schema gate、read-only 绕过尝试、release-pinned（含文件路径）、MECE 两级判定（fail = 同名 measure 表达式不一致；warn = glossary/文件分叉）、指针遵从。
-- **评测即遥测**：每次结果落数仓表（skill 版本 / git SHA / model id / token / 墙钟），捕捉单次 CI 看不见的 slow regression（anthropic 实测无维护时准确率 95%→65%/月）。**per-domain go-live gate**：清过 ~90% 阈值前不对 stakeholder 宣布可用。
-- **消融纪律**：每次有意义的 prompt/skill 改动做前后对照跑；保留「什么没用」清单（负面结果防止重跑同样的实验）。
+| `loading_behavior` | Meaning | Budget / Telemetry Rule |
+|---|---|---|
+| `resident_platform` | project assembly 前已存在的 platform prompt 或 mechanism text | 从 actual request payload 度量；保护 stable prefix |
+| `tool_schema` | SDK 序列化的 tool schema | 从 actual model requests 度量 schema tokens |
+| `compiled_core` | 小、稳定、普遍相关的 project content，在 execution 前渲染 | 作为 prompt content 做 budget 和 cache-prefix test |
+| `compiled_summary` | 紧凑 project summary，在 execution 前渲染 | 作为 prompt content 做 budget；跟踪 dropped fields |
+| `on_demand_file` | routing 需要时在 execution 中读取的 project file | 度量 file-read count、tokens、latency、pointer compliance |
+| `retrieved` | 来自 index 或外部知识面的 retrieval result | 度量 hit rate、tokens、latency、citation quality |
+| `warehouse_object` | 作为 source 使用的受治理 warehouse table、view 或 Metric View | 度量 freshness/status 和 downstream query cost |
+| `metadata_inspection` | Runtime schema、lineage 或 catalog inspection | 度量 tool calls、latency、avoided wrong-source failures |
+| `warehouse_query` | Analytical SQL 或 Metric View query execution | 度量 query cost、result shape、row count、validation outcome |
+| `history_memory` | 为本 turn 加载的 prior-turn、project 或 user memory | 度量 scope、freshness、token cost、correction value |
+| `runtime_observed` | run 中 final response 前产生的 evidence | 记录用于 validation；不是 pre-run prompt budget |
+| `final_disclosure` | answer 或 footer 中呈现的 evidence | 度量 output tokens 和 provenance completeness |
+| `telemetry` | append-only trace、eval 或 monitoring record | 用于调优 budgets；默认不是 prompt content |
+| `eval_only` | 仅用于 offline evals 或 scoring 的 asset | 在普通 user-run prompt budget 外度量 |
 
-**在线（按流量与证据采纳）**：
+### 2.5 Compile Vs. On-Demand
 
-- **provenance footer**：来源层级 · 验证状态 · owner，字段一律从 trace/settings 推导，禁止模型自报置信度——这是静默失败为数不多的缓解。
-- **被动监控**：语义层解析占比、纠正性措辞占比——前提是有足够流量，小流量项目先靠离线评测 + 遵从信号。
-- **对抗式评审 sub-agent**：anthropic 量化 +6% 准确 / +32% token / +72% 延迟，是可调的成本旋钮，证据门控后按领域决定。
+Compiled core 是保护正确性 happy path 的一小组 `compiled_core` Context Assets：
 
-## 9. 知识生命周期
+- validated MVs 的 `full_name`、status、grain、measures、dimensions；
+- metric-view-first policy；
+- 预先反驳不要过早 fallback 到 raw SQL 的原因；
+- date/period conventions。
 
-- **双层知识**：curated（人写的事实：schema、口径、规则）与 discovered（运行时踩到的坑、验证过的查询）分开存、分开演进。
-- **写回闭环**：验证通过的查询/口径修正写回项目知识，带只读 + 单语句校验；**distill 优先于 raw 检索**——原始查询堆给模型直读只换来 <1% 提升（瓶颈是结构不是访问），写回必须提炼成结构化参考片段。
-- **全局/个人分级 + 显式确认**：项目级规范修正与个人偏好分开，保存动作带用户确认，避免个人口径污染项目规范层。
-- **红线**：写回只能是验证过的查询与文档描述，**不写新的 measure/dimension 口径定义**（原则 10）。
-- **维护当一等工程**：参考文档/skill 与 transform 代码 colocate 同仓库（改模型的 PR 就是改文档的 PR），code-review hook 标记「改了模型没碰文档」的 diff；纠正收割定时扫描会话措辞、起草修复 PR，修复路径刻意「无聊」。
-- **代码派生语义**：表的真正含义在产出它的 pipeline 代码里——可用 offline 过程爬 transform 代码（SDP/DLT、dbt、notebook）反推 grain/主键/新鲜度/同义表的**文档草稿**，再交人校验。
-- **克制原则**：不要为弥补当前模型的不足过度堆基础设施——模型变强后这些投入会变多余。起步配方：少数规范数据集 + 几十条离线评测 + 一个薄 knowledge 层。
+Long tail 存在 project-file pointers 后面：
 
-## 10. 演进路线与外部参照
+- full business terms；
+- caveats 和 interpretation notes；
+- gotchas、renamed products、internal abbreviations、required filters；
+- sample queries；
+- detailed requirements 和 readiness notes；
+- detailed metric context。
 
+Long-tail files 应组织成内聚 domain modules，例如 user growth、monetization、activation 或 support operations。Knowledge Router 选择 modules；execution 读取选中的 assets。一个 run 不应因为某个术语有歧义就加载整个 project knowledge graph。
+
+### 2.6 Readiness Invariants
+
+Context Asset Pack 只有满足以下 invariants 才 ready：
+
+- 每个 launched question family 都映射到 required Context Assets；
+- 每个 metric 都只有一个 canonical definition 和 owner；
+- 每个 asset 都声明 `asset_type`、`loading_behavior` 和 `scope`；
+- 新建或变更的 assets 携带 `defense_claim`；
+- 每个 fallback path 都有明确 disclosure policy；
+- 每个 on-demand pointer 都能 resolve，或以定义好的方式 degrade；
+- 已发布 domains 有包含 known gotchas 和 business terminology 的 LLM-optimized reference docs；
+- runtime traces 能展示使用了哪些 files、schemas、queries；
+- 已发布 tier 有 eval coverage。
+
+## 3. Workflow
+
+Workflow 是 agent 产出正确答案的 operating model。它有四个阶段：route、execute、validate、disclose。
+
+### 3.1 Routing: Find The Right Entity
+
+Routing 是防御 concept/entity ambiguity 的主要手段。它回答：用户在问哪个 business concept，哪个 canonical metric/entity 表示它，以及应该使用哪个 source？
+
+Routing 必须发生在 analytical execution 之前。当 target metric、entity、grain 或 source tier 仍有歧义时，agent 不应开始写 SQL。
+
+基础 routing 机制是 **Knowledge Router**。它的工作是缩小搜索空间，而不是扫描每个 schema 或每个 project file。它把 intent 映射到少量 domain assets，例如 business context、table index、semantic definitions、known caveats 和 reusable analysis patterns。Execution 随后按需读取被选中的 assets。
+
+Routing contract 有五步：
+
+1. **Classify the question family.**
+   KPI、aggregate、ranking、trend、comparison、reconciliation、drill-down、validation、exploratory 或 unsupported。
+2. **Extract concepts and constraints.**
+   Business terms、requested period、role/scope、dimensions、filters、comparison target、denominator、grain。
+3. **Resolve concepts to canonical entities.**
+   将 business terms 映射到 governed Metric View measures/dimensions 或 approved raw paths。如果存在多个非冲突候选，优先选择 owner-approved definition、grain、required dimensions 和 validation status 匹配问题的候选。
+4. **Identify required Context Assets.**
+   将 required `on_demand_file`、`business_context`、`semantic_truth` 或 `analyst_workflow` assets 加入 load plan。
+5. **Emit a routing decision.**
+   命名 selected source、metric/entity、grain、validation status、required assets、on-demand pointers、已知 analysis pattern，以及适用时的 fallback reason。
+
+默认 source priority：
+
+1. 覆盖该问题的 certified/validated Metric View；
+2. 带 fallback disclosure 的 accepted candidate Metric View；
+3. 对未被 Metric Views 覆盖的问题族使用 approved raw path；
+4. exploratory raw SQL 仅在明确 fallback status 和 reason 时使用。
+
+Raw tables 可用于 validation、row-level drill-down，以及 Metric Views 未覆盖的问题。它们不是绕过可用 governed Metric View 的捷径。
+
+Routing decision 应可 trace。典型 decision record 如下：
+
+```text
+question_family: KPI | drill_down | validation | exploratory | ...
+business_terms: [...]
+selected_source_tier: metric_view | candidate_metric_view | approved_raw | exploratory_raw
+selected_entity: <metric view / measure / dimension / raw path>
+grain: <declared answer grain>
+validation_status: certified | validated | candidate | stale | missing
+required_assets: [...]
+required_project_files: [...]
+analysis_pattern: null | retention | funnel | cohort | rate_decomposition | reconciliation | ...
+fallback_reason: null | <reason>
 ```
-v0.3.5  Distribution 场景资产（requirements / gap / readiness / MV 验证）
-v0.3.6  显式 ContextAssembler + 六层 + 预算可测 + 下沉/指针 + 评测基线 + 契约测试
-v0.4    Golden Analysis Cases（canonical path / answer contract / fast-path 路由）
-        + 证据到位后的增项：requirement matcher、query_metric_view、LLM intent 兜底
-v0.4+   毕业项：embedding 检索（>100 表硬顶触发）、JIT 工具暴露、sliding-window 历史
-```
 
-v0.3.6 的抽象为 v0.4 预留接口形状（命中对象 schema、golden_case 槽位、评测扩展位），但**不写任何 golden-case 专属逻辑**。
+基础 observability 要求有 `routing_decision` trace record，并为 required on-demand assets 记录 file-read records。具体 event schemas 属于 implementation plans，不属于本文顶层设计。
 
-外部参照速查（详见 [`../refer/`](../refer/)）：
+### 3.2 Execution: Follow A Senior-Analyst SOP
 
-| 来源 | 我们采纳的核心 |
+Execution 回答：一旦选对实体，agent 如何执行分析以避免可避免的错误？
+
+Senior-analyst SOP 是一组 `analyst_workflow` Context Assets。它应指导 agent：
+
+1. 从 routing decision 开始；
+2. 维护 visible plan；
+3. 加载 required Context Assets；
+4. 当没有 documented default 时澄清 missing constraints；
+5. 获取 source 和 schema evidence；
+6. 应用 analytical conventions；
+7. 执行 query 或 Metric View path；
+8. conclusion 前检查 suspicious outputs；
+9. 为 validation 和 disclosure 准备 evidence package。
+
+重要 execution conventions：
+
+- validated Metric View 覆盖问题时使用 semantic path；
+- SQL fallback paths 前先 inspect schema；
+- 显式应用 date/period rules；
+- 显式应用 denominator、safe division、filter、grain constraints；
+- 对 0 rows、null spikes、unexpected grain changes 或 implausible adjacent-period jumps 等 suspicious results 重新检查。
+
+Adversarial SQL review 不是基础 always-on workflow 的一部分。若 evals 显示其 correctness gain 足以抵消 token 和 latency cost，可在后续为 high-stakes domains 引入。
+
+### 3.3 Validation: Check Before Returning
+
+Runtime validation 应包括：
+
+- schema inspection evidence；
+- executed SQL 或 Metric View query；
+- row counts 和 result shape；
+- suspicious result patterns checks；
+- settings 或 project metadata 中的 validation status；
+- 足以 reproduce answer path 的 trace metadata。
+
+Direct SQL oracles 是 eval assets，不是普通 runtime validators。Runtime validator 可检查 source tier、grain、row count、result shape、denominator sanity、freshness 或 limited invariants。如果某 validation query 是 trusted canonical calculation，它应成为 answer path，而不是 hidden oracle。
+
+对 high-stakes paths，query 成功执行并不足够。Agent 必须验证 result 匹配 intended grain、filters、period window 和 source tier。
+
+### 3.4 Disclosure
+
+每个 concluding answer 都应区分：
+
+- **raw data**：实际使用的 rows、aggregates 或 chart-ready result；
+- **metadata**：source tier、validation status、owner、freshness（若测量）、executed query reference、fallback status；
+- **visualization**：有助于比较 values、trends 或 distributions 时使用 chart 或 table；
+- **interpretation**：结果暗示什么，并与 data directly shows 什么分离。
+
+每个 answer 都应在 footer 中包含 provenance signature。它应让 confidence tier 可读：semantic layer / Metric View、approved raw path 或 exploratory raw table；validation status；已知 freshness；owner；fallback reason。
+
+Fallback answers 必须在答案前披露 status 和 reason。虚假的 footer 比没有 footer 更糟，应作为 product bug 处理。
+
+### 3.5 Safety Boundaries
+
+Safety 与 correctness 相关，但不是同一回事。数值正确的答案仍可能不安全：过度声称 authorization、隐藏 fallback status、泄露 draft content、mutate data，或诱发 overtrust。
+
+Required boundaries：
+
+- preview/read-only runs 需要 tool trimming 和 SQL allowlist guards；
+- 通过 comments、casing、leading whitespace、multi-statement SQL 的 bypass attempts 需要 tests；
+- pass-through auth 阻止 agent 超过用户的 Databricks permissions，但不会创建 product-level row-scope semantics；
+- high-stakes tiers 需要 human sign-off path。
+
+## 4. Evals And Measurement
+
+Evals 是产品正确性的仪器。它决定 domain 何时可 launch，tier 何时必须 stay dark，以及已 launch tier 何时需要 repair。
+
+### 4.1 Data-Correctness Evals
+
+任何 prompt-content change 之前必须已有 eval baseline。
+
+每个 eval case 应遵循如下形态：
+
+1. natural-language user prompt，像真实 chat 一样书写，不泄漏 table/column；
+2. agent answer 被抽取为 structured data；
+3. ground-truth SQL 在 fixed eval dataset 上执行；
+4. 使用 normalized ordering 和 numeric tolerance 做 row-by-row diff；
+5. trace metadata：model id、tokens、latency、tool calls、file reads 和 source tier。
+
+Suite 必须包含足够 cases 覆盖 P0/P1 question families，并包含足够长的 multi-turn slice 来测试 history 和 pointer compliance。
+
+Offline evals 应为 material prompt、Context Asset、routing 或 workflow changes 运行。把 agent 当作 black-box model under regression test：fixed prompts、fixed data、fixed expected outputs、trace comparison。
+
+### 4.2 Contract Tests
+
+Contract tests 保护系统形态：
+
+- prompt-shape regression test；
+- context rendering；
+- budget and truncation records；
+- schema gate；
+- read-only bypass attempts；
+- MECE fail/warn behavior；
+- pointer compliance；
+- history/compaction survival；
+- footer parsing and trace comparison。
+
+### 4.3 Launch Readiness
+
+Launch gates 按 domain 和 stakes tier 设置。初始目标：
+
+| Tier | Example Use | Initial Target |
+|---|---|---|
+| Headline KPI | Executive 或 operational KPI answers | 在覆盖充分的 eval slice 上 >=98% data-correctness pass rate |
+| Exploratory / drill-down | Analysis follow-up、diagnostic exploration | 在覆盖充分的 eval slice 上 >=90% data-correctness pass rate |
+
+Gate 使用前，implementation plan 必须定义 denominator、allowed failures、required family coverage、decision window 和 owner。本文不规定完整 gate schema。
+
+### 4.4 Regression And Going Dark
+
+Go-live gates 双向生效。持续 telemetry breach 应触发 runbook：
+
+1. notify the domain owner；
+2. 按 failure mode 和 defense line 分类 failures；
+3. 必要时冻结该 domain 的 risky prompt/skill changes；
+4. 必要时 downgrade answer footer 中的 validation status；
+5. 通过相关 Context Asset、workflow step 或 assembly mechanism 修复；
+6. 若在约定窗口内未修复，则 de-announce affected tier。
+
+Detection without response is not a defense.
+
+## 5. Context Building Mechanism
+
+Context-building mechanism 确保正确的上下文在正确时机、以正确形态、在可控成本和速度下进入 model。
+
+### 5.1 Explicit Context Assembler
+
+基础设计在 `server/services/context/` 下引入 `ContextAssembler`。
+
+Responsibilities：
+
+- 收集 `loading_behavior` 为 `resident_platform`、`compiled_core` 或 `compiled_summary` 的 pre-run Context Assets；
+- 暴露 `on_demand_file` 和 `retrieved` assets 的 pointers 和 records，供 routing 或 execution 后续加载；
+- 暴露 `runtime_observed`、`history_memory` 和 `telemetry` assets，同时不假装所有 runtime content 都是 pre-assembled；
+- 产生结构化 `AssembledContext`；
+- 按 `asset_type`、`loading_behavior` 和 `scope` 记录 usage 和 dropped fields；
+- 让 prompt preview 和 runtime prompt 走同一条路径；
+- 通过 prompt-shape regression tests 保护 stable prefixes。
+
+这用一个可测试、可预算、可跨 run 比较的对象替代裸字符串拼接。
+
+### 5.2 Compile Vs. Retrieve
+
+Prompt-content loading rule：
+
+| Content Shape | `loading_behavior` | Reason |
+|---|---|---|
+| 小 + 稳定 + 普遍相关 | `compiled_core` 或 `compiled_summary` | 保护 happy path 和 cache prefix |
+| 大 + 条件相关 + 持续增长 | `on_demand_file` | 减少 attention dilution |
+| 极大或跨 domain | `retrieved` | File orchestration 不再可扩展 |
+
+将 long-tail content 移到 `on_demand_file` pointers 后面的理由是 correctness 和 attention，不只是 prompt size。在 prompt caching 下，stable compiled content 首次运行后可能很便宜。JIT reads 会带来额外 tool turns、full-price input tokens、latency 和 history repetition。
+
+### 5.3 Token Economics
+
+Cost 和 speed 是同一个 token-economics 问题的两面。产品应按以下单位评估 correctness：
+
+- input 和 output tokens；
+- wall-clock latency；
+- `tool_call_count`；
+- file-read count；
+- schema exploration count；
+- warehouse query cost（可用时）。
+
+High tool-call count 往往说明 context 不足。High file-read count 可能说明 on-demand strategy 正在伤害 latency 或 repeated billing。这些 signals 应与 answer correctness 一起判断。
+
+### 5.4 Tool Schema Surface
+
+Tool schemas 是 assembled prompt text 之外的 `platform_mechanism` Context Assets。SDK 每一轮都会把所有 enabled tools 的 schema 序列化进 context，即使 tool 没有被调用。
+
+因此 skill selection 是 CE lever：
+
+- analysis projects 默认不应启用 heavy UC/jobs/vector-search tool surfaces；
+- 目标是更少 distinct tools in context，而不是更大的 multiplexed tools；
+- schema footprint 应从 actual model request payload 度量。
+
+### 5.5 Budget Policies And Truncation
+
+每个有意义的 `asset_type` / `loading_behavior` 组合都需要显式 budget policy 和 telemetry。初始 cap 是 hypothesis，不是猜出来的 contract。只有在 before/after evals 显示它在不制造新 failure modes 的前提下改善 correctness、latency 或 cost 后，它才应成为 gate。
+
+Budget tuning 应遵循 measurement loop：
+
+1. instrument actual tokens、tool calls、file reads、latency、query cost；
+2. 在代表性 eval slices 上建立 baseline；
+3. 针对特定组合提出 cap 或 loading change；
+4. 重新运行固定 eval slice 并检查 failure-mode changes；
+5. 只有 correctness/cost/speed tradeoff 更好时才保留 policy；
+6. 对每个 capped run，在 `AssembledContext.dropped` 记录 dropped fields。
+
+Silent truncation is forbidden.
+
+当 content 触达 cap 时，优先 repair 顺序是：
+
+1. reduce duplication；
+2. 将 long-tail content 移到 `on_demand_file` pointer 后面；
+3. improve retrieval/routing；
+4. 仅作为 fallback 进行 truncate，并保留 observability。
+
+### 5.6 Scope Graduation
+
+Scope discipline 是 correctness 和 economics lever：
+
+- <=20 tables/MVs 是理想 project shape；
+- <=100 是 file orchestration 的 hard cap；
+- 超过 cap 后，产品应转向 offline aggregation + embedding retrieval，而不是继续增加 `compiled_core` 或 `on_demand_file` assets。
+
+## 6. Knowledge Lifecycle
+
+Knowledge lifecycle 回答：我们如何创建、验证、发布、维护和退役 Context Assets？
+
+### 6.1 Asset Creation
+
+New-domain onboarding 创建初始 asset set：
+
+1. map P0/P1 question families；
+2. identify candidate tables and Metric Views；
+3. validate 或 create `semantic_truth` assets；
+4. assign owners for metrics and data sources；
+5. write business terms、caveats、date conventions、fallback policy；
+6. author eval cases with ground-truth SQL；
+7. 将 settings 和 on-demand reference files 发布到 project asset pack。
+
+Track onboarding cost：
+
+- 从 request 到 first launchable tier 的 elapsed time；
+- human hours by role；
+- 覆盖的 P0/P1 question families 数量；
+- unresolved asset gaps；
+- authored 和 maintained eval cases 数量。
+
+### 6.2 Human Ownership
+
+每个 launched domain 需要 named owners：
+
+- data owner：负责 source 和 freshness questions；
+- metric owner：负责 canonical definitions；
+- product owner：负责 launch tier、threshold 和 user-facing availability；
+- evaluation owner：负责 ground-truth case quality 和 telemetry review。
+
+Metric definitions、validation status 和 go-live decisions 不应 anonymous。
+
+### 6.3 Code-Derived Draft Docs
+
+主要 cost-reduction lever 是 code-derived draft documentation。Offline process 可以 crawl 产出某张表的 transform code，并起草：
+
+- grain；
+- primary keys；
+- freshness；
+- source objects；
+- sibling tables；
+- caveats；
+- example filters。
+
+人类验证 draft。该 process 只起草 documentation；不生成 metric definitions。
+
+### 6.4 Curated And Discovered Knowledge
+
+Knowledge 分成两类：
+
+- **Curated knowledge**：human-written schemas、definitions、caveats、policies，以及 validated Context Assets。
+- **Discovered knowledge**：runtime learnings，例如 validated queries、recurring pitfalls、user corrections。
+
+Write-backs 必须 distill 成 structured reference fragments，而不是 raw query logs。Project-level canonical corrections 和 personal preferences 必须分开保存，saves 需要 explicit confirmation。
+
+### 6.5 Maintenance Loop
+
+Reference docs、skills 和 `on_demand_file` Context Assets 应与它们描述的 transform code 和 dbt/Spark models colocated。Prompt 和 skill assets 是 code：需要 review、tests、owners 和 change history。
+
+CI 应标记任何改动 reporting model、Metric View 或 governed table 但没有在同一个 PR 中触碰对应 agent reference asset 的 change。默认动作是 block launch，或要求 domain owner 显式 waiver。这样 agent knowledge 会在 underlying data contract 变化的同一时点保持新鲜。
+
+Correction harvesting 应从重复 user corrections 中起草 PR，并把相同 cases 回流进 evals。
+
+Readiness rots. Telemetry curve 是 domain 仍然 ready 的证据。
+
+## 7. Iteration Model
+
+系统应通过 measured iterations 演进，而不是通过累积 prompt complexity 演进。
+
+### 7.1 Measure Before Changing
+
+任何影响 what enters context 的变更都需要 data-correctness baseline。Manual smoke tests 对 debugging 有用，但不能替代 baseline。
+
+需要 before/after comparison 的 changes：
+
+- prompt content changes；
+- new 或 removed `on_demand_file` assets；
+- budget、truncation 或 loading-policy changes；
+- routing/matcher changes；
+- tool-surface changes；
+- new retrieval mechanism；
+- adversarial-review sub-agent；
+- golden-case execution changes。
+
+### 7.2 Evidence-Gated Mechanisms
+
+只有 evals 显示 gap 或 benefit 后才增加 complexity。
+
+| Mechanism | Build When |
 |---|---|
-| [nao](../refer/nao-context-engineering.md) | CE 是可度量学科（含查询执行成本）；瘦 prompt + orchestrated 文件读取；MECE；数据正确性评测 + `tool_call_count`；范围纪律 ≤20/≤100；语义层证据门控 |
-| [dash](../refer/dash-context-engineering.md) | 编译 vs 检索二分；curated/discovered 双层记忆 + 写回闭环；资源层强制边界 > prompt 文字；eval 即契约 |
-| [anthropic](../refer/how-anthropic-enables-self-service-data-analytics-with-claude.md) | 三种失败模式分类法；两个负面结果（LLM 生成口径净负面、raw 检索 <1%）；skill 漂移 + colocation/hook 维护；评测即遥测 + go-live gate；provenance footer；对抗式评审成本量化 |
-| [openai](../refer/Inside%20OpenAI’s%20in-house%20data%20agent.md) | 代码派生表语义；过度规约会变差（护栏而非菜谱）；RAG-at-scale 毕业路径；工具整合；自纠错触发器；memory 全局/个人分级 + 显式保存 |
+| Dedicated Knowledge Router matcher | model-reasoning router 的 pointer non-compliance 超过 threshold |
+| LLM intent fallback for golden-case matching | deterministic trigger matching 漏掉 covered question families 的真实 paraphrases |
+| Dedicated `query_metric_view` tool | eval 时 hand-written MV SQL errors 达到 material 水平 |
+| Adversarial SQL review | 某 domain misses 主要由 reasoning/verification failures 主导，且 cost 可接受 |
+| Budget cap 或 truncation rule | Telemetry 显示某组合昂贵或 attention-diluting，且 ablation 改善 correctness/cost/speed |
+| Embedding retrieval | Project scope 超过 file-orchestration hard cap |
+| Sliding-window history | Multi-turn evals 显示 history 或 memory compression 导致 regressions |
 
-> 一句话总结：**把「什么进上下文」做成有预算、有层次、可测试的工程对象；编译核心守准确率的 happy path，长尾按需读取并验证遵从；一切增量机制证据门控；用数据正确性评测和维护流程对抗三种失败模式。**
+### 7.3 Future Versions
+
+以下主题有意排除在基础 CE 设计之外，属于 future versioned designs 或 action plans：
+
+- full asset manifests；
+- context versioning 和 release-pinned reads；
+- frozen project file snapshots；
+- deterministic golden-case execution paths；
+- production role/scope enforcement；
+- richer launch-gate schemas；
+- dedicated Metric View query tools；
+- 超过 file-orchestration cap 后的 embedding retrieval；
+- sliding-window history 和 advanced memory compaction。
+
+## 8. Appendix
+
+### 8.1 Defense Lines
+
+正确性来自五道叠加防线：
+
+| # | Defense Line | Mechanisms | Primary Target |
+|---|---|---|---|
+| 1 | Context Assets | Data foundations、validated Metric Views、MECE definitions、human-owned metric definitions、business context、scope discipline | 降低 ambiguity、freshness 和 retrieval 的知识前提 |
+| 2 | Routing | Entity resolution、metric-view-first source selection、knowledge-router/on-demand pointers、`project_files_read` compliance | Concept/entity ambiguity 和 retrieval failure |
+| 3 | Execution | Schema gate、date/period conventions、suspicious-result self-checks | Wrong operation on right entities |
+| 4 | Disclosure | Provenance footer、fallback reason、source tier、validation status、owner | Silent failure mitigation |
+| 5 | Measurement | Data-correctness evals、per-stakes launch gates、telemetry、regression runbook | Staleness 和 system regression |
+
+### 8.2 Cross-Cutting Principles
+
+1. **每个 token 都有目的。** 更多上下文并不更好；irrelevant context 会浪费预算并稀释注意力。
+2. **Cache-friendliness first.** Stable prefix 在前，volatile content 在后。
+3. **Tool state over prompt text.** Constraints 应由 state、gates、tools 强制；prompt text 负责解释。
+4. **Thin prompt 是 attention strategy，不是 cost strategy。** Prompt caching 会改变经济账；JIT reads 在一个 session 中可能更贵。
+5. **Cost 是三维的。** Reliability、latency、token/query cost 必须一起评估。
+6. **MECE definitions.** 每个 metric 只有一个 canonical definition；冲突必须可检测。
+7. **Guardrails, not recipes.** 编码 constraints 和 facts；避免在 prompt rendering 中写脆弱 step lists。
+8. **Evidence gating.** 只有 evals 量化 gap 或 benefit 后才增加 complexity。
+9. **Measure before changing.** Prompt-content changes 需要先有 correctness baseline。
+10. **Humans own metric definitions.** LLM 可以起草 documentation，但不能拥有 metric truth。
+
+### 8.3 External Reference Summary
+
+| Source | What We Adopt |
+|---|---|
+| [nao](../refer/nao-context-engineering.md) | CE as measurable discipline、token/query cost、thin prompt + orchestrated reads、MECE、data-correctness evals、scope discipline |
+| [dash](../refer/dash-context-engineering.md) | Compile-vs-retrieve split、curated/discovered memory、write-back loop、resource enforcement、evals as contracts |
+| [anthropic](../refer/how-anthropic-enables-self-service-data-analytics-with-claude.md) | Data-foundation/source-of-truth/skill/validation stack、failure-mode taxonomy、knowledge/unbook skill pattern、maintenance loop、evals-as-telemetry、provenance footer、adversarial review cost |
+| [openai](../refer/Inside%20OpenAI’s%20in-house%20data%20agent.md) | Multi-source data context、table usage、human annotations、code enrichment、institutional knowledge、memory、runtime evidence、RAG-at-scale graduation path、tool consolidation、self-correction triggers |
+
+### 8.4 Design Provenance
+
+目标 Context Asset model 结合三类输入：
+
+- OpenAI-style data-agent design 的 multi-source context model；
+- Anthropic-style analytics deployments 的 data-foundation/source-of-truth/skill discipline；
+- 当前 builder-app-oai implementation 和 v0.3.6 target design。
+
+当前实现说明：context 仍然分散在 system prompt、project settings rendering、skills guidance、operating guide、runtime state 和 SDK session history 中。基础 CE 方向是将其收敛为 structured Context Asset assembly path。

@@ -1,218 +1,710 @@
-# Context Engineering — Top-Level Design (databricks-builder-app-oai)
+# Context Engineering - Basic Design (databricks-builder-app-oai)
 
-Date: 2026-06-10 ｜ 中文版: [`context-engineering-zh.md`](./context-engineering-zh.md)
+Date: 2026-06-10 | Chinese version: [`context-engineering-zh.md`](./context-engineering-zh.md)
 
-This is the **top-level design** for Context Engineering (CE) in builder-app-oai. It answers: how do we systematically decide what enters the model's context, in what form, at what cost, and with what quality safeguards. It is version-agnostic — the versioned as-is baseline, target design, and implementation tasks live in the documents below.
+This document defines the basic Context Engineering (CE) design for
+`databricks-builder-app-oai`: how the product decides what context exists, how
+it enters the model, how it is checked, and how it improves over time.
 
-## 0. Document map
+Scope note: this document applies to the `databricks-builder-app-oai` design
+track under `docs/builder-app-oai/`. It is not a status claim about the legacy
+`databricks-builder-app/` package unless an implementation plan explicitly says
+so.
+
+Non-goals for this basic design:
+
+- detailed context versioning;
+- release-pinned reads or frozen release snapshots;
+- production role/scope enforcement;
+- deterministic golden-case execution paths.
+
+Those are future-version topics. This document keeps only the basic CE concepts
+needed to build and evaluate a reliable self-service analytics agent.
+
+## 0. Document Map
 
 | Document | Role |
 |---|---|
-| This document | Top-level philosophy, architecture, and roadmap; version-agnostic |
+| This document | Basic product and architecture decision record for Context Engineering |
 | [`v0.3.6/gap-analysis.md`](./v0.3.6/gap-analysis.md) | As-is baseline: context sources, prompting, workflow, history |
-| [`v0.3.6/design.md`](./v0.3.6/design.md) | v0.3.6 target design: six-layer model, budgets, on-demand reads, contracts and evals |
-| [`v0.3.6/action-plan.md`](./v0.3.6/action-plan.md) | P1–P4 implementation tasks and acceptance gates |
-| [`v0.4-golden-analysis-cases/`](./v0.4-golden-analysis-cases/) | Canonical paths / answer contracts for high-frequency question families (next version) |
-| [`../refer/`](../refer/) | External practice references: nao, dash, anthropic, openai (see §10 quick table) |
+| [`v0.3.6/design.md`](./v0.3.6/design.md) | Implementation-level target design and tasks for the next build slice |
+| [`v0.3.6/action-plan.md`](./v0.3.6/action-plan.md) | P1-P4 implementation tasks and acceptance gates |
+| [`v0.4-golden-analysis-cases/`](./v0.4-golden-analysis-cases/) | Future golden-case work |
+| [`../refer/`](../refer/) | External practice references: nao, dash, anthropic, openai |
 
-## 1. Problem definition: analytics accuracy is a context + verification problem
+## 1. Problem Definition
 
-Unlike coding agents, a data-analysis question usually has **exactly one correct answer from exactly one correct source**, with no "tests as natural guardrails". Anthropic's conclusion matches our experience: **accuracy is not a SQL-generation problem — once the user's question is mapped to the correct entities, execution and SQL are trivial**. Nearly all errors fall into three failure modes, and every component of the CE system must be able to answer "which one am I defending against":
+Analytics correctness is a context + verification problem. Unlike coding agents,
+a data-analysis question usually has one correct answer from one correct source.
+There are few natural tests at runtime, and users often cannot verify the answer
+from first principles.
 
-1. **Concept ↔ entity ambiguity**: one business term ("achievement rate") maps to several plausible tables/columns/definitions. Defense: Metric View semantic layer + MECE single canonical definitions + business-term mapping.
-2. **Data staleness**: schemas, definitions, and docs drift with the business; answers start being subtly wrong. Defense: maintenance processes (colocation, evals-as-telemetry, correction harvesting).
-3. **Retrieval failure**: the correct information exists but the agent can't find it. Defense: orchestration pointers + `read_project_file` on-demand reads (small scale) → embedding retrieval (the graduation path past the threshold).
+Entity resolution is usually the dominant failure point: once the user's question
+is mapped to the correct table, metric, grain, and business definition, SQL
+generation is less often the bottleneck. But execution errors still matter,
+especially date windows, filters, denominators, and joins.
 
-Context that cannot be attributed to any failure mode is, by default, wasting budget.
+This design focuses on four primary failure modes:
 
-## 2. How correctness and accuracy are ensured: defense in depth
+1. **Concept/entity ambiguity**: one business term maps to several plausible
+   tables, columns, metrics, or definitions.
+2. **Data staleness**: schemas, definitions, and docs drift as the business
+   changes.
+3. **Retrieval failure**: the correct information exists but the agent does not
+   find or use it.
+4. **Execution errors on the right entities**: the selected table or metric is
+   right, but the operation is wrong.
 
-CE's ultimate deliverable is "the answer is right". No single mechanism guarantees that on its own — Anthropic's measurement: the bare model scored ~21% on their evals, while the full stacked defenses hold steady at 95%+. Correctness comes from **five stacked defense lines**, each attacking one of §1's failure modes. This section is the overview; mechanism details live in the referenced sections.
+Every meaningful context item should have a `defense_claim`: the failure mode or
+operating risk it is meant to reduce. Context that cannot state a claim is, by
+default, wasting attention and budget.
 
-| # | Defense line | Mechanisms | Primary target | Details |
-|---|---|---|---|---|
-| 1 | **Assets** (before the question) | Validated Metric View semantic layer; MECE single canonical definitions; metric definitions owned by humans (never LLM-generated); scope discipline ≤20/≤100 | Entity ambiguity — collapse "dozens of plausible candidates" into one governed answer | §3/§5/§9 |
-| 2 | **Routing** (finding the answer) | Metric-view-first + pre-rebutted "don't bail early" list; orchestration pointers + compliance signal (`project_files_read`, proving the model actually read the canonical source) | Retrieval failure — the answer exists but the agent didn't find or use it | §5/§6 |
-| 3 | **Execution** (writing the query) | Schema gate (inspect schema before SQL); date/period conventions (week boundaries, whether the current period counts — the top error source for time questions); suspicious-result self-correction (0 rows / null spike / 10× jump between adjacent periods / 1 row after aggregation → re-check before concluding) | Wrong operations on the right entities (join/filter/date-window errors) | §6 |
-| 4 | **Disclosure** (delivering the answer) | Provenance footer (source tier · validation status · owner — always derived from trace/settings, never model self-assessed); fallbacks must disclose status and reason first; separate observation ("the data shows X") from interpretation ("this suggests Y") | Consumer-side mitigation of silent failure — give consumers a basis for judgment when the answer is wrong | §6/§8 |
-| 5 | **Measurement** (system level) | Data-correctness evals (row-by-row diff against ground-truth SQL, not LLM-judge scoring); per-domain go-live gate (no availability announcement below ~90%); evals-as-telemetry (time series catching drift-type regressions); passive monitoring + correction harvesting feeding back into the eval set | Staleness + overall regression — knowing how accurate you actually are right now | §8 |
+## 2. Basic Context Asset Model
 
-Four accompanying judgments:
+Context Assets are governed information the agent relies on to route, execute,
+validate, and disclose an analysis. They are not incidental prompt text. They
+should have owners, source-of-truth locations, freshness expectations, loading
+behavior, and observability.
 
-- **Defenses must live on the system side; never count on the user.** Self-service users don't understand the underlying data and cannot verify answers for you — this is the essential difference from building tools for data scientists, and the reason defense line 4 exists.
-- **Accuracy is the product of the stack, not of any single layer.** Line 1 collapses the entity space first; only then do the later lines matter. Skipping asset building and piling on prompt tricks or evals locks in a low accuracy ceiling (the flip side of "once entities are pinned, execution and SQL are trivial").
-- **Accuracy has an explicit budget knob.** High-cost measures like the adversarial-review sub-agent (+6% accuracy / +32% tokens / +72% latency) are evidence-gated and enabled per domain — "how much are you willing to pay for accuracy" is a question that must be answered explicitly, not defaulted to all-on.
-- **Be honest about the residual risk: silent failure** (an answer that is wrong but looks plausible and gets adopted without objection) has no perfect fix. Mitigations are defense line 4 + human sign-off for high-stakes outputs + standing evals for headline KPIs checked against blessed dashboards. Even ~100% offline-eval pass only proves "no obvious gaps", never that the system can't be wrong — claiming absolute accuracy is itself an error.
+The basic design uses a **Context Asset Pack** per project. The pack contains
+the minimum governed assets needed to answer the launched question families, plus
+pointers to long-tail assets the agent may read on demand.
 
-### 2.1 Readiness gates per defense line
+### 2.1 Target State
 
-"The defense exists" is not "the defense is ready". Each line has an explicit ready bar, an executable verification method, and a repair action when the bar isn't met (diagnosis and repair stay separate — the audit only diagnoses; every finding routes to a repair action):
+For any launched domain, the Context Asset Pack must answer five questions:
 
-**Line 1 — Assets**
+1. **What can the agent answer?**
+   The covered P0/P1 question families and their required `semantic_truth`
+   assets.
+2. **Which entities are canonical?**
+   The Metric Views, raw paths, measures, dimensions, grains, and owner-approved
+   definitions the agent should prefer.
+3. **How should the agent operate?**
+   The workflow policies and conventions that prevent common analytical errors.
+4. **What evidence proves readiness?**
+   Eval cases, validation SQL, launch tier, pass rule, and trace requirements.
+5. **What context was used for this run?**
+   The project settings, project files, retrieved context, tool outputs, and
+   runtime evidence loaded or observed during the run.
 
-- *Ready bar*: every target question family (requirements P0/P1) maps to required assets — a validated MV or an approved raw path, nothing dangling. MVs are verified on a validation slice (e.g., Distribution 202604); candidates/deferred have a fallback-disclosure policy. One canonical definition per metric, with an owner. Scope ≤20 tables/MVs (≤100 hard cap).
-- *How to verify*: gap-analysis coverage check + readiness docs; the MECE two-level contract test (fail/warn); the context-audit rubric's scope and per-MV coverage items.
-- *When not ready*: gaps go through onboarding to build assets (create/validate MVs, write definitions); oversized scope converges to the gold layer first — don't add more context.
+If a domain cannot answer these questions, it is not ready as a product surface,
+even if a prompt can produce plausible answers.
 
-**Line 2 — Routing**
+### 2.2 Asset Contract
 
-- *Ready bar*: the compiled core is actually in L1 (validated MVs' grain/measures/dimensions, metric-view-first, pre-rebutted list, date conventions). All pointed-to files exist or degrade gracefully, and are covered by the release freeze. `project_files_read` tracking is live and the **pointer non-compliance rate is measured and below threshold**. The skill set is converged per project type, with the tool-schema footprint within the frozen baseline.
-- *How to verify*: context rendering tests (assert which sections render / don't render); the release-pinned test including the file path; the eval assertion "KPI case ⇒ trace contains the corresponding file read".
-- *When not ready*: non-compliance above threshold → only then build the requirement matcher (evidence-gated); missing files → degrade to compiled rendering and backfill the files.
+The basic asset contract is intentionally small. It should be represented by the
+available carriers today: DB settings, project files, traces, and eval telemetry.
+A full asset manifest can be added later.
 
-**Line 3 — Execution**
-
-- *Ready bar*: plan state machine / schema gate / read-only (including bypass attempts via comments, casing, leading whitespace) contract tests are all green. Date/period conventions are rendered into L1. Self-correction triggers (0 rows / null spike / 10× / 1 row) are written into the workflow guide.
-- *How to verify*: contract tests in CI; spot-check time-windowed eval cases for convention-correct windows.
-- *When not ready*: gate misses → fix gate constants/regex and add cases; date-case failures → fix the conventions section before considering semantic-layer work.
-
-**Line 4 — Disclosure**
-
-- *Ready bar*: the footer appears on every concluding answer and is **parseable and cross-checkable against the trace** (source tier consistent with executed SQL, validation status consistent with settings). On fallback, status and reason are disclosed before the answer. A human sign-off process for high-stakes outputs is defined.
-- *How to verify*: footer parsing test + trace spot-check comparison; the eval assertion that fallback cases contain disclosure language.
-- *When not ready*: a false footer is treated as a bug — it is the last mitigation for silent failure, and false is worse than missing.
-
-**Line 5 — Measurement**
-
-- *Ready bar*: the data-correctness eval baseline exists **before any prompt-content change**. Enough cases per P0 question family (a few dozen per domain — diminishing returns beyond that), with ground truth pinned to snapshot dates so it can't drift. Results land in a telemetry table (skill version / git SHA / model id) queryable as a time series. The domain has cleared the ~90% go-live threshold.
-- *How to verify*: evals runnable in CI with a historical curve; the gate is assertable.
-- *When not ready*: below threshold → don't announce availability to stakeholders; classify failures (data model / dates / the test itself / metric definition) and route to defense lines 1–3 for repair.
-
-Three usage rules:
-
-- **Line 5 is the instrument and must be ready first.** Without the eval baseline, "ready" for lines 1–4 cannot be judged — the order is: stand up the instrument (line 5's baseline part), bring each line up to bar, then pass the go-live gate.
-- **Readiness is per-domain / per-project**, not a global system switch: one project's Distribution domain passing the gate says nothing about a newly onboarded domain, which restarts from line 1's asset mapping.
-- **Readiness rots.** The docs describe a data model that changes daily (accuracy drifts 95%→65%/month without maintenance), so readiness must be bound to the maintenance loop (colocation, code-review hook, correction harvesting — see §9) and continuously re-verified; the telemetry curve is the evidence of "still ready".
-
-### 2.2 How the four taxonomies relate, and the enforcement matrix
-
-This document carries four numbered taxonomies. They are not parallel lists but **four orthogonal axes** of one system: the five defense lines are the **goal decomposition** (where correctness comes from), the ten principles (§3) are the **decision rules** (how design trade-offs are judged), the six layers (§4) are the **runtime structure** (how context is physically assembled), and the five artifacts (§7) are **data governance** (where content authoritatively comes from and how it flows). In one sentence: **principles govern how the layers are built; the content the layers carry is governed by the artifact contract; all three stand up the defense lines; and defense line 5 (measurement) is the instrument that verifies the other three axes actually hold**. Do not attempt a 1:1 item mapping — the mapping is many-to-many by design.
-
-Two scoping declarations to prevent misreading:
-
-- **The defense lines decompose reliability only.** CE's goals are three-dimensional (reliability / speed / cost, principle 5); all five lines belong to reliability. Principle 2 (cache) and principle 4 (attention/cost accounting) also govern speed/cost — that they don't map fully onto the defense lines is by design, not an orphan.
-- **The five artifacts govern project-side configured content only** (i.e., the sources of L1/L3). L0's source of truth is code, L2 is request-scoped parameters, and L4/L5's authoritative stores are runtime products (execution events / SDK session) — none are among the five artifacts (scoping details in §7).
-
-| Defense line | Main principles | Layers involved | Artifacts involved | Enforcement of the links |
-|---|---|---|---|---|
-| 1 Assets | P6 MECE, P10 human-owned definitions | Outside the layers (warehouse assets), entering via the L1 compiled core | DB settings, downsunk files (the two must not fork) | ✅ MECE two-level test; ⚠️ scope discipline ≤20/≤100 is an audit warning |
-| 2 Routing | P4 attention, P3 verifiable signals, P7 guardrails, P2 cache | L1 pointers + L3 on-demand reads + the tool-schema surface | Downsunk files + release freeze | ✅ `project_files_read` compliance assertion, release-pinned file-path test, prompt shape snapshot; ⚠️ P7 "guardrails not recipes" relies on review discipline |
-| 3 Execution | P3 tool state > prompt text | Not in the content layers — carried by run_state tool state; L4 feeds the schema gate | — (behavioral contract, not configured content) | ✅ plan / schema gate / read-only (incl. bypass attempts) contract tests |
-| 4 Disclosure | P3 applied on the output side (trust derived state, not the model's self-report) | Output side, bypassing the assembly layers; derived from the trace | DB settings' validation status (footer truthfulness depends on its freshness) | ✅ footer parsing + trace comparison test |
-| 5 Measurement | P5 three-dimensional cost, P8 evidence gating, P9 measure first | Above the whole (consumes `AssembledContext` observability + traces) | Telemetry table (the source of truth for "accuracy state", see §7 scoping note) | ✅ eval-baseline-first (gate ordering), go-live gate, telemetry time series |
-
-Legend: ✅ = mechanically enforced by a named test/signal; ⚠️ = held only by review discipline — "recipe-ification" cannot be judged mechanically and the scope line is advisory, so these two must be guarded by humans when reviewing prompt/skill changes and during project onboarding. Distinguishing the two classes is a matter of honesty: claiming "everything is mechanically enforced" would overstate the system's capacity for self-protection.
-
-## 3. Design principles
-
-1. **Every token has a purpose.** More context is not better: excess wastes budget, dilutes attention, and amplifies hallucination.
-2. **Cache-friendliness first.** Stable prefix up front (L0 static instructions + tool schemas), volatile content at the end; the prefix is shared across projects, and neither layering nor downsinking may break it.
-3. **Tool state over prompt text.** Workflow constraints are carried by tool state (plan state machine, schema gate, read-only trimming); the prompt only explains. Any constraint that exists only as prompt text must be paired with a verifiable signal (e.g., the pointer compliance rate). Defense line 4's rule — "footers are always derived from trace/settings, never model self-assessed" — is the same logic applied on the output side.
-4. **The case for a thin prompt is attention, not money.** Under prompt caching, stable compiled content is nearly free; a JIT read costs an extra turn + full-price tokens + repeated billing as it rides in history. The criterion for downsinking is accuracy/attention benefit, **not prompt size** — the "small + stable + universally relevant" compiled core is never downsunk.
-5. **Cost is three-dimensional: reliability / speed / cost (including execution cost).** Beyond tokens, exploratory schema queries caused by insufficient context (warehouse $ + latency) and JIT file reads are costs too; evals collect them together (`tool_call_count`, file-read count).
-6. **MECE: exactly one canonical definition per metric.** No conflicts across MVs, across raw tables, or between settings and downsunk files; conflicts must be detectable — never let the model silently pick one of two.
-7. **Guardrails, not recipes.** You may prescribe "constraints and facts" (don't skip the semantic layer; this is the canonical table; this definition has a gotcha); you may not prescribe "execution paths" (step 1 do X, step 2 do Y) — over-prescription pushes the agent down wrong paths (OpenAI's finding).
-8. **Evidence gating.** Every mechanism that adds constraints or complexity (a dedicated MV tool, the requirement matcher, adversarial review, embedding retrieval) is built only after evals quantify the benefit/gap — never imposed up front.
-9. **Measure before changing.** Any work that changes "what goes into the prompt" must have a data-correctness eval baseline as its control group first; a "manual smoke test" is no substitute for a baseline.
-10. **Humans own metric definitions.** Use LLMs to generate documentation/descriptions (business_terms, caveats, field notes — drafts can be derived from transform code), but measure/dimension definitions are never auto-generated — LLM-bootstrapping the semantic layer was net-negative on Anthropic's evals.
-
-## 4. Architecture: an explicit Context Engine and the six-layer model
-
-Context assembly converges into an explicit `ContextAssembler` (`server/services/context/`), completed before the SDK execution loop, producing a structured `AssembledContext` (per-layer text + usage + the list of truncated fields) rather than bare string concatenation.
-
-| Layer | Name | Stability | Contents |
-|---|---|---|---|
-| L0 | immutable | Stable across projects (cache prefix) | Role, response format, plan state machine, tool rules |
-| L1 | project | Stable within a project/release | Settings, skills guidance, AGENTS.md, metric-view compiled core, date conventions |
-| L2 | run | Per run | run_role, read_only, resource overrides |
-| L3 | turn | Assembled per question | User message, on-demand-read/retrieved fine-grained context (golden_case slot reserved) |
-| L4 | observation | Accumulates within a turn | Schema-history seed, tool results |
-| L5 | history | Across turns | SDK session + compression summary (observable) |
-
-Two structural insights:
-
-- **Tool schemas are a resident cost surface outside the six layers.** The SDK serializes every enabled tool's schema into context every turn, proportional to the number of enabled skills; skill selection is therefore itself a CE lever (one fewer heavy-schema skill = a dozen fewer schemas + more accurate tool selection). Note the direction of the lever: "fewer distinct tools in context", not "merge into bigger multiplexed tools" — the latter is precisely the source of schema bloat.
-- **Budgets are explicit and silent truncation is forbidden.** Each layer's budget is a code constant; over-budget drops must leave a record in `AssembledContext.dropped`. When a section hits its cap, the first choice is downsinking to a file + pointer; truncation is only the fallback.
-
-## 5. Content organization: compile vs. on-demand read
-
-The criterion: **small + stable + universally relevant → compile into the resident prompt; large + conditionally relevant + ever-growing → downsink into project files, with orchestration pointers guiding the model to `read_project_file` on demand**.
-
-- **Compiled core (never downsunk)**: validated MVs' full_name / status / grain / measures / dimensions, the metric-view-first policy with the pre-rebutted "don't bail early to raw SQL" list, and the date/period conventions section. This is the happy path; it should not cost a read round-trip.
-- **On-demand long tail (downsunk)**: full business_terms, known_caveats, sample_queries, requirements / readiness details. The resident prompt keeps only a routing section: "for this kind of question, read this file first".
-- **Pointer compliance must be verifiable**: pointers are prompt text (the very shape principle 3 warns about), so `run_state` tracks `project_files_read` and evals assert "KPI-class question ⇒ trace contains the corresponding file read". The non-compliance rate is the evidence for whether to upgrade to automatic routing (requirement matcher → LLM intent classification).
-- **Graduation path**: scope discipline is **≤20 tables/MVs ideal, ≤100 hard cap** (oversized scope is the #1 predictor of reliability failure). File orchestration suffices within the cap; only past it do we upgrade to offline aggregation + embedding retrieval (OpenAI's approach at 70k-dataset scale). Scope discipline thus serves double duty: a reliability lever and the trigger line for switching retrieval mechanisms.
-
-## 6. Workflow contract
-
-Behavioral constraints are carried by tool state and written as testable contracts:
-
-- **Plan state machine**: `create → start → tools → finish → conclusion`; repeated operations return structured errors instead of wasting turns.
-- **Schema gate**: SQL referencing configured tables is rejected until the conversation has a schema inspection, enforcing schema-first; the gate-exempt prefixes (DESCRIBE etc.) are a single testable constant.
-- **Metric-view-first**: KPI/aggregate/trend/comparison questions use the configured Metric Views (`MEASURE(...)`) first; raw tables are for validation, drill-down, and questions MVs don't cover; any fallback must disclose status and reason first. The pre-rebutted list is inlined in the compiled core so it can't be talked past in one sentence.
-- **Read-only**: preview runs get tool trimming + a SQL allowlist; the regex guard is the soft layer — hard isolation requires evaluating credential-level options (SELECT-only UC grants / a low-privilege service principal) and squarely facing their conflict with the per-user pass-through model — pass-through itself already guarantees the agent never exceeds the user's own permissions.
-- **Suspicious-result self-check**: when triggers fire (0 rows, null spike, 10× jump between adjacent periods, 1 row after aggregation), re-check schema/filters before concluding — moving iteration from the user into the agent.
-
-## 7. Sources of truth: the five artifacts
-
-| Artifact | Role | Key rules |
+| Field | Meaning | Basic Carrier / Status |
 |---|---|---|
-| `project_setting.yaml` | Human-edited source | Synced to DB on save; not re-read at run time |
-| DB settings | Source of truth at run time | Read by `build_project_context` every run |
-| Release snapshot | Frozen source seen by previewers | **Covers both settings and project files** |
-| AGENTS.md | Mechanism-guide snapshot | Mechanisms only, no project payload; re-read from disk every run |
-| Downsunk context files | On-demand carrier for fine-grained L1/L3 content | Derived class: materialized from settings (sole write path, no hand edits); authored class: human-edited; release-pinned runs' `read_project_file` resolves to the frozen version |
+| `id` | Stable identifier for references and traces | Required where assets already have IDs: MV names, file paths, eval case IDs |
+| `asset_type` | The job this Context Asset performs | Required as the organizing field; see Section 2.3 |
+| `defense_claim` | Failure mode or operating risk this asset defends against | Required for new or changed assets where a carrier exists |
+| `content` | Knowledge, evidence, rule, or control record | Required in the carrier or implied by the referenced object |
+| `owner` | Person or team accountable for correctness and freshness | Required for metric definitions and launch readiness |
+| `source_of_truth` | DB setting, authored file, derived file, trace, or telemetry table | Required for project-owned assets |
+| `freshness_policy` | When the asset must be reviewed or regenerated | Target field; can start as notes or validation metadata |
+| `validation_status` | Candidate, validated, certified, stale, missing, or not applicable | Required for `semantic_truth` assets |
+| `loading_behavior` | How or when the asset enters the run | Required for context assembly and tests |
+| `scope` | Platform, project, run, turn, history, or eval/control | Required for access and observability decisions |
+| `observability_signal` | Trace field, file-read record, footer field, eval result, or audit warning | Required for runtime/eval assets; target for all assets |
 
-The fifth row is the precondition for the on-demand-read architecture: once fine-grained context is downsunk into files, release pinning leaks if the release freeze doesn't cover files; and if materialization isn't the sole write path, settings and files fork into MECE conflicts.
+### 2.3 Asset Types
 
-**Scoping declaration**: the five artifacts govern **project-side configured content** (i.e., the sources of L1/L3). The other layers have their own owners — L0's source of truth is **code** (its stability guarded by the prompt shape snapshot test); L2 is request-scoped parameters; L4/L5's authoritative stores are execution events and the SDK session (runtime products, not configuration); the eval telemetry table is the source of truth for "accuracy state" (§8). They are not in this table, but "who owns it, who may write it, when is it read" must be answerable for them all the same.
+| `asset_type` | Content | Typical `loading_behavior` | Typical `scope` | Readiness Rule |
+|---|---|---|---|---|
+| `platform_mechanism` | System prompt core, tool schemas, plan state machine, read-only rules, response contract | `resident_platform`, `tool_schema` | Platform | Mechanism is covered by prompt/tool-shape tests |
+| `data_foundation` | Governed source tables, transforms, tests, schema metadata, lineage, code-derived and LLM-optimized table docs | `warehouse_object`, `metadata_inspection`, `compiled_summary` | Project | The data estate is legible enough to distinguish similar entities |
+| `semantic_truth` | Metric Views, canonical measures, dimensions, grains, approved raw paths, owners, validation status, fallback policy | `compiled_core`, `on_demand_file`, `warehouse_query` | Project | Every launched KPI/aggregate family maps to a validated MV or approved raw path |
+| `business_context` | Business terms, aliases, gotchas, caveats, launch/incident notes, interpretation guidance, decision context | `compiled_summary`, `on_demand_file`, `retrieved` | Project/turn | Ambiguous terms have one canonical interpretation or an explicit fallback policy |
+| `analyst_workflow` | Knowledge Router contract, senior-analyst SOP, analysis patterns, review rubric | `compiled_core`, `on_demand_file` | Platform/project/turn | Rules that affect correctness are either enforced by tool state or covered by tests |
+| `turn_context_memory` | Matched project files, retrieved docs, saved corrections, project/personal memory | `on_demand_file`, `retrieved`, `history_memory` | Turn/history | Retrieved or remembered context is scoped, auditable, and does not silently override canonical definitions |
+| `runtime_evidence` | Schema inspections, executed SQL or MV query, raw rows, result shape, validation checks, footer metadata | `runtime_observed`, `final_disclosure`, `telemetry` | Run/turn | Runs are reproducible enough to verify source tier, validation status, and file compliance |
+| `control_plane` | Evals, readiness gates, telemetry, regression runbooks | `eval_only`, `telemetry` | Eval/control | Readiness and regression decisions are measurable and replayable |
 
-## 8. Validation system
+### 2.4 Loading Behaviors
 
-**Offline (baseline first)**:
+`loading_behavior` is a closed vocabulary for assembly, traces, and budget
+telemetry. New values should be deliberate because they affect comparability.
 
-- **Data-correctness evals** are the foundation: NL prompt → extract the agent's answer into structured data → row-by-row diff against ground-truth SQL (normalized, order-insensitive, numeric tolerance), wired into `.test/` (MLflow + GEPA). Test prompts must read like real chat (no table/column names); output column names encode units, not provenance — anti-leakage.
-- **Contract tests** guard "what the context looks like": prompt shape snapshot (protecting the cache prefix), budget-truncation records, schema gate, read-only bypass attempts, release-pinned (including file paths), MECE two-level check (fail = same measure name with differing expressions; warn = glossary/file divergence), pointer compliance.
-- **Evals as telemetry**: every run lands in a warehouse table (skill version / git SHA / model id / tokens / wall clock), catching slow regressions a single CI run can't see (Anthropic measured 95%→65%/month accuracy decay without maintenance). **Per-domain go-live gate**: no availability announcement to stakeholders until the domain clears the ~90% threshold.
-- **Ablation discipline**: every meaningful prompt/skill change gets a before/after comparison run; keep a "what didn't work" list (negative results prevent re-running the same experiment).
+| `loading_behavior` | Meaning | Budget / Telemetry Rule |
+|---|---|---|
+| `resident_platform` | Platform prompt or mechanism text present before project assembly | Measure from the actual request payload; protect stable prefix |
+| `tool_schema` | Tool schema serialized by the SDK | Measure schema tokens from actual model requests |
+| `compiled_core` | Small, stable, universally relevant project content rendered before execution | Budget and cache-prefix test as prompt content |
+| `compiled_summary` | Compact project summary rendered before execution | Budget as prompt content; track dropped fields |
+| `on_demand_file` | Project file read during execution when routing requires it | Measure file-read count, tokens, latency, and pointer compliance |
+| `retrieved` | Retrieval result from an index or external knowledge surface | Measure hit rate, tokens, latency, and citation quality |
+| `warehouse_object` | Governed warehouse table, view, or Metric View used as source | Measure freshness/status and downstream query cost |
+| `metadata_inspection` | Runtime schema, lineage, or catalog inspection | Measure tool calls, latency, and avoided wrong-source failures |
+| `warehouse_query` | Analytical SQL or Metric View query execution | Measure query cost, result shape, row count, and validation outcome |
+| `history_memory` | Prior-turn, project, or user memory loaded for the turn | Measure scope, freshness, token cost, and correction value |
+| `runtime_observed` | Evidence produced during the run, before final response | Record for validation; not a pre-run prompt budget |
+| `final_disclosure` | Evidence surfaced in the answer or footer | Measure output tokens and provenance completeness |
+| `telemetry` | Append-only trace, eval, or monitoring record | Used to tune budgets; not prompt content by default |
+| `eval_only` | Asset used only by offline evals or scoring | Versioned later; measured outside normal user-run prompt budget |
 
-**Online (adopted per traffic and evidence)**:
+### 2.5 Compile Vs. On-Demand
 
-- **Provenance footer**: source tier · validation status · owner, all fields derived from trace/settings, model-self-reported confidence forbidden — one of the few mitigations for silent failure.
-- **Passive monitoring**: share of queries resolved via the semantic layer, share of replies containing corrective phrasing — contingent on sufficient traffic; low-traffic projects rely on offline evals + the compliance signal first.
-- **Adversarial-review sub-agent**: Anthropic quantified +6% accuracy / +32% tokens / +72% latency — a tunable cost knob, enabled per domain after evidence gating.
+The compiled core is the small set of `compiled_core` Context Assets that
+protect the correctness happy path:
 
-## 9. Knowledge lifecycle
+- validated MVs' `full_name`, status, grain, measures, and dimensions;
+- metric-view-first policy;
+- pre-rebutted reasons not to bail early to raw SQL;
+- date/period conventions.
 
-- **Two-tier knowledge**: curated (human-written facts: schemas, definitions, rules) and discovered (pitfalls hit at runtime, validated queries) are stored and evolved separately.
-- **Write-back loop**: validated queries / definition corrections are written back into project knowledge, with read-only + single-statement validation; **distill over raw retrieval** — dumping raw queries for the model to read directly bought <1% improvement (the bottleneck is structure, not access), so write-backs must be distilled into structured reference fragments.
-- **Global/personal scoping + explicit confirmation**: project-level canonical corrections and personal preferences are kept apart; saves require user confirmation, so personal definitions never pollute the project's canonical layer.
-- **Red line**: write-backs may only contain validated queries and documentation descriptions — **never new measure/dimension definitions** (principle 10).
-- **Maintenance as first-class engineering**: reference docs/skills are colocated in the same repo as the transform code (the PR that changes the model is the PR that updates its docs); a code-review hook flags diffs that "changed a reporting model without touching its skill/reference file"; correction harvesting periodically scans conversation phrasing and drafts fix PRs, with the repair path deliberately kept "boring".
-- **Code-derived semantics**: a table's true meaning lives in the pipeline code that produces it — an offline process can crawl transform code (SDP/DLT, dbt, notebooks) to derive **draft docs** for grain/primary keys/freshness/sibling tables, then hand them to humans for verification.
-- **Restraint**: don't over-build infrastructure to compensate for today's model weaknesses — those investments become redundant as models improve. The starter recipe: a few canonical datasets + a few dozen offline evals + one thin knowledge layer.
+The long tail is stored behind project-file pointers:
 
-## 10. Evolution roadmap and external references
+- full business terms;
+- caveats and interpretation notes;
+- gotchas, renamed products, internal abbreviations, and required filters;
+- sample queries;
+- detailed requirements and readiness notes;
+- detailed metric context.
 
+Long-tail files should be organized as cohesive domain modules such as user
+growth, monetization, activation, or support operations. The Knowledge Router
+selects modules; execution reads the selected assets. A run should not load the
+whole project knowledge graph because a single term is ambiguous.
+
+### 2.6 Readiness Invariants
+
+A Context Asset Pack is ready only when these invariants hold:
+
+- every launched question family maps to required Context Assets;
+- every metric has exactly one canonical definition and owner;
+- every asset has declared `asset_type`, `loading_behavior`, and `scope`;
+- new or changed assets carry a `defense_claim`;
+- every fallback path has an explicit disclosure policy;
+- every on-demand pointer resolves or degrades in a defined way;
+- LLM-optimized reference docs exist for launched domains with known gotchas and
+  business terminology;
+- runtime traces can show which files, schemas, and queries were used;
+- eval coverage exists for the launched tier.
+
+## 3. Workflow
+
+The workflow is the agent's operating model for producing a correct answer. It
+has four stages: route, execute, validate, disclose.
+
+### 3.1 Routing: Find The Right Entity
+
+Routing is the primary defense against concept/entity ambiguity. It answers:
+which business concept is the user asking about, which canonical metric/entity
+represents it, and which source should be used?
+
+Routing must happen before analytical execution. The agent should not start
+writing SQL while the target metric, entity, grain, or source tier is still
+ambiguous.
+
+The basic routing mechanism is the **Knowledge Router**. Its job is to narrow
+the search space, not scan every schema or every project file. It maps intent to
+a small set of domain assets such as business context, table index, semantic
+definitions, known caveats, and reusable analysis patterns. Execution then reads
+the selected assets if needed.
+
+The routing contract has five steps:
+
+1. **Classify the question family.**
+   KPI, aggregate, ranking, trend, comparison, reconciliation, drill-down,
+   validation, exploratory, or unsupported.
+2. **Extract concepts and constraints.**
+   Business terms, requested period, role/scope, dimensions, filters, comparison
+   target, denominator, and grain.
+3. **Resolve concepts to canonical entities.**
+   Map business terms to governed Metric View measures/dimensions or approved
+   raw paths. If several non-conflicting candidates exist, prefer the one whose
+   owner-approved definition, grain, required dimensions, and validation status
+   match the question.
+4. **Identify required Context Assets.**
+   Add required `on_demand_file`, `business_context`, `semantic_truth`, or
+   `analyst_workflow` assets to the load plan.
+5. **Emit a routing decision.**
+   Name the selected source, metric/entity, grain, validation status, required
+   assets, on-demand pointers, analysis pattern when known, and fallback reason
+   if applicable.
+
+Default source priority:
+
+1. certified/validated Metric View that covers the question;
+2. accepted candidate Metric View with fallback disclosure;
+3. approved raw path for a question family not covered by Metric Views;
+4. exploratory raw SQL only with explicit fallback status and reason.
+
+Raw tables are valid for validation, row-level drill-down, and questions not
+covered by Metric Views. They are not a shortcut around an available governed
+Metric View.
+
+The routing decision should be traceable. A typical decision record is:
+
+```text
+question_family: KPI | drill_down | validation | exploratory | ...
+business_terms: [...]
+selected_source_tier: metric_view | candidate_metric_view | approved_raw | exploratory_raw
+selected_entity: <metric view / measure / dimension / raw path>
+grain: <declared answer grain>
+validation_status: certified | validated | candidate | stale | missing
+required_assets: [...]
+required_project_files: [...]
+analysis_pattern: null | retention | funnel | cohort | rate_decomposition | reconciliation | ...
+fallback_reason: null | <reason>
 ```
-v0.3.5  Distribution scenario assets (requirements / gap / readiness / MV validation)
-v0.3.6  Explicit ContextAssembler + six layers + testable budgets + downsinking/pointers
-        + eval baseline + contract tests
-v0.4    Golden Analysis Cases (canonical path / answer contract / fast-path routing)
-        + evidence-gated additions: requirement matcher, query_metric_view, LLM intent fallback
-v0.4+   Graduation items: embedding retrieval (triggered past the 100-table hard cap),
-        JIT tool exposure, sliding-window history
-```
 
-The v0.3.6 abstractions reserve interface shapes for v0.4 (hit-object schema, golden_case slot, eval extension fields) but contain **no golden-case-specific logic**.
+Basic observability requires a `routing_decision` trace record and file-read
+records for required on-demand assets. Exact event schemas belong in
+implementation plans, not this top-level design.
 
-External reference quick table (details in [`../refer/`](../refer/)):
+### 3.2 Execution: Follow A Senior-Analyst SOP
 
-| Source | What we adopt |
+Execution answers: once the right entity is selected, how does the agent perform
+the analysis without making avoidable mistakes?
+
+The senior-analyst SOP is a family of `analyst_workflow` Context Assets. It
+should guide the agent through:
+
+1. start from the routing decision;
+2. maintain a visible plan;
+3. load required Context Assets;
+4. clarify missing constraints when no documented default exists;
+5. acquire source and schema evidence;
+6. apply analytical conventions;
+7. execute the query or Metric View path;
+8. inspect suspicious outputs before concluding;
+9. prepare the evidence package for validation and disclosure.
+
+Important execution conventions:
+
+- use the semantic path when a validated Metric View covers the question;
+- inspect schema before SQL fallback paths;
+- apply date/period rules explicitly;
+- apply denominator, safe division, filter, and grain constraints explicitly;
+- re-check suspicious results such as 0 rows, null spikes, unexpected grain
+  changes, or implausible adjacent-period jumps.
+
+Adversarial SQL review is not part of the basic always-on workflow. It can be
+introduced later for high-stakes domains if evals show that the correctness gain
+justifies the token and latency cost.
+
+### 3.3 Validation: Check Before Returning
+
+Runtime validation should include:
+
+- schema inspection evidence;
+- executed SQL or Metric View query;
+- row counts and result shape;
+- checks for suspicious result patterns;
+- validation status from settings or project metadata;
+- trace metadata sufficient to reproduce the answer path.
+
+Direct SQL oracles are eval assets, not ordinary runtime validators. A runtime
+validator may check source tier, grain, row count, result shape, denominator
+sanity, freshness, or limited invariants. If a validation query is the trusted
+canonical calculation, it should become the answer path rather than remain a
+hidden oracle.
+
+For high-stakes paths, successful query execution is not enough. The agent must
+verify that the result matches the intended grain, filters, period window, and
+source tier.
+
+### 3.4 Disclosure
+
+Every concluding answer should separate:
+
+- **raw data**: the actual rows, aggregates, or chart-ready result used;
+- **metadata**: source tier, validation status, owner, freshness if measured,
+  executed query reference, and fallback status;
+- **visualization**: chart or table when it helps compare values, trends, or
+  distributions;
+- **interpretation**: what the result suggests, separated from what the data
+  directly shows.
+
+Every answer should include a provenance signature in the footer. It should make
+the confidence tier legible: semantic layer / Metric View, approved raw path, or
+exploratory raw table; validation status; freshness where known; owner; and
+fallback reason.
+
+Fallback answers must disclose status and reason before the answer. A false
+footer is worse than a missing footer and should be treated as a product bug.
+
+### 3.5 Safety Boundaries
+
+Safety is related to correctness but not the same thing. A numerically correct
+answer can still be unsafe if it overclaims authorization, hides fallback status,
+leaks draft content, mutates data, or invites overtrust.
+
+Required boundaries:
+
+- preview/read-only runs need tool trimming and SQL allowlist guards;
+- bypass attempts via comments, casing, leading whitespace, and multi-statement
+  SQL need tests;
+- pass-through auth prevents the agent from exceeding the user's Databricks
+  permissions, but does not create product-level row-scope semantics;
+- high-stakes tiers need a human sign-off path.
+
+## 4. Evals And Measurement
+
+Evals are the product's correctness instrument. They decide when a domain can
+launch, when a tier must stay dark, and when a launched tier needs repair.
+
+### 4.1 Data-Correctness Evals
+
+The eval baseline must exist before any prompt-content change.
+
+Each eval case should follow this shape:
+
+1. natural-language user prompt, written like real chat and without table/column leakage;
+2. agent answer extracted into structured data;
+3. ground-truth SQL executed on a fixed eval dataset;
+4. row-by-row diff with normalized ordering and numeric tolerance;
+5. trace metadata: model id, tokens, latency, tool calls, file reads, and source
+   tier.
+
+The suite must include enough cases to cover P0/P1 question families and a
+multi-turn slice long enough to exercise history and pointer compliance.
+
+Offline evals should run for material prompt, Context Asset, routing, or
+workflow changes. Treat the agent as a black-box model under regression test:
+fixed prompts, fixed data, fixed expected outputs, and trace comparison.
+
+### 4.2 Contract Tests
+
+Contract tests guard the system shape:
+
+- prompt-shape regression test;
+- context rendering;
+- budget and truncation records;
+- schema gate;
+- read-only bypass attempts;
+- MECE fail/warn behavior;
+- pointer compliance;
+- history/compaction survival;
+- footer parsing and trace comparison.
+
+### 4.3 Launch Readiness
+
+Launch gates are per domain and per stakes tier. Initial targets:
+
+| Tier | Example Use | Initial Target |
+|---|---|---|
+| Headline KPI | Executive or operational KPI answers | >=98% data-correctness pass rate on a sufficiently covered eval slice |
+| Exploratory / drill-down | Analysis follow-up, diagnostic exploration | >=90% data-correctness pass rate on a sufficiently covered eval slice |
+
+Before a gate is used, the implementation plan must define the denominator,
+allowed failures, required family coverage, decision window, and owner. This
+top-level document does not prescribe a full gate schema.
+
+### 4.4 Regression And Going Dark
+
+Go-live gates work in both directions. A sustained telemetry breach should
+trigger a runbook:
+
+1. notify the domain owner;
+2. classify failures by failure mode and defense line;
+3. pause risky prompt/skill changes for that domain if needed;
+4. downgrade validation status in the answer footer if needed;
+5. repair through the relevant Context Asset, workflow step, or assembly
+   mechanism;
+6. de-announce the affected tier if not repaired within the agreed window.
+
+Detection without response is not a defense.
+
+## 5. Context Building Mechanism
+
+The context-building mechanism ensures the right context enters the model at the
+right time, in the right form, with controlled cost and speed.
+
+### 5.1 Explicit Context Assembler
+
+The basic design introduces `ContextAssembler` under `server/services/context/`.
+
+Responsibilities:
+
+- collect pre-run Context Assets whose `loading_behavior` is
+  `resident_platform`, `compiled_core`, or `compiled_summary`;
+- expose pointers and records for `on_demand_file` and `retrieved` assets that
+  routing or execution may load later;
+- expose `runtime_observed`, `history_memory`, and `telemetry` assets without
+  pretending all runtime content is pre-assembled;
+- produce structured `AssembledContext`;
+- record usage and dropped fields by `asset_type`, `loading_behavior`, and
+  `scope`;
+- keep prompt preview and runtime prompt on the same path;
+- protect stable prefixes through prompt-shape regression tests.
+
+This replaces bare string concatenation with an object that can be tested,
+budgeted, and compared across runs.
+
+### 5.2 Compile Vs. Retrieve
+
+Prompt-content loading rule:
+
+| Content Shape | `loading_behavior` | Reason |
+|---|---|---|
+| Small + stable + universally relevant | `compiled_core` or `compiled_summary` | Protects the happy path and cache prefix |
+| Large + conditional + growing | `on_demand_file` | Reduces attention dilution |
+| Very large or cross-domain | `retrieved` | File orchestration no longer scales |
+
+Moving long-tail content behind `on_demand_file` pointers is justified by
+correctness and attention, not by prompt size alone. Under prompt caching, stable
+compiled content can be cheap after the first run. JIT reads cost extra tool
+turns, full-price input tokens, latency, and history repetition.
+
+### 5.3 Token Economics
+
+Cost and speed are two sides of the same token-economics problem. The product
+should evaluate correctness per unit of:
+
+- input and output tokens;
+- wall-clock latency;
+- `tool_call_count`;
+- file-read count;
+- schema exploration count;
+- warehouse query cost where available.
+
+High tool-call count often means the context was insufficient. High file-read
+count may mean the on-demand strategy is hurting latency or repeated billing.
+These signals should be judged alongside answer correctness.
+
+### 5.4 Tool Schema Surface
+
+Tool schemas are `platform_mechanism` Context Assets outside assembled prompt
+text. The SDK serializes every enabled tool's schema into context every turn,
+even when the tool is not called.
+
+Skill selection is therefore a CE lever:
+
+- analysis projects should not enable heavy UC/jobs/vector-search tool surfaces
+  by default;
+- the target is fewer distinct tools in context, not larger multiplexed tools;
+- schema footprint should be measured from the actual model request payload.
+
+### 5.5 Budget Policies And Truncation
+
+Every meaningful `asset_type` / `loading_behavior` combination needs an explicit
+budget policy and telemetry. The initial cap is a hypothesis, not a guessed
+contract. It should become a gate only after before/after evals show that it
+improves correctness, latency, or cost without creating new failure modes.
+
+Budget tuning should follow a measurement loop:
+
+1. instrument actual tokens, tool calls, file reads, latency, and query cost;
+2. establish a baseline on representative eval slices;
+3. propose a cap or loading change for a specific combination;
+4. rerun the fixed eval slice and inspect failure-mode changes;
+5. keep the policy only when the correctness/cost/speed tradeoff is better;
+6. record dropped fields in `AssembledContext.dropped` for every capped run.
+
+Silent truncation is forbidden.
+
+When content hits a cap, the preferred repair is:
+
+1. reduce duplication;
+2. move long-tail content behind an `on_demand_file` pointer;
+3. improve retrieval/routing;
+4. truncate only as a fallback, with observability.
+
+### 5.6 Scope Graduation
+
+Scope discipline is a correctness and economics lever:
+
+- <=20 tables/MVs is the ideal project shape;
+- <=100 is the hard cap for file orchestration;
+- beyond the cap, the product should move to offline aggregation + embedding
+  retrieval instead of adding more `compiled_core` or `on_demand_file` assets.
+
+## 6. Knowledge Lifecycle
+
+Knowledge lifecycle answers: how do we create, validate, publish, maintain, and
+retire Context Assets?
+
+### 6.1 Asset Creation
+
+New-domain onboarding creates the initial asset set:
+
+1. map P0/P1 question families;
+2. identify candidate tables and Metric Views;
+3. validate or create `semantic_truth` assets;
+4. assign owners for metrics and data sources;
+5. write business terms, caveats, date conventions, and fallback policy;
+6. author eval cases with ground-truth SQL;
+7. publish settings and on-demand reference files into the project asset pack.
+
+Track onboarding cost:
+
+- elapsed time from request to first launchable tier;
+- human hours by role;
+- number of P0/P1 question families covered;
+- unresolved asset gaps;
+- eval cases authored and maintained.
+
+### 6.2 Human Ownership
+
+Each launched domain needs named owners:
+
+- data owner for source and freshness questions;
+- metric owner for canonical definitions;
+- product owner for launch tier, threshold, and user-facing availability;
+- evaluation owner for ground-truth case quality and telemetry review.
+
+Metric definitions, validation status, and go-live decisions should not be
+anonymous.
+
+### 6.3 Code-Derived Draft Docs
+
+The primary cost-reduction lever is code-derived draft documentation. An offline
+process can crawl the transform code that produces a table and draft:
+
+- grain;
+- primary keys;
+- freshness;
+- source objects;
+- sibling tables;
+- caveats;
+- example filters.
+
+Humans verify the draft. The process drafts documentation only; it does not
+generate metric definitions.
+
+### 6.4 Curated And Discovered Knowledge
+
+Knowledge is split into two categories:
+
+- **Curated knowledge**: human-written schemas, definitions, caveats, policies,
+  and validated Context Assets.
+- **Discovered knowledge**: runtime learnings such as validated queries,
+  recurring pitfalls, and user corrections.
+
+Write-backs must be distilled into structured reference fragments, not raw query
+logs. Project-level canonical corrections and personal preferences must be kept
+separate, and saves require explicit confirmation.
+
+### 6.5 Maintenance Loop
+
+Reference docs, skills, and `on_demand_file` Context Assets should be colocated
+with the transform code and dbt/Spark models they describe. Prompt and skill
+assets are code: they need review, tests, owners, and change history.
+
+CI should flag any change to a reporting model, Metric View, or governed table
+that does not touch the corresponding agent reference asset in the same PR. The
+default action is to block the launch or require an explicit waiver from the
+domain owner. This keeps agent knowledge fresh at the same point the underlying
+data contract changes.
+
+Correction harvesting should draft PRs from repeated user corrections and feed
+the same cases back into evals.
+
+Readiness rots. The telemetry curve is the evidence that a domain is still
+ready.
+
+## 7. Iteration Model
+
+The system should evolve through measured iterations, not through accumulated
+prompt complexity.
+
+### 7.1 Measure Before Changing
+
+Any change that affects what enters context needs a data-correctness baseline
+first. Manual smoke tests are useful for debugging, but they do not replace the
+baseline.
+
+Changes that require before/after comparison:
+
+- prompt content changes;
+- new or removed `on_demand_file` assets;
+- budget, truncation, or loading-policy changes;
+- routing/matcher changes;
+- tool-surface changes;
+- new retrieval mechanism;
+- adversarial-review sub-agent;
+- golden-case execution changes.
+
+### 7.2 Evidence-Gated Mechanisms
+
+Complexity is added only after evals show the gap or benefit.
+
+| Mechanism | Build When |
 |---|---|
-| [nao](../refer/nao-context-engineering.md) | CE as a measurable discipline (incl. query-execution cost); thin prompt + orchestrated file reads; MECE; data-correctness evals + `tool_call_count`; scope discipline ≤20/≤100; evidence-gated semantic layer |
-| [dash](../refer/dash-context-engineering.md) | Compile-vs-retrieve split; curated/discovered two-tier memory + write-back loop; resource-layer enforcement over prompt text; evals as contracts |
-| [anthropic](../refer/how-anthropic-enables-self-service-data-analytics-with-claude.md) | The three-failure-mode taxonomy; two negative results (LLM-generated definitions net-negative, raw retrieval <1%); skill drift + colocation/hook maintenance; evals-as-telemetry + go-live gate; provenance footer; quantified adversarial-review cost |
-| [openai](../refer/Inside%20OpenAI’s%20in-house%20data%20agent.md) | Code-derived table semantics; over-prescription degrades results (guardrails not recipes); RAG-at-scale graduation path; tool consolidation; self-correction triggers; global/personal memory scoping + explicit saves |
+| Dedicated Knowledge Router matcher | Pointer non-compliance exceeds the threshold for the model-reasoning router |
+| LLM intent fallback for golden-case matching | Deterministic trigger matching misses real paraphrases of covered question families |
+| Dedicated `query_metric_view` tool | Hand-written MV SQL errors are material at eval time |
+| Adversarial SQL review | Reasoning/verification failures dominate a domain's misses and cost is acceptable |
+| Budget cap or truncation rule | Telemetry shows a combination is expensive or attention-diluting, and ablation improves correctness/cost/speed |
+| Embedding retrieval | Project scope exceeds the file-orchestration hard cap |
+| Sliding-window history | Multi-turn evals show history or memory compression causes regressions |
 
-> One-sentence summary: **turn "what enters the context" into an engineered object with budgets, layers, and tests; let the compiled core guard the accuracy happy path while the long tail is read on demand with verified compliance; evidence-gate every incremental mechanism; and fight the three failure modes with data-correctness evals and maintenance processes.**
+### 7.3 Future Versions
+
+The following topics are intentionally out of scope for the basic CE design and
+belong in future versioned designs or action plans:
+
+- full asset manifests;
+- context versioning and release-pinned reads;
+- frozen project file snapshots;
+- deterministic golden-case execution paths;
+- production role/scope enforcement;
+- richer launch-gate schemas;
+- dedicated Metric View query tools;
+- embedding retrieval beyond the file-orchestration cap;
+- sliding-window history and advanced memory compaction.
+
+## 8. Appendix
+
+### 8.1 Defense Lines
+
+Correctness comes from five stacked defense lines:
+
+| # | Defense Line | Mechanisms | Primary Target |
+|---|---|---|---|
+| 1 | Context Assets | Data foundations, validated Metric Views, MECE definitions, human-owned metric definitions, business context, scope discipline | Knowledge precondition for ambiguity reduction, freshness, and retrieval |
+| 2 | Routing | Entity resolution, metric-view-first source selection, knowledge-router/on-demand pointers, `project_files_read` compliance | Concept/entity ambiguity and retrieval failure |
+| 3 | Execution | Schema gate, date/period conventions, suspicious-result self-checks | Wrong operation on right entities |
+| 4 | Disclosure | Provenance footer, fallback reason, source tier, validation status, owner | Silent failure mitigation |
+| 5 | Measurement | Data-correctness evals, per-stakes launch gates, telemetry, regression runbook | Staleness and system regression |
+
+### 8.2 Cross-Cutting Principles
+
+1. **Every token has a purpose.** More context is not better; irrelevant context
+   wastes budget and dilutes attention.
+2. **Cache-friendliness first.** Stable prefix up front, volatile content late.
+3. **Tool state over prompt text.** Constraints should be enforced by state,
+   gates, and tools; prompt text explains them.
+4. **Thin prompt is an attention strategy, not a cost strategy.** Prompt caching
+   changes the economics; JIT reads can cost more over a session.
+5. **Cost is three-dimensional.** Reliability, latency, and token/query cost
+   must be evaluated together.
+6. **MECE definitions.** One canonical definition per metric; conflicts must be
+   detectable.
+7. **Guardrails, not recipes.** Encode constraints and facts; avoid brittle
+   step lists in prompt rendering.
+8. **Evidence gating.** Add complexity only after evals quantify the gap or
+   benefit.
+9. **Measure before changing.** Prompt-content changes need a correctness
+   baseline first.
+10. **Humans own metric definitions.** LLMs may draft documentation, not metric
+    truth.
+
+### 8.3 External Reference Summary
+
+| Source | What We Adopt |
+|---|---|
+| [nao](../refer/nao-context-engineering.md) | CE as measurable discipline, token/query cost, thin prompt + orchestrated reads, MECE, data-correctness evals, scope discipline |
+| [dash](../refer/dash-context-engineering.md) | Compile-vs-retrieve split, curated/discovered memory, write-back loop, resource enforcement, evals as contracts |
+| [anthropic](../refer/how-anthropic-enables-self-service-data-analytics-with-claude.md) | Data-foundation/source-of-truth/skill/validation stack, failure-mode taxonomy, knowledge/unbook skill pattern, maintenance loop, evals-as-telemetry, provenance footer, adversarial review cost |
+| [openai](../refer/Inside%20OpenAI’s%20in-house%20data%20agent.md) | Multi-source data context, table usage, human annotations, code enrichment, institutional knowledge, memory, runtime evidence, RAG-at-scale graduation path, tool consolidation, self-correction triggers |
+
+### 8.4 Design Provenance
+
+The target Context Asset model combines three inputs:
+
+- the multi-source context model from OpenAI-style data-agent design;
+- the data-foundation/source-of-truth/skill discipline from Anthropic-style
+  analytics deployments;
+- the current builder-app-oai implementation and the v0.3.6 target design.
+
+Current implementation note: context is still spread across system prompt,
+project settings rendering, skills guidance, operating guide, runtime state, and
+SDK session history. The basic CE direction is to consolidate this into a
+structured Context Asset assembly path.
