@@ -26,9 +26,12 @@ needed to build and evaluate a reliable self-service analytics agent.
 | Document | Role |
 |---|---|
 | This document | Basic product and architecture decision record for Context Engineering |
-| [`v0.3.6/gap-analysis.md`](./v0.3.6/gap-analysis.md) | As-is baseline: context sources, prompting, workflow, history |
-| [`v0.3.6/design.md`](./v0.3.6/design.md) | Implementation-level target design and tasks for the next build slice |
-| [`v0.3.6/action-plan.md`](./v0.3.6/action-plan.md) | P1-P4 implementation tasks and acceptance gates |
+| [`v0.3.6/gap-analysis.md`](./v0.3.6/gap-analysis.md) | Routing-first as-is baseline: route assets, source selection, file pointers |
+| [`v0.3.6/design.md`](./v0.3.6/design.md) | Routing Context Asset Pack, Knowledge Router contract, route handoff |
+| [`v0.3.6/action-plan.md`](./v0.3.6/action-plan.md) | Routing implementation tasks and acceptance gates |
+| [`v0.3.7/gap-analysis.md`](./v0.3.7/gap-analysis.md) | Execution-first as-is baseline: SOP, query execution, evidence, validation |
+| [`v0.3.7/design.md`](./v0.3.7/design.md) | Execution Context Assets, runtime evidence, provenance, execution evals |
+| [`v0.3.7/action-plan.md`](./v0.3.7/action-plan.md) | Execution implementation tasks and acceptance gates |
 | [`v0.4-golden-analysis-cases/`](./v0.4-golden-analysis-cases/) | Future golden-case work |
 | [`../refer/`](../refer/) | External practice references: nao, dash, anthropic, openai |
 
@@ -759,7 +762,7 @@ The target Context Asset model combines three inputs:
 - the multi-source context model from OpenAI-style data-agent design;
 - the data-foundation/source-of-truth/skill discipline from Anthropic-style
   analytics deployments;
-- the current builder-app-oai implementation and the v0.3.6 target design.
+- the current builder-app-oai implementation and the v0.3.6/v0.3.7 target designs.
 
 Current implementation note: context is still spread across system prompt,
 project settings rendering, skills guidance, operating guide, runtime state, and

@@ -18,6 +18,8 @@ progress tracking.
 | `v0.2-business-analysis/` | Analyst pilot track for project settings, analysis notes, and read-only analysis runs. |
 | `v0.3-visual-storytelling/` | Visual narrative track for chart evidence, story conclusions, and shareable analysis output. |
 | `v0.3.5-metric-view-context-engineering/` | Scenario-onboarding and semantic-layer track for deriving analysis requirements, gap-analyzing Databricks assets, and validating Metric Views. |
+| `v0.3.6/` | Context Engineering routing track for routing assets, Knowledge Router decisions, file pointers, and route evals. |
+| `v0.3.7/` | Context Engineering execution track for SOP assets, query execution checks, runtime evidence, provenance, and data-correctness evals. |
 | `v0.4-golden-analysis-cases/` | Golden-case track for canonical question paths that consume the validated Metric View layer. |
 
 ## Versioned Progress Tracks
