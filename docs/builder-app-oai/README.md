@@ -20,7 +20,8 @@ progress tracking.
 | `v0.3.5-metric-view-context-engineering/` | Scenario-onboarding and semantic-layer track for deriving analysis requirements, gap-analyzing Databricks assets, and validating Metric Views. |
 | `v0.3.6/` | Context Engineering routing track for routing assets, Knowledge Router decisions, file pointers, and route evals. |
 | `v0.3.7/` | Context Engineering execution track for SOP assets, query execution checks, runtime evidence, provenance, and data-correctness evals. |
-| `v0.4-golden-analysis-cases/` | Golden-case track for canonical question paths that consume the validated Metric View layer. |
+| `v0.4-golden-analysis-cases/` | Eval-first golden-case track for launch gates, oracle-backed data fidelity, and canonical question coverage over validated Metric Views. |
+| `v0.4.1/` | Golden-case-assisted routing/execution track with paired evals for agents with and without golden-case assistance. |
 
 ## Versioned Progress Tracks
 

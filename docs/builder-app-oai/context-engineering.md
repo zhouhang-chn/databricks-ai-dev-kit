@@ -32,7 +32,12 @@ needed to build and evaluate a reliable self-service analytics agent.
 | [`v0.3.7/gap-analysis.md`](./v0.3.7/gap-analysis.md) | Execution-first as-is baseline: SOP, query execution, evidence, validation |
 | [`v0.3.7/design.md`](./v0.3.7/design.md) | Execution Context Assets, runtime evidence, provenance, execution evals |
 | [`v0.3.7/action-plan.md`](./v0.3.7/action-plan.md) | Execution implementation tasks and acceptance gates |
-| [`v0.4-golden-analysis-cases/`](./v0.4-golden-analysis-cases/) | Future golden-case work |
+| [`v0.4-golden-analysis-cases/gap-analysis.md`](./v0.4-golden-analysis-cases/gap-analysis.md) | Eval-first baseline for golden-case Context Assets |
+| [`v0.4-golden-analysis-cases/design.md`](./v0.4-golden-analysis-cases/design.md) | Golden cases as `control_plane` assets for route/execution/data/disclosure evals |
+| [`v0.4-golden-analysis-cases/action-plan.md`](./v0.4-golden-analysis-cases/action-plan.md) | Golden-case eval implementation tasks and launch gates |
+| [`v0.4.1/gap-analysis.md`](./v0.4.1/gap-analysis.md) | Gap analysis for using golden cases to assist routing and execution |
+| [`v0.4.1/design.md`](./v0.4.1/design.md) | Runtime-safe golden-case assistance and paired eval variants |
+| [`v0.4.1/action-plan.md`](./v0.4.1/action-plan.md) | Assisted-routing/execution implementation tasks and gates |
 | [`../refer/`](../refer/) | External practice references: nao, dash, anthropic, openai |
 
 ## 1. Problem Definition
@@ -443,7 +448,99 @@ Contract tests guard the system shape:
 - history/compaction survival;
 - footer parsing and trace comparison.
 
-### 4.3 Launch Readiness
+### 4.3 Golden Analysis Cases
+
+Golden Analysis Cases are `control_plane` Context Assets for high-value,
+recurring question families. They bind routing expectations, execution
+expectations, oracle queries or snapshots, answer contracts, disclosure checks,
+safety checks, and launch gates into one reviewed eval asset.
+
+They are eval-first by default:
+
+- full prompts, oracle SQL, expected rows, scoring rules, and answer contracts
+  use `eval_only` loading behavior;
+- normal user runs should not receive oracle SQL or expected answers in prompt
+  context;
+- compact launch summaries may use `compiled_summary` when the product needs to
+  advertise covered question families;
+- every run against a golden case should emit trace metadata that can be joined
+  to eval results: case id, prompt id, route id, execution evidence id, query
+  refs, model id, git SHA, context asset version, tokens, latency, tool calls,
+  and file reads.
+
+Golden cases consume earlier defense lines:
+
+1. v0.3.6 routing evals compare actual `routing_decision` with the golden
+   case's route expectation.
+2. v0.3.7 execution evals compare `execution_evidence` with the golden case's
+   execution expectation.
+3. v0.4 data-fidelity evals compare structured outputs with reviewed oracles
+   under exact or tolerant assertions.
+4. Disclosure and safety evals verify provenance footer consistency, fallback
+   status, required caveats, read-only behavior, and absence of security
+   overclaims.
+
+Direct SQL oracles are control-plane assets, not hidden runtime validators. If
+the direct SQL path is the trusted answer path, the case should be classified as
+approved raw rather than Metric View-backed. Otherwise, direct SQL remains an
+eval oracle, drill-down source, or explicit fallback.
+
+### 4.4 Golden-Case-Assisted Routing And Execution
+
+After a golden case is active as an eval asset, a runtime-safe projection may be
+used to assist routing and execution. This projection is not the full golden
+case. It may include case id, launch status, selected source tier, selected
+semantic source, required files, expected grain, required filters, fallback
+policy, required caveats, and forbidden claims. It must not include oracle SQL,
+expected answer values, hidden negative cases, or answer-revealing scoring
+rules.
+
+Assistance is explicit and measurable:
+
+- `disabled`: ignore golden cases at runtime;
+- `shadow`: match and log would-have-assisted cases without exposing hints;
+- `route_only`: use case hints to shape `routing_decision` and file pointers;
+- `route_and_execution`: also use query/grain/filter/fallback hints in the
+  `execution_contract`.
+
+Every assisted run should record assist metadata in `routing_decision` and
+`execution_evidence`: case id, assist mode, confidence, accepted hints, ignored
+hints, contradicted hints, and fallback-policy result.
+
+Evals must support paired variants so the same suite can run against the same
+agent with golden-case assistance disabled and enabled:
+
+```yaml
+eval_run:
+  agent_variants:
+    - id: baseline_without_golden_cases
+      golden_case_assistance:
+        mode: disabled
+    - id: with_golden_case_route_only
+      golden_case_assistance:
+        mode: route_only
+    - id: with_golden_case_route_and_execution
+      golden_case_assistance:
+        mode: route_and_execution
+  paired_comparison:
+    enabled: true
+    baseline_variant: baseline_without_golden_cases
+    compare_metrics:
+      - routing_accuracy
+      - data_accuracy
+      - source_tier_compliance
+      - required_file_recall
+      - latency_ms
+      - input_tokens
+      - tool_call_count
+      - file_read_count
+```
+
+Golden-case assistance should be promoted from `shadow` to active modes only
+when paired evals show no accuracy or safety regression and an acceptable
+latency/token/tool-cost tradeoff.
+
+### 4.5 Launch Readiness
 
 Launch gates are per domain and per stakes tier. Initial targets:
 
@@ -453,10 +550,12 @@ Launch gates are per domain and per stakes tier. Initial targets:
 | Exploratory / drill-down | Analysis follow-up, diagnostic exploration | >=90% data-correctness pass rate on a sufficiently covered eval slice |
 
 Before a gate is used, the implementation plan must define the denominator,
-allowed failures, required family coverage, decision window, and owner. This
-top-level document does not prescribe a full gate schema.
+allowed failures, required family coverage, decision window, and owner. Golden
+cases provide the first concrete carrier for those launch-gate details. If
+golden-case assistance is enabled, launch readiness must include paired eval
+results for assisted and unassisted variants.
 
-### 4.4 Regression And Going Dark
+### 4.6 Regression And Going Dark
 
 Go-live gates work in both directions. A sustained telemetry breach should
 trigger a runbook:
@@ -688,6 +787,8 @@ Complexity is added only after evals show the gap or benefit.
 | Mechanism | Build When |
 |---|---|
 | Dedicated Knowledge Router matcher | Pointer non-compliance exceeds the threshold for the model-reasoning router |
+| Golden-case routing assistance | Eval-first golden cases are active and shadow-mode paired evals show route/pointer benefit |
+| Golden-case execution assistance | Route-only assistance is stable and paired evals show source-tier or data-accuracy benefit |
 | LLM intent fallback for golden-case matching | Deterministic trigger matching misses real paraphrases of covered question families |
 | Dedicated `query_metric_view` tool | Hand-written MV SQL errors are material at eval time |
 | Adversarial SQL review | Reasoning/verification failures dominate a domain's misses and cost is acceptable |

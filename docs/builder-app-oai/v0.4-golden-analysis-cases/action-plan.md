@@ -1,360 +1,270 @@
 # v0.4 Golden Analysis Cases Action Plan
 
-## Objective And Release Gates
+Date: 2026-06-11
 
-Objective:
+Objective: implement Golden Analysis Cases as eval-first Context Assets that
+bind v0.3.6 routing expectations and v0.3.7 execution evidence expectations into
+repeatable launch and regression gates.
 
-- Turn recurring, high-value analysis question families into reviewed Golden
-  Analysis Cases that route to certified Metric Views first, validate against
-  direct SQL oracles, and produce repeatable answer stories with measurable
-  quality gates.
+## Release Gates
 
-Release gates:
+1. **Contract gate**: `golden_case` schema supports route expectations,
+   execution expectations, oracle references, answer contracts, assertions,
+   ownership, freshness, and launch gates.
+2. **Asset gate**: each case references required `semantic_truth`,
+   `business_context`, and `control_plane` assets without duplicating metric
+   definitions.
+3. **Routing eval gate**: reviewed prompt variants produce expected
+   `routing_decision` fields and required file reads.
+4. **Execution eval gate**: selected source, query mode, grain, filters,
+   fallback policy, and `execution_evidence` match the case contract.
+5. **Data-fidelity gate**: Metric View result rows match oracle rows within
+   configured tolerances.
+6. **Disclosure gate**: provenance footer is parseable and trace-consistent.
+7. **Safety gate**: user-preview traces expose read-only behavior and do not
+   claim production row-level security.
+8. **Telemetry gate**: each eval run stores case id, model id, git SHA, context
+   version, assertion results, tokens, latency, tool calls, file reads, and
+   query refs.
 
-1. Contract gate: `project_setting.yaml` supports `metric_view_context`,
-   `org_chart_notes`, `user_context`, and `golden_cases` without breaking the
-   existing v0.2/v0.3 project settings shape.
-2. Semantic dependency gate: each metric-oriented golden case declares
-   `metric_view_refs` with required Metric Views, dimensions, measures,
-   readiness status, and fallback policy.
-3. Certification gate: v0.3.5 has certified or explicitly accepted candidate
-   status for the Metric Views referenced by the initial golden cases.
-4. Routing gate: known question variants match the expected case or ask a
-   targeted clarification when required context is missing.
-5. Execution gate: golden paths inspect schema, query Metric Views with
-   explicit dimensions and `MEASURE()`, and use direct SQL only for validation,
-   drill-down, or declared fallback.
-6. Answer-contract gate: completed runs include required fields, caveats,
-   confidence, and recommended next step while avoiding forbidden claims.
-7. Eval gate: each shipped case has routing, plan, query-fidelity,
-   data-fidelity, response-quality, and read-only safety checks.
-8. Distribution seed gate: at least five Distribution golden cases map to
-   MV1-MV3 and direct SQL oracles before broader fraud, profile, and
-   recommendation scenarios are promoted.
+## Workstream A - Golden Case Contract
 
-## Workstreams
+Tasks:
 
-Workstream A: Golden Case Contract
-
-- Add the project-setting schema for:
-  - `metric_view_context`
-  - `org_chart_notes`
-  - `user_context`
-  - `golden_cases`
-- Split golden-case queries into:
-  - `metric_view_queries` for the canonical answer path
-  - `validation_queries` for direct SQL or reconciliation oracles
-- Define readiness states for case execution:
-  - ready
-  - ready_with_candidate_metric_view
-  - blocked_missing_context
-  - blocked_missing_metric_view
-  - blocked_stale_metric_view
-  - fallback_allowed
-- Keep large SQL bodies in settings for the first version. Revisit external
-  query files only if prompt size or editing ergonomics become a real problem.
-
-Workstream B: Metric View Dependency And Readiness
-
-- Resolve `metric_view_refs` against `metric_view_context.metric_views`.
-- Verify required dimensions and measures are present before selecting a case.
-- Enforce required status:
-  - `certified` for production-quality happy paths
-  - `validated` for checked but not fully released paths
-  - `candidate` only when the case explicitly accepts candidate answers
-- Ensure Metric View SQL uses `MEASURE()` and no `SELECT *`.
-- Return readiness failures instead of silently falling back when a certified
-  Metric View is required but unavailable.
-
-Workstream C: Prompt Rendering And Routing
-
-- Render Project Management Context in this order:
-  - analysis notes
-  - org chart notes
-  - user context
-  - Metric View context
-  - bounded golden-case routing summary
-- Keep full SQL out of the initial prompt. Retrieve case details after a case
-  is selected.
-- Classify questions using examples, keywords, intent labels, required
-  entities, audience roles, configured resources, and Metric View readiness.
-- Ask targeted clarifying questions when a near match lacks month, employee,
-  POC, or role context.
-- Fall back visibly to free-form planning only when no case matches or the case
-  explicitly permits fallback.
-
-Workstream D: Golden Path Runtime
-
-- Add a canonical execution policy:
-  - inspect Metric View schema first
-  - run Metric View query
-  - optionally run direct SQL oracle for eval or sampled validation
-  - synthesize via `submit_conclusion`
-- Use SQL over Metric Views until a dedicated `query_metric_view` tool exists.
-- Keep direct SQL available for:
-  - eval oracle
-  - detail drill-down
-  - source-data debugging
-  - explicit fallback policy
-- Mark every result with whether it used certified, validated, candidate, or
-  fallback semantics.
-- Preserve read-only user-preview behavior.
-
-Workstream E: Settings UI
-
-- Expose separate editable surfaces for:
-  - `analysis_notes`
-  - `org_chart_notes`
-  - `user_context`
-  - `metric_view_context`
-  - `golden_cases`
-- Start with YAML/text editing for `golden_cases`.
-- Add validation feedback for missing Metric Views, missing measures, missing
-  dimensions, undeclared parameters, and missing ground-truth queries.
-- Show readiness status for each golden case.
-- Keep structured editing for later once the schema stabilizes.
-
-Workstream F: Evaluation Harness
-
-- Convert golden cases into repeatable eval cases.
-- Score at least these layers:
-  - routing
-  - planning
-  - schema safety
-  - semantic dependency
-  - query fidelity
-  - data fidelity
-  - response quality
-  - read-only safety
-- Store trace IDs, selected case IDs, Metric View query refs, validation query
-  refs, evidence blocks, and response scores.
-- Require exact matches for count fields and configured tolerances for rates.
-
-Workstream G: Distribution Seed
-
-- Treat Distribution as the first end-to-end v0.4 seed.
-- Use the v0.3.5 Distribution context pack as the semantic source:
-  - MV1 `m1_achievement_detail_metrics`
-  - MV2 `m1_poc_achievement_metrics`
-  - MV3 `m1_kpi725_benchmark_metrics`
-- Convert the first five cases into app-readable `golden_cases`:
-  - `distribution_a1_m1_achievement`
-  - `distribution_a5_m1_unachieved_pocs`
-  - `distribution_a2_m2_team_ranking`
-  - `distribution_b3_near_achievement`
-  - `distribution_f3_kpi_scan_reconcile`
-- Keep fraud, recommendation, profile, BEES coverage, and KBD coverage cases
-  deferred until their source outputs and Metric Views are stable.
-
-## Milestone 1: Contract And Docs
-
-Goal:
-
-- Finalize the v0.4 implementation contract before runtime changes.
-
-Scope:
-
-1. Add this action plan.
-2. Keep `design.md` as the source of truth for the golden-case YAML shape.
-3. Keep `distribution-gap-analysis.md` aligned with the v0.3.5 Distribution
-   context pack.
-4. Document that Metric Views are the default happy path and direct SQL is an
-   oracle, drill-down, or declared fallback.
-5. Define the v0.5 boundary for production role resolution and row filtering.
+1. Define the `golden_case` schema in docs and fixtures.
+2. Add fields for `status`, `owner`, `defense_claims`, `coverage`,
+   `prompts`, `required_context_assets`, `route_expectation`,
+   `execution_expectation`, `oracle`, `answer_contract`, `assertions`, and
+   `launch_gate`.
+3. Keep full oracle SQL and expected outputs out of normal prompt rendering.
+4. Define status transitions: `candidate`, `active`, `stale`, `blocked`,
+   `dark`.
+5. Define ownership and freshness requirements for cases and oracle queries.
 
 Acceptance:
 
-- v0.4 docs include design, gap analysis, and action plan.
-- The golden-case schema includes Metric View dependencies and separate
-  validation queries.
-- Distribution guidance no longer treats raw source SQL as the default
-  canonical path for metric-oriented cases.
+- A complete case can be represented without Distribution-specific fields.
+- Metric definitions remain in Metric View context or approved raw-path assets.
+- Oracle assets have owners and freshness policy.
 
-## Milestone 2: Project Setting Schema Extension
+## Workstream B - Eval Asset Loading And Isolation
 
-Goal:
+Tasks:
 
-- Persist the new v0.4 sections in project settings.
-
-Scope:
-
-1. Extend the project-setting parser/model for:
-   - `metric_view_context`
-   - `org_chart_notes`
-   - `user_context`
-   - `golden_cases`
-2. Preserve unknown-field behavior only where it is intentional.
-3. Add normalization for golden-case IDs, query refs, parameters, and readiness
-   status.
-4. Validate that every `metric_view_refs.full_name` exists in
-   `databricks_resources.input_metric_views` or `metric_view_context`.
-5. Validate that every `ground_truth_query_ref` points to a
-   `validation_queries` entry.
+1. Treat full golden cases as `eval_only` assets by default.
+2. Render only compact launch summaries into ordinary prompt context when
+   needed: case id, title, launch tier, covered family.
+3. Ensure eval prompts cannot leak oracle SQL or expected answers into the
+   model input.
+4. Add a fixture layout for project-level golden cases and oracle SQL.
+5. Decide whether the initial carrier is DB settings, project files, or both.
 
 Acceptance:
 
-- Existing project settings still load.
-- Distribution settings with `metric_view_context` load without losing fields.
-- Invalid golden-case references produce actionable validation errors.
-- Unit tests cover minimal, complete, and invalid golden-case payloads.
+- Normal user runs do not include oracle SQL.
+- Eval runs can load full case definitions and oracle SQL.
+- Release-pinned runs use the frozen case version.
 
-## Milestone 3: Prompt Rendering And Case Matching
+## Workstream C - Routing Evals
 
-Goal:
+Tasks:
 
-- Let the Analysis Agent identify when a user question should use a golden
-  path.
-
-Scope:
-
-1. Render `org_chart_notes` below `analysis_notes`.
-2. Render bounded `metric_view_context` before golden cases.
-3. Render a compact golden-case routing summary with case ID, examples,
-   required entities, Metric View refs, and readiness.
-4. Add a matcher that considers examples, keywords, intent, audience role,
-   required entities, configured resources, and Metric View readiness.
-5. Ask targeted clarification when a near match misses required context.
+1. Generate routing eval cases from `golden_cases.prompts`.
+2. Compare actual `routing_decision` with `route_expectation`.
+3. Assert selected case id when case matching exists.
+4. Assert required project-file recall and pointer compliance.
+5. Capture source-tier drift, fallback reason, route latency, and file-read
+   count.
 
 Acceptance:
 
-- Known question variants select the expected case.
-- Missing `yearmonth`, `employee_no`, role, or POC context produces a targeted
-  clarification instead of broad SQL.
-- A stale or missing required Metric View prevents golden-path selection unless
-  the case explicitly allows fallback.
+- Each active case has at least two reviewed prompt variants.
+- Route evals fail when the selected source tier or entity is wrong.
+- Pointer non-compliance is visible by case id.
 
-## Milestone 4: Metric View-First Execution
+## Workstream D - Execution And Evidence Evals
 
-Goal:
+Tasks:
 
-- Execute selected golden paths through Metric Views before source SQL.
-
-Scope:
-
-1. Add runtime policy for canonical path steps:
-   - `inspect_schema`
-   - `query_metric_view`
-   - `validate_sql`
-   - `execute_sql`
-   - `conclude`
-2. Implement `query_metric_view` as either:
-   - a dedicated typed tool, or
-   - generated SQL over Metric Views using `MEASURE()` and explicit dimensions.
-3. Keep schema-before-query for both Metric Views and source tables.
-4. Block `SELECT *` against Metric Views.
-5. Record whether the answer used certified, validated, candidate, or fallback
-   semantics.
+1. Generate execution eval cases from `execution_expectation`.
+2. Compare executed query refs, source tier, query mode, grain, filters, and
+   fallback policy against the case contract.
+3. Assert `execution_evidence` exists and contains route id, source, query refs,
+   row count, result shape, loaded files, validation status, and fallback
+   fields.
+4. Assert suspicious-result checks ran when configured.
+5. Assert read-only safety for user-preview cases.
 
 Acceptance:
 
-- Metric View SQL includes explicit dimensions and `MEASURE()` calls.
-- Direct SQL is not used for the happy path when a required certified Metric
-  View is available.
-- Candidate Metric View runs disclose candidate status.
-- Missing Metric View runs return readiness failure or documented fallback.
+- Metric View-backed cases fail if raw SQL is used without allowed fallback.
+- Cases fail when expected query refs or evidence fields are missing.
+- Read-only safety is evaluated per case, not only by generic unit tests.
 
-## Milestone 5: Golden Case Evaluation
+## Workstream E - Data Fidelity And Oracle Runner
 
-Goal:
+Tasks:
 
-- Make golden-case quality measurable and repeatable.
-
-Scope:
-
-1. Generate eval cases from `golden_cases`.
-2. Add routing evals for reviewed question variants.
-3. Add plan evals that verify the canonical path was followed.
-4. Add query evals that check resources, dimensions, measures, parameters, and
-   `MEASURE()` usage.
-5. Add data-fidelity evals comparing Metric View results to direct SQL oracles.
-6. Add response rubrics for required fields, caveats, confidence, and forbidden
-   claims.
-7. Add read-only safety checks for user-preview runs.
+1. Normalize direct SQL or snapshot oracles as `control_plane` assets.
+2. Execute or load oracle results with fixed parameters.
+3. Extract agent output into structured rows.
+4. Diff rows with normalized ordering and configured numeric tolerances.
+5. Record exact-count, rate-tolerance, null, denominator, and grain assertions.
 
 Acceptance:
 
-- Each shipped golden case has at least one successful trace.
-- Count fields match direct SQL exactly.
-- Rate fields match configured tolerances.
-- No user-preview trace exposes write-capable tools.
-- Answers do not claim v0.5 production row-level security.
+- Count fields can require exact match.
+- Rate fields can use per-field tolerances.
+- Oracle failures mark cases stale or blocked, not silently passing.
 
-## Milestone 6: Settings UI Slice
+## Workstream F - Disclosure And Answer Contract Evals
 
-Goal:
+Tasks:
 
-- Make v0.4 sections editable and understandable in the app.
-
-Scope:
-
-1. Add separate settings fields for `org_chart_notes` and `user_context`.
-2. Show Metric View context and validation status.
-3. Add a YAML/text editor for `golden_cases`.
-4. Add readiness diagnostics per case.
-5. Surface errors for missing Metric Views, dimensions, measures, query refs,
-   and required parameters.
+1. Validate `answer_contract.must_include` and `must_not_include`.
+2. Parse provenance footer and compare it with trace/evidence.
+3. Check required caveats and fallback disclosures.
+4. Check visualization/table requirements when declared.
+5. Check no security overclaim for demo/eval user context.
 
 Acceptance:
 
-- A developer can add or edit a golden case without editing database rows.
-- A project with invalid golden-case references clearly shows blockers.
-- User-preview mode can run against the published or draft case set without
-  exposing edit controls.
+- Footer mismatch is a hard failure.
+- Missing required caveat is a failure for cases that declare one.
+- Role/persona filters are described as eval/demo context unless v0.5 security
+  is implemented.
 
-## Milestone 7: Distribution Seed
+## Workstream G - Telemetry And Launch Gates
 
-Goal:
+Tasks:
 
-- Prove v0.4 with the first Distribution golden-case package.
-
-Scope:
-
-1. Close or explicitly accept v0.3.5 certification status for MV1-MV3.
-2. Add `user_context` and `org_chart_notes` to the Distribution project setting
-   draft.
-3. Add five Distribution golden cases with:
-   - trigger questions
-   - Metric View refs
-   - Metric View query refs
-   - direct SQL validation refs
-   - answer contracts
-   - response rubrics
-4. Run one M1 case, one M2 case, and one KPI reconciliation case.
-5. Capture trace IDs, query output, validation output, evidence blocks, and
-   response scores.
+1. Define eval result row schema:
+   - case id;
+   - prompt id;
+   - case version;
+   - model id;
+   - git SHA;
+   - context asset version or release id;
+   - route id;
+   - execution evidence id;
+   - query refs;
+   - assertion results;
+   - tokens, latency, tool calls, file reads, warehouse query count.
+2. Store results in a queryable table or durable artifact.
+3. Implement launch-gate calculation by domain and stakes tier.
+4. Add stale/dark regression runbook.
 
 Acceptance:
 
-- `distribution_a1_m1_achievement` answers through MV2.
-- `distribution_a5_m1_unachieved_pocs` uses MV2 for POC selection and MV1 for
-  group drill-down.
-- `distribution_a2_m2_team_ranking` uses org chart notes and discloses that
-  v0.4 user context is not production security.
-- `distribution_f3_kpi_scan_reconcile` uses MV3 and validates against KPI725
-  and scan-side oracles.
-- Deferred cases remain explicitly out of scope.
+- A reviewer can query pass rate by case id and assertion layer.
+- A regression can be traced to model, code, prompt/context, or data/oracle
+  changes.
+- A sustained gate failure marks a case stale, blocked, or dark.
 
-## Milestone 8: Release Hardening
+## Workstream H - Distribution Seed
 
-Goal:
+Tasks:
 
-- Make golden cases stable enough for repeated demos and user-preview runs.
-
-Scope:
-
-1. Add release-readiness checks for golden-case validity.
-2. Store selected case ID and query refs in trace metadata.
-3. Add fallback language templates for readiness failures.
-4. Add stale Metric View warnings based on validation timestamps.
-5. Add docs for updating a case after Metric View changes.
+1. Convert the first five Distribution cases into generic `golden_case` assets:
+   - `distribution_a1_m1_achievement`;
+   - `distribution_a5_m1_unachieved_pocs`;
+   - `distribution_a2_m2_team_ranking`;
+   - `distribution_b3_near_achievement`;
+   - `distribution_f3_kpi_scan_reconcile`.
+2. Link MV1-MV3 as semantic dependencies.
+3. Link direct SQL validation refs as oracles.
+4. Add Chinese and English prompt variants where useful.
+5. Mark fraud, recommendation, profile, BEES coverage, and KBD coverage cases
+   as blocked or deferred until source outputs and Metric Views are stable.
 
 Acceptance:
 
-- A project release cannot be marked ready while P0 golden cases have missing
-  Metric View dependencies.
-- Trace review can answer which case, Metric View, query refs, and fallback
-  status were used.
-- Stale or candidate Metric View answers disclose status clearly.
+- Distribution seed cases exercise routing, execution, data, evidence,
+  disclosure, and safety eval layers.
+- User/persona context is explicitly eval/demo only.
+- Case readiness reflects MV status and oracle health.
+
+## Milestones
+
+### Milestone 1 - Contract And Fixtures
+
+Deliver:
+
+- generic `golden_case` schema;
+- example Distribution case;
+- fixture layout for prompts, oracles, and expected outputs;
+- docs update linking v0.4 to v0.3.6 and v0.3.7.
+
+Gate:
+
+- schema can represent a case without embedding full metric definitions;
+- full oracle SQL is eval-only.
+
+### Milestone 2 - Routing Eval Harness
+
+Deliver:
+
+- prompt-variant runner;
+- route expectation comparator;
+- pointer-compliance assertions;
+- selected-case assertion where matching exists.
+
+Gate:
+
+- route failures are reported by case id and assertion layer.
+
+### Milestone 3 - Execution And Evidence Eval Harness
+
+Deliver:
+
+- execution expectation comparator;
+- evidence object comparator;
+- Metric View source-tier compliance assertions;
+- read-only per-case safety assertions.
+
+Gate:
+
+- evidence omissions and wrong source tier fail the case.
+
+### Milestone 4 - Oracle And Data Fidelity
+
+Deliver:
+
+- oracle runner or snapshot loader;
+- structured answer extraction;
+- row diff with exact/tolerant fields;
+- oracle freshness status.
+
+Gate:
+
+- data-fidelity failures are reproducible and tied to case parameters.
+
+### Milestone 5 - Launch Telemetry
+
+Deliver:
+
+- eval result schema;
+- durable result storage;
+- launch-gate calculation;
+- stale/dark runbook.
+
+Gate:
+
+- launch decision can be made from stored eval results, not manual review only.
+
+### Milestone 6 - Distribution Seed
+
+Deliver:
+
+- five Distribution seed cases;
+- MV1-MV3 dependency refs;
+- oracle refs and prompt variants;
+- initial launch statuses.
+
+Gate:
+
+- at least one M1 KPI case, one M2 ranking case, and one reconciliation case run
+  through all eval layers.
 
 ## Validation Commands
 
@@ -364,34 +274,26 @@ Docs-only validation:
 git diff -- docs/builder-app-oai/v0.4-golden-analysis-cases
 ```
 
-Project-setting and runtime validation after implementation work:
+Markdown hygiene:
+
+```bash
+git diff --check -- docs/builder-app-oai/v0.4-golden-analysis-cases docs/builder-app-oai/context-engineering.md
+```
+
+Runtime validation after implementation work:
 
 ```bash
 cd databricks-builder-app-oai
-UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run pytest tests/test_project_settings_yaml.py tests/test_project_config.py -q
+UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run pytest tests/test_project_settings_yaml.py tests/test_project_config.py tests/test_openai_runtime.py -q
 ```
 
-OpenAI runtime validation after prompt or routing changes:
-
-```bash
-cd databricks-builder-app-oai
-UV_CACHE_DIR=/tmp/uv-cache-ai-dev-kit uv run pytest tests/test_openai_runtime.py -q
-```
-
-Frontend validation after settings UI changes:
+Frontend validation after settings UI work:
 
 ```bash
 cd databricks-builder-app-oai/client
 pnpm install
 pnpm lint
 pnpm build:typecheck
-```
-
-Local app smoke setup:
-
-```bash
-cd databricks-builder-app-oai
-./scripts/start_local.sh --profile <profile>
 ```
 
 Before browser or frontend tests, confirm both services are reachable:
@@ -401,20 +303,14 @@ curl -fsS http://127.0.0.1:8000/health
 curl -fsS http://127.0.0.1:3000
 ```
 
-If testing `pnpm preview`, also check:
-
-```bash
-curl -fsS http://127.0.0.1:4173
-```
-
 ## Risks And Mitigations
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Golden cases duplicate Metric View semantics | Cases drift from governed definitions | Store full grain, business terms, validation, and caveats in `metric_view_context`; keep case refs minimal. |
-| Candidate Metric Views are treated as certified | Answers appear more authoritative than validation supports | Require status checks and visible candidate caveats. |
-| Direct SQL becomes the default path again | v0.4 repeats semantic discovery and loses Databricks-native context assets | Make direct SQL an oracle, drill-down, or declared fallback only. |
-| Prompt bloat from full SQL and all cases | Routing becomes slower and less reliable | Render bounded summaries first; load full case details after selection. |
-| Role-shaped Distribution answers imply security | Users may mistake demo context for row-level enforcement | Keep `user_context` as demo/eval only and disclose v0.5 security boundary. |
-| Metric View names or measures change after certification | Golden paths fail or return stale definitions | Add validation timestamps, stale status, and release-readiness checks. |
-| Eval overfits to one phrasing | Real users miss the golden path | Maintain multiple reviewed question variants per case and add ambiguous phrasing evals. |
+| Golden cases leak oracle SQL into prompts | Evals become invalid | Keep full cases `eval_only`; render only compact summaries in normal runs |
+| Golden cases duplicate Metric View definitions | Drift from semantic truth | Store only refs and required measures/dimensions; keep definitions in Metric View assets |
+| Eval overfits to one phrasing | Real users miss covered paths | Require multiple prompt variants and paraphrase coverage |
+| Direct SQL becomes the happy path | Semantic layer loses value | Classify direct SQL as oracle, drill-down, or explicit fallback |
+| Oracle drift is mistaken for agent regression | Wrong repair path | Give oracles owners, freshness policy, and stale status |
+| Role-shaped evals imply security | User overtrust | Mark `user_context` as eval/demo only until v0.5 |
+| Telemetry is too sparse | Cannot debug regressions | Store case id, model id, SHA, context version, route/evidence ids, and assertion layer results |
